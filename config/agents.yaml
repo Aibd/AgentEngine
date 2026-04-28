@@ -1,0 +1,18 @@
+﻿agents:
+  general_chat:
+    enabled: true
+    handler: react
+    default_model: default
+    max_steps: 3
+  deep_research:
+    enabled: true
+    handler: react
+    default_model: deep_research
+    max_steps: 10
+  file_clerk:
+    enabled: true
+    handler: pipeline
+    legacy_adapter: true
+compatibility:
+  legacy_agent_type_map:
+    "3": deep_research

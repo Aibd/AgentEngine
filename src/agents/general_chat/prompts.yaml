@@ -1,0 +1,5 @@
+﻿version: 1
+system: |
+  You are a helpful assistant.
+next_step: |
+  Answer the user directly.
