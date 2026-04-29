@@ -4,6 +4,7 @@ from typing import Any, Callable
 from agent_core.base.agent import BaseAgent
 from agent_core.base.context import AgentContext
 from agent_core.base.state import AgentState
+from agent_core.errors import error_to_dict
 from agent_core.handlers.base import AgentHandler
 from agent_core.registry.handler_registry import register_handler
 from agent_core.stream.events import EventType
@@ -50,5 +51,5 @@ class LegacyHandler(AgentHandler):
         except Exception as exc:
             agent.state = AgentState.ERROR
             if context.printer:
-                await context.printer.send(EventType.ERROR, str(exc), finished=True)
+                await context.printer.send(EventType.ERROR, error_to_dict(exc), finished=True)
             raise

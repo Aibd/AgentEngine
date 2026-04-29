@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any
 
+from agent_core.errors import AgentCoreError, error_to_dict
 from agent_core.stream.event_stream import EventStream
 from agent_core.stream.events import EventType
 
@@ -38,13 +39,15 @@ class Printer:
         is_dict = isinstance(data, dict)
         is_result_like = type_str in {EventType.RESULT.value, EventType.TOOL_RESULT.value, EventType.FINAL_RESULT.value}
 
+        error_msg = _error_message(data) if type_str == EventType.ERROR.value else None
+
         event = {
             "responseType": type_str,
             "response": data,
             "responseAll": data,
             "useTimes": 0,
             "reqId": self.request_id,
-            "errorMsg": data if type_str == EventType.ERROR.value else None,
+            "errorMsg": error_msg,
             "resultMap": data if is_dict and is_result_like else None,
             "conversation_id": self.conversation_id,
             "finished": bool(finished),
@@ -71,11 +74,21 @@ class Printer:
     async def result(self, data: Any) -> None:
         await self.send(EventType.RESULT, data, finished=True)
 
-    async def error(self, message: str) -> None:
-        await self.send(EventType.ERROR, message, finished=True)
+    async def error(self, error: str | BaseException | dict[str, Any]) -> None:
+        data = error_to_dict(error) if isinstance(error, BaseException) else error
+        await self.send(EventType.ERROR, data, finished=True)
 
     async def done(self) -> None:
         await self.send(EventType.DONE, "done", finished=True)
 
     async def stream_chunk(self, content: str, finished: bool = False) -> None:
         await self.send(EventType.TEXT, content, finished=finished)
+
+
+def _error_message(data: Any) -> str:
+    if isinstance(data, AgentCoreError):
+        return data.message
+    if isinstance(data, dict):
+        message = data.get("message")
+        return message if isinstance(message, str) else str(data)
+    return str(data)

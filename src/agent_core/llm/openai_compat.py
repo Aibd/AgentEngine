@@ -15,6 +15,13 @@ from typing import Any, AsyncIterator
 
 import httpx
 
+from agent_core.errors import (
+    LLMConnectionError,
+    LLMError,
+    LLMHTTPError,
+    LLMRateLimitError,
+    LLMTimeoutError,
+)
 from agent_core.llm.client import LLMChunk, LLMResponse
 from agent_core.memory.message import Message
 
@@ -148,7 +155,7 @@ class OpenAICompatibleClient:
     ) -> LLMResponse:
         payload = self._build_payload(messages, stream=False, **kwargs)
 
-        last_exc: Exception | None = None
+        last_exc: LLMError | None = None
         for attempt in range(self.max_retries + 1):
             attempt_no = attempt + 1
             started_at = time.perf_counter()
@@ -170,20 +177,16 @@ class OpenAICompatibleClient:
                     time.perf_counter() - started_at,
                 )
                 return self._parse_response(resp.json())
-            except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
-                last_exc = exc
-                status_code = (
-                    exc.response.status_code
-                    if isinstance(exc, httpx.HTTPStatusError)
-                    else None
-                )
+            except (LLMError, httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError) as exc:
+                last_exc = self._to_llm_error(exc)
+                status_code = last_exc.error_status_code
                 if attempt < self.max_retries:
                     logger.warning(
                         "llm_post_retry attempt=%d model=%s status=%s error=%s",
                         attempt_no,
                         payload.get("model"),
                         status_code,
-                        type(exc).__name__,
+                        last_exc.error_code,
                     )
                     await asyncio.sleep(2 ** attempt)
                 else:
@@ -192,7 +195,7 @@ class OpenAICompatibleClient:
                         attempt_no,
                         payload.get("model"),
                         status_code,
-                        type(exc).__name__,
+                        last_exc.error_code,
                         time.perf_counter() - started_at,
                     )
         assert last_exc is not None
@@ -256,7 +259,7 @@ class OpenAICompatibleClient:
     ) -> AsyncIterator[LLMChunk]:
         payload = self._build_payload(messages, stream=True, **kwargs)
 
-        last_exc: Exception | None = None
+        last_exc: LLMError | None = None
         for attempt in range(self.max_retries + 1):
             attempt_no = attempt + 1
             started_at = time.perf_counter()
@@ -304,20 +307,16 @@ class OpenAICompatibleClient:
                     time.perf_counter() - started_at,
                 )
                 return
-            except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
-                last_exc = exc
-                status_code = (
-                    exc.response.status_code
-                    if isinstance(exc, httpx.HTTPStatusError)
-                    else None
-                )
+            except (LLMError, httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError) as exc:
+                last_exc = self._to_llm_error(exc)
+                status_code = last_exc.error_status_code
                 if attempt < self.max_retries:
                     logger.warning(
                         "llm_stream_http_retry attempt=%d model=%s status=%s error=%s",
                         attempt_no,
                         payload.get("model"),
                         status_code,
-                        type(exc).__name__,
+                        last_exc.error_code,
                     )
                     await asyncio.sleep(2 ** attempt)
                 else:
@@ -326,7 +325,7 @@ class OpenAICompatibleClient:
                         attempt_no,
                         payload.get("model"),
                         status_code,
-                        type(exc).__name__,
+                        last_exc.error_code,
                         time.perf_counter() - started_at,
                     )
         assert last_exc is not None
@@ -338,11 +337,53 @@ class OpenAICompatibleClient:
         except httpx.HTTPStatusError as exc:
             body = resp.text[:2000]
             message = f"{exc}; response body: {body}"
-            raise httpx.HTTPStatusError(
+            retryable = resp.status_code in {408, 409, 425, 429} or resp.status_code >= 500
+            details = {"url": str(exc.request.url)}
+            if resp.status_code == 429:
+                raise LLMRateLimitError(
+                    message,
+                    status_code=resp.status_code,
+                    body=body,
+                    details=details,
+                ) from exc
+            raise LLMHTTPError(
                 message,
-                request=exc.request,
-                response=exc.response,
+                status_code=resp.status_code,
+                body=body,
+                retryable=retryable,
+                details=details,
             ) from exc
+
+    def _to_llm_error(self, exc: BaseException) -> LLMError:
+        if isinstance(exc, LLMError):
+            return exc
+        if isinstance(exc, httpx.TimeoutException):
+            return LLMTimeoutError(
+                str(exc) or "LLM request timed out",
+                details=self._request_details(exc),
+            )
+        if isinstance(exc, httpx.HTTPStatusError):
+            response = exc.response
+            return LLMHTTPError(
+                f"{exc}; response body: {response.text[:2000]}",
+                status_code=response.status_code,
+                body=response.text[:2000],
+                retryable=response.status_code in {408, 409, 425, 429}
+                or response.status_code >= 500,
+                details=self._request_details(exc),
+            )
+        if isinstance(exc, httpx.TransportError):
+            return LLMConnectionError(
+                str(exc) or "LLM transport error",
+                details=self._request_details(exc),
+            )
+        return LLMError(str(exc) or exc.__class__.__name__)
+
+    def _request_details(self, exc: httpx.HTTPError) -> dict[str, Any]:
+        request = getattr(exc, "request", None)
+        if request is None:
+            return {}
+        return {"url": str(request.url)}
 
     # -- Parsing --------------------------------------------------------
 

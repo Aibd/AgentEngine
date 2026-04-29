@@ -1,0 +1,131 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+
+@dataclass(frozen=True, slots=True)
+class ErrorInfo:
+    code: str
+    message: str
+    category: str = "agent_core"
+    retryable: bool = False
+    status_code: int | None = None
+    details: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "code": self.code,
+            "message": self.message,
+            "category": self.category,
+            "retryable": self.retryable,
+        }
+        if self.status_code is not None:
+            data["status_code"] = self.status_code
+        if self.details:
+            data["details"] = self.details
+        return data
+
+
+class AgentCoreError(Exception):
+    code = "agent_core_error"
+    category = "agent_core"
+    retryable = False
+    status_code: int | None = None
+
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        code: str | None = None,
+        category: str | None = None,
+        retryable: bool | None = None,
+        status_code: int | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        self.message = message or self.__class__.__name__
+        self.error_code = code or self.code
+        self.error_category = category or self.category
+        self.is_retryable = self.retryable if retryable is None else retryable
+        self.error_status_code = self.status_code if status_code is None else status_code
+        self.details = details or {}
+        super().__init__(self.message)
+
+    @property
+    def info(self) -> ErrorInfo:
+        return ErrorInfo(
+            code=self.error_code,
+            message=self.message,
+            category=self.error_category,
+            retryable=self.is_retryable,
+            status_code=self.error_status_code,
+            details=self.details,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.info.to_dict()
+
+
+class LLMError(AgentCoreError):
+    code = "llm_error"
+    category = "llm"
+
+
+class LLMHTTPError(LLMError):
+    code = "llm_http_error"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        body: str = "",
+        retryable: bool = False,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        merged_details = dict(details or {})
+        if body:
+            merged_details["body"] = body
+        super().__init__(
+            message,
+            retryable=retryable,
+            status_code=status_code,
+            details=merged_details,
+        )
+
+
+class LLMRateLimitError(LLMHTTPError):
+    code = "llm_rate_limited"
+    retryable = True
+
+
+class LLMTimeoutError(LLMError):
+    code = "llm_timeout"
+    retryable = True
+
+
+class LLMConnectionError(LLMError):
+    code = "llm_connection_error"
+    retryable = True
+
+
+class LLMStreamError(LLMError):
+    code = "llm_stream_error"
+    retryable = True
+
+
+class ToolExecutionError(AgentCoreError):
+    code = "tool_execution_error"
+    category = "tool"
+
+
+def error_to_dict(error: BaseException) -> dict[str, Any]:
+    if isinstance(error, AgentCoreError):
+        return error.to_dict()
+    return ErrorInfo(
+        code="unexpected_error",
+        message=str(error) or error.__class__.__name__,
+        category="unexpected",
+        retryable=False,
+        details={"type": error.__class__.__name__},
+    ).to_dict()

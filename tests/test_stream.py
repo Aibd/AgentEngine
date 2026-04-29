@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from agent_core.errors import LLMTimeoutError
 from agent_core.stream.event_stream import EventStream
 from agent_core.stream.events import EventType
 from agent_core.stream.printer import Printer
@@ -66,6 +67,18 @@ class TestPrinter:
         assert event["responseType"] == "error"
         assert event["finished"] is True
         assert event["errorMsg"] == "boom"
+
+    async def test_error_serializes_structured_exception(self):
+        stream = EventStream()
+        printer = Printer("req-err", stream)
+        await printer.error(LLMTimeoutError("provider timed out"))
+        event = await stream._queue.get()
+
+        assert event["responseType"] == "error"
+        assert event["errorMsg"] == "provider timed out"
+        assert event["response"]["code"] == "llm_timeout"
+        assert event["response"]["category"] == "llm"
+        assert event["response"]["retryable"] is True
 
     async def test_tool_result_populates_result_map(self):
         stream = EventStream()

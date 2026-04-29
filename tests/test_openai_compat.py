@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 import agent_core.llm.openai_compat as openai_compat
+from agent_core.errors import LLMHTTPError
 from agent_core.llm.openai_compat import OpenAICompatibleClient
 from agent_core.memory.message import Message
 
@@ -67,10 +68,14 @@ async def test_post_raises_status_error_with_response_body():
 
     client = _client_with_transport(handler, max_retries=0)
     try:
-        with pytest.raises(httpx.HTTPStatusError, match="forbidden reason"):
+        with pytest.raises(LLMHTTPError, match="forbidden reason") as exc_info:
             await client.chat([Message.user("hello")])
     finally:
         await client.close()
+
+    assert exc_info.value.error_code == "llm_http_error"
+    assert exc_info.value.error_status_code == 403
+    assert exc_info.value.details["body"] == "forbidden reason"
 
 
 async def test_stream_retries_timeout_then_succeeds(monkeypatch):

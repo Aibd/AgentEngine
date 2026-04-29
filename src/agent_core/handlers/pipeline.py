@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 from agent_core.base.agent import BaseAgent
 from agent_core.base.context import AgentContext
 from agent_core.base.state import AgentState
+from agent_core.errors import error_to_dict
 from agent_core.handlers.base import AgentHandler
 from agent_core.memory.message import Message
 from agent_core.registry.handler_registry import register_handler
@@ -51,5 +52,5 @@ class PipelineHandler(AgentHandler):
         except Exception as exc:
             agent.state = AgentState.ERROR
             if context.printer:
-                await context.printer.send(EventType.ERROR, str(exc), finished=True)
+                await context.printer.send(EventType.ERROR, error_to_dict(exc), finished=True)
             raise
