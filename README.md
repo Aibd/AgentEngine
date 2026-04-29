@@ -74,9 +74,16 @@ Recommended first integration path:
 ## Running tests
 
 ```bash
-pip install -e .[dev]
-pytest
+uv sync --extra dev
+uv run --env-file .env pytest
 ```
 
 `pyproject.toml` sets `pythonpath = ["src"]` and `asyncio_mode = "auto"` so
 no extra config is needed.
+
+Real provider smoke tests are opt-in:
+
+```bash
+# Set RUN_INTEGRATION=1 in .env first.
+uv run --env-file .env pytest -m integration
+```
