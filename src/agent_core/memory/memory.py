@@ -42,9 +42,16 @@ class Memory:
         self,
         content: str = "",
         *,
+        reasoning_content: str = "",
         tool_calls: list[dict[str, Any]] | None = None,
     ) -> None:
-        self.append(Message.assistant(content, tool_calls=tool_calls))
+        self.append(
+            Message.assistant(
+                content,
+                reasoning_content=reasoning_content,
+                tool_calls=tool_calls,
+            )
+        )
 
     def add_tool_message(self, content: str, *, tool_call_id: str) -> None:
         self.append(Message.tool(content, tool_call_id=tool_call_id))

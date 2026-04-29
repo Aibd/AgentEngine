@@ -69,6 +69,7 @@ class ReActHandler(AgentHandler):
 
             agent.memory.add_assistant_message(
                 response.content or "",
+                reasoning_content=response.reasoning_content or "",
                 tool_calls=response.tool_calls or None,
             )
 

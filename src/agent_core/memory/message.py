@@ -15,11 +15,14 @@ class Message:
     """A single chat message with optional multimodal and tool-call extensions.
 
     `tool_calls` stores OpenAI-format raw dicts so they can be sent back to the
-    LLM verbatim on the next turn. `base64_image` enables multimodal user input.
+    LLM verbatim on the next turn. `reasoning_content` preserves DeepSeek-style
+    thinking output that some providers require on the follow-up tool turn.
+    `base64_image` enables multimodal user input.
     """
 
     role: Role
     content: str = ""
+    reasoning_content: str = ""
     name: str | None = None
     tool_call_id: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
@@ -28,6 +31,8 @@ class Message:
 
     def to_openai(self) -> dict[str, Any]:
         payload: dict[str, Any] = {"role": self.role.value, "content": self.content}
+        if self.reasoning_content:
+            payload["reasoning_content"] = self.reasoning_content
         if self.name:
             payload["name"] = self.name
         if self.tool_call_id:
@@ -51,9 +56,15 @@ class Message:
         cls,
         content: str = "",
         *,
+        reasoning_content: str = "",
         tool_calls: list[dict[str, Any]] | None = None,
     ) -> "Message":
-        return cls(Role.ASSISTANT, content, tool_calls=tool_calls)
+        return cls(
+            Role.ASSISTANT,
+            content,
+            reasoning_content=reasoning_content,
+            tool_calls=tool_calls,
+        )
 
     @classmethod
     def tool(cls, content: str, tool_call_id: str | None = None) -> "Message":
