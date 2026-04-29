@@ -30,7 +30,19 @@ class Message:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_openai(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {"role": self.role.value, "content": self.content}
+        payload: dict[str, Any] = {"role": self.role.value}
+        if self.base64_image and self.role == Role.USER:
+            image_url = (
+                self.base64_image
+                if self.base64_image.startswith("data:")
+                else f"data:image/jpeg;base64,{self.base64_image}"
+            )
+            payload["content"] = [
+                {"type": "text", "text": self.content},
+                {"type": "image_url", "image_url": {"url": image_url}},
+            ]
+        else:
+            payload["content"] = self.content
         if self.reasoning_content:
             payload["reasoning_content"] = self.reasoning_content
         if self.name:
@@ -39,8 +51,6 @@ class Message:
             payload["tool_call_id"] = self.tool_call_id
         if self.tool_calls:
             payload["tool_calls"] = self.tool_calls
-        if self.base64_image:
-            payload["base64_image"] = self.base64_image
         return payload
 
     @classmethod

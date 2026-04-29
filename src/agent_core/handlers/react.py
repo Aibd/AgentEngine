@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -7,9 +8,13 @@ from agent_core.base.agent import BaseAgent
 from agent_core.base.context import AgentContext
 from agent_core.base.state import AgentState
 from agent_core.handlers.base import AgentHandler
+from agent_core.llm.client import LLMResponse
 from agent_core.memory.message import Message
 from agent_core.registry.handler_registry import register_handler
 from agent_core.stream.events import EventType
+
+
+DEFAULT_TOOL_TIMEOUT_SECONDS = 30.0
 
 
 @register_handler("react")
@@ -22,6 +27,15 @@ class ReActHandler(AgentHandler):
     """
 
     name = "react"
+
+    def __init__(
+        self,
+        *,
+        tool_timeout_seconds: float | None = DEFAULT_TOOL_TIMEOUT_SECONDS,
+    ) -> None:
+        if tool_timeout_seconds is not None and tool_timeout_seconds <= 0:
+            raise ValueError("tool_timeout_seconds must be greater than 0")
+        self.tool_timeout_seconds = tool_timeout_seconds
 
     async def handle(self, agent: BaseAgent, context: AgentContext, query: str) -> str:
         agent.setup()
@@ -65,7 +79,7 @@ class ReActHandler(AgentHandler):
                 else None
             )
 
-            response = await context.llm.chat(messages, tools=tools, stream=False)
+            response = await self._chat_streaming(context, messages, tools=tools)
 
             agent.memory.add_assistant_message(
                 response.content or "",
@@ -75,11 +89,6 @@ class ReActHandler(AgentHandler):
 
             if response.content:
                 final_answer = response.content
-                if context.printer:
-                    await context.printer.send(
-                        EventType.TOOL_THOUGHT,
-                        {"tool_thought": response.content},
-                    )
 
             if not response.tool_calls:
                 break
@@ -87,6 +96,76 @@ class ReActHandler(AgentHandler):
             await self._execute_tool_calls(agent, context, response.tool_calls)
 
         return final_answer
+
+    async def _chat_streaming(
+        self,
+        context: AgentContext,
+        messages: list[Message],
+        *,
+        tools: list[dict[str, Any]] | None,
+    ) -> LLMResponse:
+        if context.llm is None:
+            return LLMResponse()
+
+        chat_stream = getattr(context.llm, "chat_stream", None)
+        if chat_stream is None:
+            return await context.llm.chat(messages, tools=tools, stream=False)
+
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_calls_map: dict[int, dict[str, Any]] = {}
+        finish_reason: str | None = None
+        usage: dict[str, int] = {}
+        raw_chunks: list[dict[str, Any]] = []
+
+        async for chunk in chat_stream(messages, tools=tools):
+            if chunk.content:
+                content_parts.append(chunk.content)
+                if context.printer:
+                    await context.printer.send(EventType.TEXT, chunk.content)
+            if chunk.reasoning_content:
+                reasoning_parts.append(chunk.reasoning_content)
+            if chunk.usage:
+                usage = chunk.usage
+            if chunk.finish_reason:
+                finish_reason = chunk.finish_reason
+            if chunk.raw is not None:
+                raw_chunks.append(chunk.raw)
+                self._accumulate_tool_calls(tool_calls_map, chunk.raw)
+
+        return LLMResponse(
+            content="".join(content_parts),
+            reasoning_content="".join(reasoning_parts),
+            tool_calls=list(tool_calls_map.values()) if tool_calls_map else [],
+            finish_reason=finish_reason or "stop",
+            usage=usage,
+            raw={"chunks": raw_chunks} if raw_chunks else None,
+        )
+
+    def _accumulate_tool_calls(
+        self,
+        tool_calls_map: dict[int, dict[str, Any]],
+        raw: dict[str, Any],
+    ) -> None:
+        for choice in raw.get("choices", []) or []:
+            delta = choice.get("delta", {}) or {}
+            for tc in delta.get("tool_calls", []) or []:
+                idx = tc.get("index", 0)
+                slot = tool_calls_map.setdefault(
+                    idx,
+                    {
+                        "id": tc.get("id", ""),
+                        "type": "function",
+                        "function": {"name": "", "arguments": ""},
+                    },
+                )
+                if tc.get("id"):
+                    slot["id"] = tc["id"]
+                func = tc.get("function", {}) or {}
+                if func.get("name"):
+                    slot["function"]["name"] = func["name"]
+                if func.get("arguments"):
+                    slot["function"]["arguments"] += func["arguments"]
 
     def _build_messages(self, agent: BaseAgent, next_step: str) -> list[Message]:
         if not next_step:
@@ -129,7 +208,18 @@ class ReActHandler(AgentHandler):
                 rendered = f"Unknown tool: {tool_name}"
             else:
                 try:
-                    raw_result = await tool.run(**tool_args)
+                    tool_coro = tool.run(**tool_args)
+                    if self.tool_timeout_seconds is None:
+                        raw_result = await tool_coro
+                    else:
+                        raw_result = await asyncio.wait_for(
+                            tool_coro,
+                            timeout=self.tool_timeout_seconds,
+                        )
+                except asyncio.TimeoutError:
+                    raw_result = (
+                        f"Tool timeout after {self.tool_timeout_seconds}s: {tool_name}"
+                    )
                 except Exception as exc:
                     raw_result = f"Tool error: {exc}"
                 rendered = (

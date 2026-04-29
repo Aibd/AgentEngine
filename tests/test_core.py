@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from agent_core.base.context import AgentContext
 from agent_core.llm.client import LLMResponse
 from mock_llm import MockLLMClient
@@ -69,3 +71,17 @@ async def test_service_uses_llm_factory_when_context_has_no_llm():
 
     assert result == "factory response"
     assert len(llm.calls) == 1
+
+
+async def test_service_rejects_empty_query():
+    service = AgentOrchestrationService()
+
+    with pytest.raises(ValueError, match="query"):
+        await service.run(agent_name="general_chat", query="   ")
+
+
+async def test_service_rejects_too_long_query():
+    service = AgentOrchestrationService(max_query_chars=4)
+
+    with pytest.raises(ValueError, match="too long"):
+        await service.run(agent_name="general_chat", query="hello")

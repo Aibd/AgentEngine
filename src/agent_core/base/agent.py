@@ -25,6 +25,10 @@ class BaseAgent:
         max_steps: int = 10,
         max_messages: int = 0,
     ) -> None:
+        if max_steps < 1:
+            raise ValueError("max_steps must be at least 1")
+        if max_messages < 0:
+            raise ValueError("max_messages must be at least 0")
         self.context = context
         self.memory = Memory(max_messages=max_messages)
         self.max_steps = max_steps

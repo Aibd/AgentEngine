@@ -24,6 +24,9 @@ except ImportError:  # pragma: no cover
     yaml = None  # type: ignore[assignment]
 
 
+DEFAULT_MAX_QUERY_CHARS = 20_000
+
+
 class AgentOrchestrationService:
     """Application-facing entry point.
 
@@ -37,9 +40,13 @@ class AgentOrchestrationService:
         config_path: str | Path | None = None,
         *,
         llm_factory: Callable[[], LLMClient | None] | None = None,
+        max_query_chars: int = DEFAULT_MAX_QUERY_CHARS,
     ) -> None:
+        if max_query_chars < 1:
+            raise ValueError("max_query_chars must be at least 1")
         self._config: dict[str, Any] = self._load_config(config_path)
         self._llm_factory = llm_factory or (lambda: create_llm_from_env(required=False))
+        self._max_query_chars = max_query_chars
 
     def _load_config(self, config_path: str | Path | None) -> dict[str, Any]:
         if config_path is None or yaml is None:
@@ -67,6 +74,7 @@ class AgentOrchestrationService:
         agent_kwargs: dict[str, Any] | None = None,
         handler_kwargs: dict[str, Any] | None = None,
     ) -> str:
+        self._validate_run_inputs(agent_name=agent_name, query=query)
         if not self.is_enabled(agent_name):
             raise RuntimeError(f"Agent disabled in config: {agent_name}")
 
@@ -90,6 +98,18 @@ class AgentOrchestrationService:
             context.extras["agent_state"] = agent.state.value
             context.extras["agent_current_step"] = agent.current_step
             context.extras["agent_memory"] = agent.memory.to_openai()
+
+    def _validate_run_inputs(self, *, agent_name: str, query: str) -> None:
+        if not agent_name or not agent_name.strip():
+            raise ValueError("agent_name must not be empty")
+        if not isinstance(query, str):
+            raise TypeError("query must be a string")
+        if not query.strip():
+            raise ValueError("query must not be empty")
+        if len(query) > self._max_query_chars:
+            raise ValueError(
+                f"query is too long: {len(query)} > {self._max_query_chars}"
+            )
 
     def create_streaming_context(
         self,

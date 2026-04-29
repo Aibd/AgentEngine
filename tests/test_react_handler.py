@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from agent_core.base.agent import BaseAgent
 from agent_core.base.context import AgentContext
 from agent_core.base.state import AgentState
@@ -9,6 +11,7 @@ from mock_llm import MockLLMClient
 from agent_core.memory.message import Role
 from agent_core.stream.event_stream import EventStream
 from agent_core.stream.printer import Printer
+from agent_core.tools.base import Tool
 from agent_core.tools.builtin.planning_tool import PlanningTool
 from agent_core.tools.collection import ToolCollection
 
@@ -29,6 +32,16 @@ class _ResearchLikeAgent(BaseAgent):
 
     def system_prompt(self) -> str:
         return "Plan first, then execute."
+
+
+class _SlowTool(Tool):
+    name = "slow_tool"
+    description = "Sleeps longer than the test timeout"
+    schema = {"type": "object", "properties": {}}
+
+    async def run(self, **kwargs):
+        await asyncio.sleep(1)
+        return "too late"
 
 
 def _make_context(llm: MockLLMClient, *, with_tools: bool = False) -> tuple[AgentContext, EventStream]:
@@ -73,9 +86,10 @@ class TestReActHandler:
         events = await _drain(stream)
         types = [e["responseType"] for e in events]
         assert "start" in types
-        assert "tool_thought" in types
+        assert "text" in types
         assert "result" in types
         assert events[-1]["finished"] is True
+        assert llm.calls[0]["stream"] is True
 
     async def test_system_prompt_injected(self):
         llm = MockLLMClient([LLMResponse(content="ok", finish_reason="stop")])
@@ -136,6 +150,8 @@ class TestReActHandler:
         events = await _drain(stream)
         types = [e["responseType"] for e in events]
         assert "tool_result" in types
+        assert llm.calls[0]["stream"] is True
+        assert llm.calls[1]["stream"] is True
 
     async def test_unknown_tool_recovers_gracefully(self):
         llm = MockLLMClient([
@@ -162,6 +178,32 @@ class TestReActHandler:
         # Tool message should record the "Unknown tool" string
         tool_msgs = [m for m in agent.memory.messages if m.role == Role.TOOL]
         assert tool_msgs and "Unknown tool" in tool_msgs[0].content
+
+    async def test_tool_timeout_is_recorded(self):
+        llm = MockLLMClient([
+            LLMResponse(
+                content="",
+                finish_reason="tool_calls",
+                tool_calls=[
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "slow_tool", "arguments": "{}"},
+                    }
+                ],
+            ),
+            LLMResponse(content="Recovered after timeout.", finish_reason="stop"),
+        ])
+        context, _ = _make_context(llm)
+        context.tool_collection.add(_SlowTool())
+        agent = _SimpleAgent(context, max_steps=5)
+
+        handler = ReActHandler(tool_timeout_seconds=0.01)
+        result = await handler.handle(agent, context, "use slow tool")
+
+        assert result == "Recovered after timeout."
+        tool_msgs = [m for m in agent.memory.messages if m.role == Role.TOOL]
+        assert tool_msgs and "Tool timeout after" in tool_msgs[0].content
 
     async def test_max_steps_terminates_loop(self):
         # LLM keeps requesting tool calls; max_steps caps the loop.
@@ -198,3 +240,14 @@ class TestReActHandler:
 
         # setup() should have registered planning_tool
         assert context.tool_collection.get("planning_tool") is not None
+
+    async def test_invalid_max_steps_raises(self):
+        llm = MockLLMClient([LLMResponse(content="ok", finish_reason="stop")])
+        context, _ = _make_context(llm)
+
+        try:
+            _SimpleAgent(context, max_steps=0)
+        except ValueError as exc:
+            assert "max_steps" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")

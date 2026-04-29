@@ -47,7 +47,18 @@ class TestMessage:
     def test_to_openai_with_image(self):
         msg = Message.user("look", base64_image="abc123")
         d = msg.to_openai()
-        assert d["base64_image"] == "abc123"
+        assert d["content"] == [
+            {"type": "text", "text": "look"},
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/jpeg;base64,abc123"},
+            },
+        ]
+
+    def test_to_openai_with_image_data_url(self):
+        msg = Message.user("look", base64_image="data:image/png;base64,abc123")
+        d = msg.to_openai()
+        assert d["content"][1]["image_url"]["url"] == "data:image/png;base64,abc123"
 
 
 class TestMemory:
