@@ -50,6 +50,7 @@ class AgentOrchestrationService:
         self._config: dict[str, Any] = self._load_config(config_path)
         self._llm_factory = llm_factory or (lambda: create_llm_from_env(required=False))
         self._max_query_chars = max_query_chars
+        self._managed_llms: dict[int, LLMClient] = {}
 
     def _load_config(self, config_path: str | Path | None) -> dict[str, Any]:
         if config_path is None or yaml is None:
@@ -90,6 +91,7 @@ class AgentOrchestrationService:
         context = context or AgentContext(request_id="local", query=query)
         if context.llm is None:
             context.llm = self._llm_factory()
+            self._track_managed_llm(context.llm)
 
         started_at = time.perf_counter()
         agent = create_agent(agent_name, context, **merged_agent_kwargs)
@@ -118,6 +120,31 @@ class AgentOrchestrationService:
                 agent.current_step,
                 time.perf_counter() - started_at,
             )
+
+    def _track_managed_llm(self, llm: LLMClient | None) -> None:
+        if llm is None or not hasattr(llm, "close"):
+            return
+        self._managed_llms[id(llm)] = llm
+
+    async def close(self) -> None:
+        llms = list(self._managed_llms.values())
+        self._managed_llms.clear()
+        for llm in llms:
+            close = getattr(llm, "close", None)
+            if close is None:
+                continue
+            result = close()
+            if hasattr(result, "__await__"):
+                await result
+
+    async def shutdown(self) -> None:
+        await self.close()
+
+    async def __aenter__(self) -> "AgentOrchestrationService":
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        await self.close()
 
     def _validate_run_inputs(self, *, agent_name: str, query: str) -> None:
         if not agent_name or not agent_name.strip():

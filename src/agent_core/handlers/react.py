@@ -68,6 +68,16 @@ class ReActHandler(AgentHandler):
             if context.printer:
                 await context.printer.send(EventType.RESULT, {"result": result}, finished=True)
             return result
+        except asyncio.CancelledError:
+            agent.state = AgentState.CANCELLED
+            logger.warning(
+                "react_run_cancelled request_id=%s agent=%s steps=%d elapsed=%.3fs",
+                context.request_id,
+                agent.name,
+                agent.current_step,
+                time.perf_counter() - started_at,
+            )
+            raise
         except Exception as exc:
             agent.state = AgentState.ERROR
             logger.exception(

@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, Callable
 
 from agent_core.base.agent import BaseAgent
@@ -43,6 +44,9 @@ class LegacyHandler(AgentHandler):
             if context.printer:
                 await context.printer.send(EventType.RESULT, {"result": result}, finished=True)
             return str(result) if result is not None else ""
+        except asyncio.CancelledError:
+            agent.state = AgentState.CANCELLED
+            raise
         except Exception as exc:
             agent.state = AgentState.ERROR
             if context.printer:

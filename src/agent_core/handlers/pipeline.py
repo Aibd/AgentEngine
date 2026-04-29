@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Awaitable, Callable
 
 from agent_core.base.agent import BaseAgent
@@ -44,6 +45,9 @@ class PipelineHandler(AgentHandler):
             if context.printer:
                 await context.printer.send(EventType.RESULT, {"result": result}, finished=True)
             return result
+        except asyncio.CancelledError:
+            agent.state = AgentState.CANCELLED
+            raise
         except Exception as exc:
             agent.state = AgentState.ERROR
             if context.printer:

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from typing import Any
 
 from agent_core.base.agent import BaseAgent
@@ -54,17 +55,34 @@ class FileClerkAdapter(BaseAgent):
         queue: asyncio.Queue = asyncio.Queue()
         legacy = self.legacy_factory(queue)
         task = asyncio.create_task(legacy.run())
-        while not task.done():
-            try:
-                message = await asyncio.wait_for(queue.get(), timeout=0.1)
-            except asyncio.TimeoutError:
-                continue
-            if self.context.printer:
-                finished = (
-                    message.get("status") == "end"
-                    if isinstance(message, dict)
-                    else False
-                )
-                await self.context.printer.send("text", message, finished=finished)
-        result = await task
-        return str(result) if result is not None else ""
+        try:
+            while not task.done() or not queue.empty():
+                try:
+                    if task.done():
+                        message = queue.get_nowait()
+                    else:
+                        message = await asyncio.wait_for(queue.get(), timeout=0.1)
+                except asyncio.QueueEmpty:
+                    break
+                except asyncio.TimeoutError:
+                    continue
+                if self.context.printer:
+                    finished = (
+                        message.get("status") == "end"
+                        if isinstance(message, dict)
+                        else False
+                    )
+                    await self.context.printer.send("text", message, finished=finished)
+            result = await task
+            return str(result) if result is not None else ""
+        except asyncio.CancelledError:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+            raise
+        except Exception:
+            if not task.done():
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+            raise

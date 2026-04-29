@@ -6,3 +6,4 @@ class AgentState(str, Enum):
     RUNNING = "running"
     FINISHED = "finished"
     ERROR = "error"
+    CANCELLED = "cancelled"
