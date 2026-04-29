@@ -29,7 +29,7 @@ class FileClerkAdapter(BaseAgent):
         self,
         context: AgentContext,
         *,
-        legacy_factory: Callable[[asyncio.Queue], Any] | None = None,
+        legacy_factory: Callable[[asyncio.Queue[Any]], Any] | None = None,
         max_steps: int = 1,
     ) -> None:
         super().__init__(context, max_steps=max_steps)
@@ -52,7 +52,7 @@ class FileClerkAdapter(BaseAgent):
         if self.legacy_factory is None:
             return "file_clerk adapter ready; inject legacy_factory to run."
 
-        queue: asyncio.Queue = asyncio.Queue()
+        queue: asyncio.Queue[Any] = asyncio.Queue()
         legacy = self.legacy_factory(queue)
         task = asyncio.create_task(legacy.run())
         try:

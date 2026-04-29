@@ -61,13 +61,20 @@ class PromptLoader:
     # -- Convenience helpers -------------------------------------------
 
     def get_system_prompt(self, relative_path: str | Path) -> str:
-        return self.load(relative_path).get("system", "")
+        return _string_value(self.load(relative_path).get("system", ""))
 
     def get_next_step_prompt(self, relative_path: str | Path) -> str:
-        return self.load(relative_path).get("next_step", "")
+        return _string_value(self.load(relative_path).get("next_step", ""))
 
     def get_template(self, relative_path: str | Path, template_name: str) -> str:
-        return self.load(relative_path).get("templates", {}).get(template_name, "")
+        templates = self.load(relative_path).get("templates", {})
+        if not isinstance(templates, dict):
+            return ""
+        return _string_value(templates.get(template_name, ""))
 
     def clear_cache(self) -> None:
         self._cache.clear()
+
+
+def _string_value(value: Any) -> str:
+    return value if isinstance(value, str) else ""

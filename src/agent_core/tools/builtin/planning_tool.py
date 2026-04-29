@@ -66,16 +66,19 @@ class PlanningTool(Tool):
     def __init__(self) -> None:
         self.plan: Plan | None = None
 
-    async def run(self, *, action: str, steps: list[str] | None = None, **_: Any) -> dict[str, Any]:
+    async def run(self, **kwargs: Any) -> dict[str, Any]:
+        action = str(kwargs.get("action", "inspect"))
+        steps_value = kwargs.get("steps")
+        steps = steps_value if isinstance(steps_value, list) else None
+
         if action == "create":
-            self.plan = Plan(steps=list(steps) if steps else [])
+            self.plan = Plan(steps=[str(step) for step in steps] if steps else [])
             return {"created": True, "plan": self.plan.to_dict()}
         if action == "advance":
             if self.plan is None:
                 return {"error": "No plan exists. Call action='create' first."}
             self.plan.advance()
             return {"advanced": True, "plan": self.plan.to_dict()}
-        # inspect (default)
         if self.plan is None:
             return {"plan": None}
         return {"plan": self.plan.to_dict()}

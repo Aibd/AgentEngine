@@ -1,4 +1,6 @@
-﻿from agent_core.tools.base import Tool
+from typing import Any
+
+from agent_core.tools.base import Tool
 
 
 class ToolCollection:
@@ -19,5 +21,5 @@ class ToolCollection:
             raise KeyError(f"Tool not registered: {name}")
         return tool
 
-    def to_openai_tools(self) -> list[dict]:
+    def to_openai_tools(self) -> list[dict[str, Any]]:
         return [tool.to_openai_tool() for tool in self.tool_map.values()]

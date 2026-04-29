@@ -1,4 +1,4 @@
-﻿from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
 
 from agent_core.base.agent import BaseAgent
 from agent_core.base.context import AgentContext
@@ -14,10 +14,11 @@ def register_agent(name: str, *, handler: str = "react") -> Callable[[T], T]:
         _AGENT_HANDLERS[name] = handler
         cls.name = name
         return cls
+
     return decorator
 
 
-def create_agent(name: str, context: AgentContext, **kwargs) -> BaseAgent:
+def create_agent(name: str, context: AgentContext, **kwargs: Any) -> BaseAgent:
     if name not in _AGENT_REGISTRY:
         raise KeyError(f"Agent not registered: {name}")
     return _AGENT_REGISTRY[name](context, **kwargs)

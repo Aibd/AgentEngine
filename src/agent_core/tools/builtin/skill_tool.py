@@ -28,7 +28,10 @@ class SkillTool(Tool):
     def __init__(self, loader: SkillLoader) -> None:
         self._loader = loader
 
-    async def run(self, skill: str, args: str = "", **kwargs: Any) -> str:
+    async def run(self, **kwargs: Any) -> str:
+        skill = str(kwargs.get("skill", ""))
+        args = str(kwargs.get("args", ""))
+
         skills = self._loader.discover()
         if skill not in skills:
             return f"Unknown skill: {skill}. Available: {', '.join(sorted(skills)) or '(none)'}"

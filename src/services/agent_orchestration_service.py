@@ -4,9 +4,10 @@ import logging
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from agent_core.base.context import AgentContext
+from agent_core.handlers.base import AgentHandler
 from agent_core.llm.client import LLMClient
 from agent_core.llm.factory import create_llm_from_env
 from agent_core.registry.agent_registry import create_agent, get_agent_handler
@@ -30,6 +31,10 @@ DEFAULT_MAX_QUERY_CHARS = 20_000
 logger = logging.getLogger(__name__)
 
 
+def _default_llm_factory() -> LLMClient | None:
+    return cast(LLMClient | None, create_llm_from_env(required=False))
+
+
 class AgentOrchestrationService:
     """Application-facing entry point.
 
@@ -48,7 +53,7 @@ class AgentOrchestrationService:
         if max_query_chars < 1:
             raise ValueError("max_query_chars must be at least 1")
         self._config: dict[str, Any] = self._load_config(config_path)
-        self._llm_factory = llm_factory or (lambda: create_llm_from_env(required=False))
+        self._llm_factory = llm_factory or _default_llm_factory
         self._max_query_chars = max_query_chars
         self._managed_llms: dict[int, LLMClient] = {}
 
@@ -97,7 +102,7 @@ class AgentOrchestrationService:
         agent = create_agent(agent_name, context, **merged_agent_kwargs)
         context.extras["agent"] = agent
         handler_name = cfg.get("handler") or get_agent_handler(agent_name)
-        handler = create_handler(handler_name, **(handler_kwargs or {}))
+        handler = cast(AgentHandler, create_handler(handler_name, **(handler_kwargs or {})))
         logger.info(
             "agent_run_start request_id=%s agent=%s handler=%s conversation_id=%s",
             context.request_id,
