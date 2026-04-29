@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 from typing import Any
 
 from agent_core.base.agent import BaseAgent
@@ -15,6 +17,7 @@ from agent_core.stream.events import EventType
 
 
 DEFAULT_TOOL_TIMEOUT_SECONDS = 30.0
+logger = logging.getLogger(__name__)
 
 
 @register_handler("react")
@@ -40,6 +43,14 @@ class ReActHandler(AgentHandler):
     async def handle(self, agent: BaseAgent, context: AgentContext, query: str) -> str:
         agent.setup()
         agent.state = AgentState.RUNNING
+        started_at = time.perf_counter()
+
+        logger.info(
+            "react_run_start request_id=%s agent=%s max_steps=%d",
+            context.request_id,
+            agent.name,
+            agent.max_steps,
+        )
 
         if context.printer:
             await context.printer.send(EventType.START, query)
@@ -47,11 +58,25 @@ class ReActHandler(AgentHandler):
         try:
             result = await self._loop(agent, context, query)
             agent.state = AgentState.FINISHED
+            logger.info(
+                "react_run_finish request_id=%s agent=%s steps=%d elapsed=%.3fs",
+                context.request_id,
+                agent.name,
+                agent.current_step,
+                time.perf_counter() - started_at,
+            )
             if context.printer:
                 await context.printer.send(EventType.RESULT, {"result": result}, finished=True)
             return result
         except Exception as exc:
             agent.state = AgentState.ERROR
+            logger.exception(
+                "react_run_error request_id=%s agent=%s steps=%d elapsed=%.3fs",
+                context.request_id,
+                agent.name,
+                agent.current_step,
+                time.perf_counter() - started_at,
+            )
             if context.printer:
                 await context.printer.send(EventType.ERROR, str(exc), finished=True)
             raise
@@ -111,6 +136,14 @@ class ReActHandler(AgentHandler):
         if chat_stream is None:
             return await context.llm.chat(messages, tools=tools, stream=False)
 
+        started_at = time.perf_counter()
+        logger.debug(
+            "llm_stream_start request_id=%s messages=%d tools=%d",
+            context.request_id,
+            len(messages),
+            len(tools or []),
+        )
+
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
         tool_calls_map: dict[int, dict[str, Any]] = {}
@@ -118,20 +151,37 @@ class ReActHandler(AgentHandler):
         usage: dict[str, int] = {}
         raw_chunks: list[dict[str, Any]] = []
 
-        async for chunk in chat_stream(messages, tools=tools):
-            if chunk.content:
-                content_parts.append(chunk.content)
-                if context.printer:
-                    await context.printer.send(EventType.TEXT, chunk.content)
-            if chunk.reasoning_content:
-                reasoning_parts.append(chunk.reasoning_content)
-            if chunk.usage:
-                usage = chunk.usage
-            if chunk.finish_reason:
-                finish_reason = chunk.finish_reason
-            if chunk.raw is not None:
-                raw_chunks.append(chunk.raw)
-                self._accumulate_tool_calls(tool_calls_map, chunk.raw)
+        try:
+            async for chunk in chat_stream(messages, tools=tools):
+                if chunk.content:
+                    content_parts.append(chunk.content)
+                    if context.printer:
+                        await context.printer.send(EventType.TEXT, chunk.content)
+                if chunk.reasoning_content:
+                    reasoning_parts.append(chunk.reasoning_content)
+                if chunk.usage:
+                    usage = chunk.usage
+                if chunk.finish_reason:
+                    finish_reason = chunk.finish_reason
+                if chunk.raw is not None:
+                    raw_chunks.append(chunk.raw)
+                    self._accumulate_tool_calls(tool_calls_map, chunk.raw)
+        except Exception:
+            logger.exception(
+                "llm_stream_error request_id=%s elapsed=%.3fs",
+                context.request_id,
+                time.perf_counter() - started_at,
+            )
+            raise
+
+        logger.debug(
+            "llm_stream_finish request_id=%s finish_reason=%s content_chars=%d tool_calls=%d elapsed=%.3fs",
+            context.request_id,
+            finish_reason or "stop",
+            sum(len(part) for part in content_parts),
+            len(tool_calls_map),
+            time.perf_counter() - started_at,
+        )
 
         return LLMResponse(
             content="".join(content_parts),
@@ -206,7 +256,19 @@ class ReActHandler(AgentHandler):
             )
             if tool is None:
                 rendered = f"Unknown tool: {tool_name}"
+                logger.warning(
+                    "tool_call_missing request_id=%s tool=%s",
+                    context.request_id,
+                    tool_name,
+                )
             else:
+                started_at = time.perf_counter()
+                logger.info(
+                    "tool_call_start request_id=%s tool=%s arg_keys=%s",
+                    context.request_id,
+                    tool_name,
+                    sorted(tool_args.keys()),
+                )
                 try:
                     tool_coro = tool.run(**tool_args)
                     if self.tool_timeout_seconds is None:
@@ -220,8 +282,28 @@ class ReActHandler(AgentHandler):
                     raw_result = (
                         f"Tool timeout after {self.tool_timeout_seconds}s: {tool_name}"
                     )
+                    logger.warning(
+                        "tool_call_timeout request_id=%s tool=%s timeout=%s elapsed=%.3fs",
+                        context.request_id,
+                        tool_name,
+                        self.tool_timeout_seconds,
+                        time.perf_counter() - started_at,
+                    )
                 except Exception as exc:
                     raw_result = f"Tool error: {exc}"
+                    logger.exception(
+                        "tool_call_error request_id=%s tool=%s elapsed=%.3fs",
+                        context.request_id,
+                        tool_name,
+                        time.perf_counter() - started_at,
+                    )
+                else:
+                    logger.info(
+                        "tool_call_finish request_id=%s tool=%s elapsed=%.3fs",
+                        context.request_id,
+                        tool_name,
+                        time.perf_counter() - started_at,
+                    )
                 rendered = (
                     raw_result
                     if isinstance(raw_result, str)

@@ -9,12 +9,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import time
 from typing import Any, AsyncIterator
 
 import httpx
 
 from agent_core.llm.client import LLMChunk, LLMResponse
 from agent_core.memory.message import Message
+
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAICompatibleClient:
@@ -145,14 +150,51 @@ class OpenAICompatibleClient:
 
         last_exc: Exception | None = None
         for attempt in range(self.max_retries + 1):
+            attempt_no = attempt + 1
+            started_at = time.perf_counter()
+            logger.debug(
+                "llm_post_start attempt=%d model=%s messages=%d tools=%d",
+                attempt_no,
+                payload.get("model"),
+                len(payload.get("messages", [])),
+                len(payload.get("tools", []) or []),
+            )
             try:
                 resp = await self.client.post(self.chat_path, json=payload)
                 self._raise_for_status(resp)
+                logger.debug(
+                    "llm_post_finish attempt=%d model=%s status=%d elapsed=%.3fs",
+                    attempt_no,
+                    payload.get("model"),
+                    resp.status_code,
+                    time.perf_counter() - started_at,
+                )
                 return self._parse_response(resp.json())
             except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
                 last_exc = exc
+                status_code = (
+                    exc.response.status_code
+                    if isinstance(exc, httpx.HTTPStatusError)
+                    else None
+                )
                 if attempt < self.max_retries:
+                    logger.warning(
+                        "llm_post_retry attempt=%d model=%s status=%s error=%s",
+                        attempt_no,
+                        payload.get("model"),
+                        status_code,
+                        type(exc).__name__,
+                    )
                     await asyncio.sleep(2 ** attempt)
+                else:
+                    logger.error(
+                        "llm_post_failed attempt=%d model=%s status=%s error=%s elapsed=%.3fs",
+                        attempt_no,
+                        payload.get("model"),
+                        status_code,
+                        type(exc).__name__,
+                        time.perf_counter() - started_at,
+                    )
         assert last_exc is not None
         raise last_exc
 
@@ -216,6 +258,15 @@ class OpenAICompatibleClient:
 
         last_exc: Exception | None = None
         for attempt in range(self.max_retries + 1):
+            attempt_no = attempt + 1
+            started_at = time.perf_counter()
+            logger.debug(
+                "llm_stream_http_start attempt=%d model=%s messages=%d tools=%d",
+                attempt_no,
+                payload.get("model"),
+                len(payload.get("messages", [])),
+                len(payload.get("tools", []) or []),
+            )
             try:
                 async with self.client.stream("POST", self.chat_path, json=payload) as resp:
                     self._raise_for_status(resp)
@@ -246,11 +297,38 @@ class OpenAICompatibleClient:
                         ):
                             chunk.raw = data
                             yield chunk
+                logger.debug(
+                    "llm_stream_http_finish attempt=%d model=%s elapsed=%.3fs",
+                    attempt_no,
+                    payload.get("model"),
+                    time.perf_counter() - started_at,
+                )
                 return
             except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
                 last_exc = exc
+                status_code = (
+                    exc.response.status_code
+                    if isinstance(exc, httpx.HTTPStatusError)
+                    else None
+                )
                 if attempt < self.max_retries:
+                    logger.warning(
+                        "llm_stream_http_retry attempt=%d model=%s status=%s error=%s",
+                        attempt_no,
+                        payload.get("model"),
+                        status_code,
+                        type(exc).__name__,
+                    )
                     await asyncio.sleep(2 ** attempt)
+                else:
+                    logger.error(
+                        "llm_stream_http_failed attempt=%d model=%s status=%s error=%s elapsed=%.3fs",
+                        attempt_no,
+                        payload.get("model"),
+                        status_code,
+                        type(exc).__name__,
+                        time.perf_counter() - started_at,
+                    )
         assert last_exc is not None
         raise last_exc
 

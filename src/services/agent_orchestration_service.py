@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -25,6 +27,7 @@ except ImportError:  # pragma: no cover
 
 
 DEFAULT_MAX_QUERY_CHARS = 20_000
+logger = logging.getLogger(__name__)
 
 
 class AgentOrchestrationService:
@@ -88,16 +91,33 @@ class AgentOrchestrationService:
         if context.llm is None:
             context.llm = self._llm_factory()
 
+        started_at = time.perf_counter()
         agent = create_agent(agent_name, context, **merged_agent_kwargs)
         context.extras["agent"] = agent
         handler_name = cfg.get("handler") or get_agent_handler(agent_name)
         handler = create_handler(handler_name, **(handler_kwargs or {}))
+        logger.info(
+            "agent_run_start request_id=%s agent=%s handler=%s conversation_id=%s",
+            context.request_id,
+            agent_name,
+            handler_name,
+            context.conversation_id,
+        )
         try:
             return await handler.handle(agent, context, query)
         finally:
             context.extras["agent_state"] = agent.state.value
             context.extras["agent_current_step"] = agent.current_step
             context.extras["agent_memory"] = agent.memory.to_openai()
+            logger.info(
+                "agent_run_finish request_id=%s agent=%s handler=%s state=%s steps=%d elapsed=%.3fs",
+                context.request_id,
+                agent_name,
+                handler_name,
+                agent.state.value,
+                agent.current_step,
+                time.perf_counter() - started_at,
+            )
 
     def _validate_run_inputs(self, *, agent_name: str, query: str) -> None:
         if not agent_name or not agent_name.strip():
