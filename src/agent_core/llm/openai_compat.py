@@ -147,7 +147,7 @@ class OpenAICompatibleClient:
         for attempt in range(self.max_retries + 1):
             try:
                 resp = await self.client.post(self.chat_path, json=payload)
-                resp.raise_for_status()
+                self._raise_for_status(resp)
                 return self._parse_response(resp.json())
             except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
                 last_exc = exc
@@ -218,7 +218,7 @@ class OpenAICompatibleClient:
         for attempt in range(self.max_retries + 1):
             try:
                 async with self.client.stream("POST", self.chat_path, json=payload) as resp:
-                    resp.raise_for_status()
+                    self._raise_for_status(resp)
                     async for line in resp.aiter_lines():
                         if not line or not line.startswith("data: "):
                             continue
@@ -253,6 +253,18 @@ class OpenAICompatibleClient:
                     await asyncio.sleep(2 ** attempt)
         assert last_exc is not None
         raise last_exc
+
+    def _raise_for_status(self, resp: httpx.Response) -> None:
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            body = resp.text[:2000]
+            message = f"{exc}; response body: {body}"
+            raise httpx.HTTPStatusError(
+                message,
+                request=exc.request,
+                response=exc.response,
+            ) from exc
 
     # -- Parsing --------------------------------------------------------
 
