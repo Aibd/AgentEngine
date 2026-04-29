@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 import agent_core.llm.openai_compat as openai_compat
-from agent_core.errors import LLMHTTPError, LLMRateLimitError
+from agent_core.errors import LLMHTTPError, LLMRateLimitError, LLMStreamError
 from agent_core.llm.openai_compat import OpenAICompatibleClient
 from agent_core.memory.message import Message
 
@@ -29,6 +29,12 @@ def _client_with_transport(
         transport=httpx.MockTransport(handler),
     )
     return client
+
+
+class _InterruptedSSEStream(httpx.AsyncByteStream):
+    async def __aiter__(self):
+        yield b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'
+        raise httpx.RemoteProtocolError("stream interrupted")
 
 
 async def test_post_retries_5xx_then_succeeds(monkeypatch):
@@ -184,3 +190,55 @@ async def test_stream_retries_timeout_then_succeeds(monkeypatch):
     assert [chunk.content for chunk in chunks if chunk.content] == ["hi"]
     assert chunks[-1].finish_reason == "stop"
     assert calls == 2
+
+
+async def test_stream_does_not_retry_after_partial_chunk(monkeypatch):
+    monkeypatch.setattr(openai_compat.asyncio, "sleep", _no_sleep)
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            stream=_InterruptedSSEStream(),
+            headers={"content-type": "text/event-stream"},
+            request=request,
+        )
+
+    client = _client_with_transport(handler, max_retries=2)
+    chunks = []
+    try:
+        with pytest.raises(LLMStreamError) as exc_info:
+            async for chunk in client.chat_stream([Message.user("hello")]):
+                chunks.append(chunk)
+    finally:
+        await client.close()
+
+    assert [chunk.content for chunk in chunks] == ["hi"]
+    assert calls == 1
+    assert exc_info.value.is_retryable is False
+    assert exc_info.value.details["cause_code"] == "llm_connection_error"
+
+
+async def test_stream_provider_error_is_structured():
+    body = 'data: {"error":{"message":"bad stream","type":"provider_error"}}\n\n'
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=body.encode("utf-8"),
+            headers={"content-type": "text/event-stream"},
+            request=request,
+        )
+
+    client = _client_with_transport(handler, max_retries=1)
+    try:
+        with pytest.raises(LLMStreamError) as exc_info:
+            _ = [chunk async for chunk in client.chat_stream([Message.user("hello")])]
+    finally:
+        await client.close()
+
+    assert exc_info.value.error_code == "llm_stream_error"
+    assert exc_info.value.is_retryable is False
+    assert exc_info.value.details["provider_error"]["type"] == "provider_error"

@@ -22,6 +22,7 @@ from agent_core.errors import (
     LLMError,
     LLMHTTPError,
     LLMRateLimitError,
+    LLMStreamError,
     LLMTimeoutError,
 )
 from agent_core.llm.client import LLMChunk, LLMResponse
@@ -267,6 +268,7 @@ class OpenAICompatibleClient:
         for attempt in range(self.max_retries + 1):
             attempt_no = attempt + 1
             started_at = time.perf_counter()
+            emitted_any = False
             logger.debug(
                 "llm_stream_http_start attempt=%d model=%s messages=%d tools=%d",
                 attempt_no,
@@ -287,6 +289,8 @@ class OpenAICompatibleClient:
                             data = json.loads(data_str)
                         except json.JSONDecodeError:
                             continue
+                        if "error" in data:
+                            raise self._stream_provider_error(data)
 
                         chunk = self._parse_chunk(data)
                         if (
@@ -303,6 +307,7 @@ class OpenAICompatibleClient:
                             )
                         ):
                             chunk.raw = data
+                            emitted_any = True
                             yield chunk
                 logger.debug(
                     "llm_stream_http_finish attempt=%d model=%s elapsed=%.3fs",
@@ -311,8 +316,17 @@ class OpenAICompatibleClient:
                     time.perf_counter() - started_at,
                 )
                 return
-            except (LLMError, httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError) as exc:
+            except (LLMError, httpx.HTTPError) as exc:
                 last_exc = self._to_llm_error(exc)
+                if emitted_any and not isinstance(last_exc, LLMStreamError):
+                    last_exc = LLMStreamError(
+                        "LLM stream interrupted after partial data",
+                        retryable=False,
+                        details={
+                            **last_exc.details,
+                            "cause_code": last_exc.error_code,
+                        },
+                    )
                 status_code = last_exc.error_status_code
                 if attempt < self.max_retries and last_exc.is_retryable:
                     logger.warning(
@@ -385,10 +399,29 @@ class OpenAICompatibleClient:
         return LLMError(str(exc) or exc.__class__.__name__)
 
     def _request_details(self, exc: httpx.HTTPError) -> dict[str, Any]:
-        request = getattr(exc, "request", None)
+        try:
+            request = exc.request
+        except RuntimeError:
+            return {}
         if request is None:
             return {}
         return {"url": str(request.url)}
+
+    def _stream_provider_error(self, data: dict[str, Any]) -> LLMStreamError:
+        raw_error = data.get("error")
+        if isinstance(raw_error, dict):
+            message_value = raw_error.get("message")
+            message = message_value if isinstance(message_value, str) else str(raw_error)
+            return LLMStreamError(
+                message,
+                retryable=False,
+                details={"provider_error": raw_error},
+            )
+        return LLMStreamError(
+            str(raw_error),
+            retryable=False,
+            details={"provider_error": raw_error},
+        )
 
     def _is_retryable_status(self, status_code: int) -> bool:
         return status_code in _RETRYABLE_STATUS_CODES
