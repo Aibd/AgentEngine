@@ -1,27 +1,53 @@
-﻿import asyncio
-from typing import Any, Callable
+"""Adapter shell for the existing FileClerkAgent.
+
+The legacy implementation is kept outside agent_core. Inject a factory that
+returns the current FileClerkAgent instance bound to an asyncio.Queue. This
+adapter bridges the legacy queue output into the new Printer event shape.
+
+Registered with handler "pipeline" because FileClerk is a fixed workflow,
+not a ReAct loop. The adapter exposes a pipeline step that runs the legacy
+agent and bridges its queue messages into the new Printer event shape.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from agent_core.base.agent import BaseAgent
+from agent_core.base.context import AgentContext
 from agent_core.registry.agent_registry import register_agent
+
+PipelineStep = Callable[[AgentContext, str], Awaitable[str]]
 
 
 @register_agent("file_clerk", handler="pipeline")
 class FileClerkAdapter(BaseAgent):
-    """Adapter shell for the existing FileClerkAgent.
-
-    Keep the legacy implementation outside agent_core. Inject a factory that
-    returns the current FileClerkAgent instance. The adapter bridges its
-    message_queue output into the new Printer event shape.
-    """
-
-    def __init__(self, context, *, legacy_factory: Callable[[asyncio.Queue], Any] | None = None, max_steps: int = 1) -> None:
+    def __init__(
+        self,
+        context: AgentContext,
+        *,
+        legacy_factory: Callable[[asyncio.Queue], Any] | None = None,
+        max_steps: int = 1,
+    ) -> None:
         super().__init__(context, max_steps=max_steps)
         self.legacy_factory = legacy_factory
 
-    async def think(self) -> bool:
-        return self.current_step == 0
+    def setup(self) -> None:
+        # Keep the factory discoverable for application code that still reads
+        # legacy integration metadata from the context.
+        if self.legacy_factory is not None:
+            self.context.extras.setdefault("file_clerk_factory", self.legacy_factory)
 
-    async def act(self) -> str:
+    def pipeline_steps(self) -> list[PipelineStep]:
+        return [self._run_legacy_step]
+
+    async def _run_legacy_step(self, context: AgentContext, query: str) -> str:
+        return await self.run_legacy(query)
+
+    async def run_legacy(self, query: str) -> str:
+        """Run the legacy agent and bridge its message_queue to Printer."""
         if self.legacy_factory is None:
             return "file_clerk adapter ready; inject legacy_factory to run."
 
@@ -34,7 +60,11 @@ class FileClerkAdapter(BaseAgent):
             except asyncio.TimeoutError:
                 continue
             if self.context.printer:
-                finished = message.get("status") == "end" if isinstance(message, dict) else False
+                finished = (
+                    message.get("status") == "end"
+                    if isinstance(message, dict)
+                    else False
+                )
                 await self.context.printer.send("text", message, finished=finished)
         result = await task
-        return str(result)
+        return str(result) if result is not None else ""

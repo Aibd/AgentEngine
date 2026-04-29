@@ -1,44 +1,51 @@
-﻿from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 
 from agent_core.base.context import AgentContext
 from agent_core.base.state import AgentState
 from agent_core.memory.memory import Memory
-from agent_core.memory.message import Message
+
+PipelineStep = Callable[[AgentContext, str], Awaitable[str]]
 
 
-class BaseAgent(ABC):
-    name = "base"
-    description = ""
+class BaseAgent:
+    """Pure context container for an agent run.
 
-    def __init__(self, context: AgentContext, *, max_steps: int = 10) -> None:
+    Loop logic lives in handlers (ReActHandler, PipelineHandler, ...).
+    Subclasses customise per-agent behaviour by overriding `setup()` and
+    `system_prompt()` hooks; they no longer implement think/act loops.
+    """
+
+    name: str = "base"
+    description: str = ""
+
+    def __init__(
+        self,
+        context: AgentContext,
+        *,
+        max_steps: int = 10,
+        max_messages: int = 0,
+    ) -> None:
         self.context = context
-        self.memory = Memory()
+        self.memory = Memory(max_messages=max_messages)
         self.max_steps = max_steps
         self.current_step = 0
         self.state = AgentState.IDLE
 
-    async def run(self, query: str | None = None) -> str:
-        self.state = AgentState.RUNNING
-        if query:
-            self.memory.append(Message.user(query))
-        result = ""
-        while self.state == AgentState.RUNNING and self.current_step < self.max_steps:
-            should_act = await self.think()
-            if not should_act:
-                self.state = AgentState.FINISHED
-                break
-            result = await self.act()
-            self.current_step += 1
-        return await self.finalize(result)
+    def setup(self) -> None:
+        """Called once by the handler before the loop starts.
 
-    @abstractmethod
-    async def think(self) -> bool:
-        ...
+        Override to register tools, seed memory, or inject extras into
+        the context. Default is a no-op.
+        """
 
-    @abstractmethod
-    async def act(self) -> str:
-        ...
+    def system_prompt(self) -> str:
+        """Return the system prompt for this agent. Empty disables it."""
+        return ""
 
-    async def finalize(self, result: str) -> str:
-        self.state = AgentState.FINISHED if self.state != AgentState.ERROR else self.state
-        return result
+    def next_step_prompt(self) -> str:
+        """Optional guidance injected before the last user message each turn."""
+        return ""
+
+    def pipeline_steps(self) -> list[PipelineStep]:
+        """Optional fixed workflow steps for PipelineHandler."""
+        return []

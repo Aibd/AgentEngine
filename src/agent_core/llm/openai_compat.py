@@ -1,10 +1,19 @@
-﻿from collections.abc import AsyncIterator
-from typing import Any
+"""OpenAI-compatible chat client.
+
+Production-grade backend for OpenAI / DeepSeek / Qwen / vLLM / LiteLLM proxies.
+Reuses one httpx.AsyncClient, retries with exponential backoff, accumulates
+streaming tool_calls deltas, and surfaces reasoning_content for thinking models.
+"""
+
+from __future__ import annotations
+
+import asyncio
 import json
+from typing import Any, AsyncIterator
 
 import httpx
 
-from agent_core.llm.client import LLMChunk, LLMResponse, ToolCall
+from agent_core.llm.client import LLMChunk, LLMResponse
 from agent_core.memory.message import Message
 
 
@@ -16,50 +25,47 @@ class OpenAICompatibleClient:
         api_key: str,
         model: str,
         chat_path: str = "/v1/chat/completions",
-        timeout: float = 300.0,
+        timeout: float = 120.0,
+        max_retries: int = 2,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model
         self.chat_path = chat_path
         self.timeout = timeout
+        self.max_retries = max_retries
+
+        self._client: httpx.AsyncClient | None = None
+
+    # -- LLMClient ------------------------------------------------------
 
     async def chat(
         self,
         messages: list[Message],
         *,
         tools: list[dict[str, Any]] | None = None,
+        tool_choice: str = "auto",
         stream: bool = False,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
         if stream:
-            content = []
-            async for chunk in self.chat_stream(messages, tools=tools, **kwargs):
-                content.append(chunk.content)
-            return LLMResponse(content="".join(content))
-
-        payload = self._payload(messages, tools=tools, stream=False, **kwargs)
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(self._url(), json=payload, headers=self._headers())
-            response.raise_for_status()
-            data = response.json()
-
-        choice = data.get("choices", [{}])[0]
-        message = choice.get("message", {})
-        tool_calls = []
-        for call in message.get("tool_calls") or []:
-            function = call.get("function", {})
-            args = function.get("arguments") or "{}"
-            try:
-                parsed_args = json.loads(args) if isinstance(args, str) else args
-            except json.JSONDecodeError:
-                parsed_args = {"raw": args}
-            tool_calls.append(ToolCall(id=call.get("id", ""), name=function.get("name", ""), arguments=parsed_args))
-        return LLMResponse(
-            content=message.get("content") or "",
-            tool_calls=tool_calls,
-            finish_reason=choice.get("finish_reason"),
-            raw=data,
+            return await self._collect_stream(
+                messages,
+                tools=tools,
+                tool_choice=tool_choice,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **kwargs,
+            )
+        return await self._post(
+            messages,
+            tools=tools,
+            tool_choice=tool_choice,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
         )
 
     async def chat_stream(
@@ -67,38 +73,207 @@ class OpenAICompatibleClient:
         messages: list[Message],
         *,
         tools: list[dict[str, Any]] | None = None,
+        tool_choice: str = "auto",
+        temperature: float | None = None,
+        max_tokens: int | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[LLMChunk]:
-        payload = self._payload(messages, tools=tools, stream=True, **kwargs)
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            async with client.stream("POST", self._url(), json=payload, headers=self._headers()) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    line = line.strip()
-                    if not line:
-                        continue
-                    if line.startswith("data: "):
-                        line = line[6:].strip()
-                    if line == "[DONE]":
-                        break
-                    data = json.loads(line)
-                    delta = data.get("choices", [{}])[0].get("delta", {})
-                    yield LLMChunk(content=delta.get("content") or "", raw=data)
-
-    def _payload(self, messages: list[Message], *, tools: list[dict[str, Any]] | None, stream: bool, **kwargs: Any) -> dict[str, Any]:
-        payload = {
-            "model": kwargs.pop("model", self.model),
-            "messages": [message.to_openai() for message in messages],
-            "stream": stream,
+        async for chunk in self._stream(
+            messages,
+            tools=tools,
+            tool_choice=tool_choice,
+            temperature=temperature,
+            max_tokens=max_tokens,
             **kwargs,
+        ):
+            yield chunk
+
+    # -- Lifecycle ------------------------------------------------------
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                base_url=self.base_url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=httpx.Timeout(self.timeout),
+            )
+        return self._client
+
+    async def close(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+    # -- Internal -------------------------------------------------------
+
+    def _build_payload(
+        self,
+        messages: list[Message],
+        *,
+        tools: list[dict[str, Any]] | None,
+        tool_choice: str,
+        temperature: float | None,
+        max_tokens: int | None,
+        stream: bool,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "model": kwargs.pop("model", self.model),
+            "messages": [m.to_openai() for m in messages],
+            "stream": stream,
         }
         if tools:
             payload["tools"] = tools
-            payload.setdefault("tool_choice", "auto")
+            payload["tool_choice"] = tool_choice
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        payload.update(kwargs)
         return payload
 
-    def _url(self) -> str:
-        return f"{self.base_url}{self.chat_path}"
+    async def _post(
+        self,
+        messages: list[Message],
+        **kwargs: Any,
+    ) -> LLMResponse:
+        payload = self._build_payload(messages, stream=False, **kwargs)
 
-    def _headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        last_exc: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                resp = await self.client.post(self.chat_path, json=payload)
+                resp.raise_for_status()
+                return self._parse_response(resp.json())
+            except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+                last_exc = exc
+                if attempt < self.max_retries:
+                    await asyncio.sleep(2 ** attempt)
+        assert last_exc is not None
+        raise last_exc
+
+    async def _collect_stream(
+        self,
+        messages: list[Message],
+        **kwargs: Any,
+    ) -> LLMResponse:
+        content_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_calls_map: dict[int, dict[str, Any]] = {}
+        finish_reason: str | None = None
+        usage: dict[str, int] = {}
+
+        async for chunk in self._stream(messages, **kwargs):
+            if chunk.content:
+                content_parts.append(chunk.content)
+            if chunk.reasoning_content:
+                reasoning_parts.append(chunk.reasoning_content)
+            if chunk.usage:
+                usage = chunk.usage
+            if chunk.finish_reason:
+                finish_reason = chunk.finish_reason
+
+            if chunk.raw is None:
+                continue
+            for choice in chunk.raw.get("choices", []) or []:
+                delta = choice.get("delta", {}) or {}
+                for tc in delta.get("tool_calls", []) or []:
+                    idx = tc.get("index", 0)
+                    slot = tool_calls_map.setdefault(
+                        idx,
+                        {
+                            "id": tc.get("id", ""),
+                            "type": "function",
+                            "function": {"name": "", "arguments": ""},
+                        },
+                    )
+                    if tc.get("id"):
+                        slot["id"] = tc["id"]
+                    func = tc.get("function", {}) or {}
+                    if func.get("name"):
+                        slot["function"]["name"] = func["name"]
+                    if func.get("arguments"):
+                        slot["function"]["arguments"] += func["arguments"]
+
+        return LLMResponse(
+            content="".join(content_parts),
+            reasoning_content="".join(reasoning_parts),
+            tool_calls=list(tool_calls_map.values()) if tool_calls_map else [],
+            finish_reason=finish_reason or "stop",
+            usage=usage,
+        )
+
+    async def _stream(
+        self,
+        messages: list[Message],
+        **kwargs: Any,
+    ) -> AsyncIterator[LLMChunk]:
+        payload = self._build_payload(messages, stream=True, **kwargs)
+
+        last_exc: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                async with self.client.stream("POST", self.chat_path, json=payload) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line or not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+                        if data_str.strip() == "[DONE]":
+                            break
+                        try:
+                            data = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+
+                        chunk = self._parse_chunk(data)
+                        if (
+                            chunk.content
+                            or chunk.reasoning_content
+                            or chunk.usage
+                            or chunk.finish_reason
+                            or (
+                                data.get("choices")
+                                and any(
+                                    (c.get("delta") or {}).get("tool_calls")
+                                    for c in data.get("choices", [])
+                                )
+                            )
+                        ):
+                            chunk.raw = data
+                            yield chunk
+                return
+            except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+                last_exc = exc
+                if attempt < self.max_retries:
+                    await asyncio.sleep(2 ** attempt)
+        assert last_exc is not None
+        raise last_exc
+
+    # -- Parsing --------------------------------------------------------
+
+    def _parse_response(self, data: dict[str, Any]) -> LLMResponse:
+        choice = (data.get("choices") or [{}])[0]
+        message = choice.get("message", {}) or {}
+        return LLMResponse(
+            content=message.get("content") or "",
+            reasoning_content=message.get("reasoning_content") or "",
+            tool_calls=message.get("tool_calls") or [],
+            finish_reason=choice.get("finish_reason") or "stop",
+            usage=data.get("usage") or {},
+            raw=data,
+        )
+
+    def _parse_chunk(self, data: dict[str, Any]) -> LLMChunk:
+        choice = (data.get("choices") or [{}])[0]
+        delta = choice.get("delta", {}) or {}
+        return LLMChunk(
+            content=delta.get("content") or "",
+            reasoning_content=delta.get("reasoning_content") or "",
+            finish_reason=choice.get("finish_reason"),
+            usage=data.get("usage") or {},
+        )

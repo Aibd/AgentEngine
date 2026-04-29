@@ -1,4 +1,4 @@
-﻿[project]
+[project]
 name = "agent-core-refactor"
 version = "0.1.0"
 description = "Standalone agent core scaffold for WiseAgent refactor"

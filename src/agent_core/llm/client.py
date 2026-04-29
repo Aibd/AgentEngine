@@ -1,31 +1,43 @@
-﻿from dataclasses import dataclass, field
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Protocol
 
 from agent_core.memory.message import Message
 
 
 @dataclass(slots=True)
-class ToolCall:
-    id: str
-    name: str
-    arguments: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
 class LLMResponse:
+    """Non-streaming chat response.
+
+    `tool_calls` stores OpenAI raw dict format so it can be written straight
+    back into Memory and resent on the next turn without conversion.
+    """
+
     content: str = ""
-    tool_calls: list[ToolCall] = field(default_factory=list)
+    reasoning_content: str = ""
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
     finish_reason: str | None = None
+    usage: dict[str, int] = field(default_factory=dict)
     raw: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
 class LLMChunk:
+    """A single streaming delta."""
+
     content: str = ""
+    reasoning_content: str = ""
+    finish_reason: str | None = None
+    usage: dict[str, int] = field(default_factory=dict)
     raw: dict[str, Any] | None = None
 
 
 class LLMClient(Protocol):
+    """Any backend that speaks the chat-completions shape.
+
+    Implementations: OpenAICompatibleClient (httpx), MockLLMClient (tests),
+    LangChainAdapterClient (LangChain ChatModel).
+    """
+
     async def chat(
         self,
         messages: list[Message],

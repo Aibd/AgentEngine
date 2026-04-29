@@ -1,7 +1,14 @@
-﻿from enum import Enum
+from enum import Enum
 
 
-class AgentEventType(str, Enum):
+class EventType(str, Enum):
+    """Stream event types emitted via Printer.
+
+    Stable string values matter — the existing SSE contract uses these as
+    `responseType` keys consumed by the front end.
+    """
+
+    START = "start"
     TEXT = "text"
     TASK = "task"
     TOOL_THOUGHT = "tool_thought"
@@ -10,3 +17,8 @@ class AgentEventType(str, Enum):
     RESULT = "result"
     FINAL_RESULT = "final_result"
     ERROR = "error"
+    DONE = "done"
+
+
+# Backwards-compatible alias for callers still importing the old name.
+AgentEventType = EventType
