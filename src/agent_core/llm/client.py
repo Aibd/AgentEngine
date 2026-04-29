@@ -34,8 +34,7 @@ class LLMChunk:
 class LLMClient(Protocol):
     """Any backend that speaks the chat-completions shape.
 
-    Implementations: OpenAICompatibleClient (httpx), MockLLMClient (tests/mock_llm.py),
-    LangChainAdapterClient (LangChain ChatModel).
+    Implementations: OpenAICompatibleClient (httpx), MockLLMClient (tests/mock_llm.py).
     """
 
     async def chat(

@@ -11,7 +11,7 @@ src/
   agent_core/    framework code, no business service imports
     base/        BaseAgent (data container) + AgentContext + AgentState
     handlers/    ReActHandler / PipelineHandler / LegacyHandler
-    llm/         OpenAI-compatible client, Mock client, LangChain adapter
+    llm/         OpenAI-compatible client, mock client contract, env factory
     memory/      Message + Memory (with trim + multimodal)
     prompts/     PromptLoader (cached YAML)
     registry/    decorator-based agent + handler registries
