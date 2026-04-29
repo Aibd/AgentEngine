@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 
 from agent_core.base.agent import BaseAgent
@@ -11,6 +12,7 @@ from agent_core.registry.handler_registry import register_handler
 from agent_core.stream.events import EventType
 
 PipelineStep = Callable[[AgentContext, str], Awaitable[str]]
+logger = logging.getLogger(__name__)
 
 
 @register_handler("pipeline")
@@ -28,13 +30,15 @@ class PipelineHandler(AgentHandler):
         self.steps = steps
 
     async def handle(self, agent: BaseAgent, context: AgentContext, query: str) -> str:
-        agent.setup()
-        agent.state = AgentState.RUNNING
-
-        if context.printer:
-            await context.printer.send(EventType.START, query)
+        primary_error: BaseException | None = None
 
         try:
+            agent.setup()
+            agent.state = AgentState.RUNNING
+
+            if context.printer:
+                await context.printer.send(EventType.START, query)
+
             agent.memory.append(Message.user(query))
             result = query
             steps = self.steps if self.steps is not None else agent.pipeline_steps()
@@ -46,11 +50,39 @@ class PipelineHandler(AgentHandler):
             if context.printer:
                 await context.printer.send(EventType.RESULT, {"result": result}, finished=True)
             return result
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as exc:
+            primary_error = exc
             agent.state = AgentState.CANCELLED
             raise
         except Exception as exc:
+            primary_error = exc
             agent.state = AgentState.ERROR
             if context.printer:
                 await context.printer.send(EventType.ERROR, error_to_dict(exc), finished=True)
             raise
+        finally:
+            await self._teardown(agent, context, primary_error)
+
+    async def _teardown(
+        self,
+        agent: BaseAgent,
+        context: AgentContext,
+        primary_error: BaseException | None,
+    ) -> None:
+        try:
+            await agent.teardown()
+        except Exception as exc:
+            logger.exception(
+                "agent_teardown_error request_id=%s agent=%s",
+                context.request_id,
+                agent.name,
+            )
+            if primary_error is None:
+                agent.state = AgentState.ERROR
+                if context.printer:
+                    await context.printer.send(
+                        EventType.ERROR,
+                        error_to_dict(exc),
+                        finished=True,
+                    )
+                raise

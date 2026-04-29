@@ -34,6 +34,15 @@ class _HangingLLM:
         yield LLMChunk()
 
 
+class _TeardownAgent(BaseAgent):
+    def __init__(self, context: AgentContext) -> None:
+        super().__init__(context)
+        self.teardown_calls = 0
+
+    async def teardown(self) -> None:
+        self.teardown_calls += 1
+
+
 async def test_service_close_closes_managed_llm_once():
     llm = _ClosableLLM()
     service = AgentOrchestrationService(llm_factory=lambda: llm)
@@ -76,6 +85,49 @@ async def test_react_cancellation_marks_agent_cancelled():
         await task
 
     assert agent.state == AgentState.CANCELLED
+
+
+async def test_react_teardown_runs_on_success():
+    context = AgentContext(
+        request_id="teardown-react",
+        query="q",
+        llm=MockLLMClient([LLMResponse(content="ok", finish_reason="stop")]),
+    )
+    agent = _TeardownAgent(context)
+
+    result = await ReActHandler().handle(agent, context, "q")
+
+    assert result == "ok"
+    assert agent.state == AgentState.FINISHED
+    assert agent.teardown_calls == 1
+
+
+async def test_react_teardown_runs_on_cancel():
+    context = AgentContext(request_id="cancel-teardown", query="q", llm=_HangingLLM())
+    agent = _TeardownAgent(context)
+    task = asyncio.create_task(ReActHandler().handle(agent, context, "q"))
+
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert agent.state == AgentState.CANCELLED
+    assert agent.teardown_calls == 1
+
+
+async def test_pipeline_teardown_runs_on_error():
+    async def fail_step(context: AgentContext, query: str) -> str:
+        raise RuntimeError("boom")
+
+    context = AgentContext(request_id="teardown-error", query="q")
+    agent = _TeardownAgent(context)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await PipelineHandler(steps=[fail_step]).handle(agent, context, "q")
+
+    assert agent.state == AgentState.ERROR
+    assert agent.teardown_calls == 1
 
 
 async def test_file_clerk_cancellation_cancels_legacy_task():

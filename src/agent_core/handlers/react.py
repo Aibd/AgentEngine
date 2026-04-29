@@ -42,21 +42,23 @@ class ReActHandler(AgentHandler):
         self.tool_timeout_seconds = tool_timeout_seconds
 
     async def handle(self, agent: BaseAgent, context: AgentContext, query: str) -> str:
-        agent.setup()
-        agent.state = AgentState.RUNNING
         started_at = time.perf_counter()
-
-        logger.info(
-            "react_run_start request_id=%s agent=%s max_steps=%d",
-            context.request_id,
-            agent.name,
-            agent.max_steps,
-        )
-
-        if context.printer:
-            await context.printer.send(EventType.START, query)
+        primary_error: BaseException | None = None
 
         try:
+            agent.setup()
+            agent.state = AgentState.RUNNING
+
+            logger.info(
+                "react_run_start request_id=%s agent=%s max_steps=%d",
+                context.request_id,
+                agent.name,
+                agent.max_steps,
+            )
+
+            if context.printer:
+                await context.printer.send(EventType.START, query)
+
             result = await self._loop(agent, context, query)
             agent.state = AgentState.FINISHED
             logger.info(
@@ -69,7 +71,8 @@ class ReActHandler(AgentHandler):
             if context.printer:
                 await context.printer.send(EventType.RESULT, {"result": result}, finished=True)
             return result
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as exc:
+            primary_error = exc
             agent.state = AgentState.CANCELLED
             logger.warning(
                 "react_run_cancelled request_id=%s agent=%s steps=%d elapsed=%.3fs",
@@ -80,6 +83,7 @@ class ReActHandler(AgentHandler):
             )
             raise
         except Exception as exc:
+            primary_error = exc
             agent.state = AgentState.ERROR
             logger.exception(
                 "react_run_error request_id=%s agent=%s steps=%d elapsed=%.3fs",
@@ -91,6 +95,32 @@ class ReActHandler(AgentHandler):
             if context.printer:
                 await context.printer.send(EventType.ERROR, error_to_dict(exc), finished=True)
             raise
+        finally:
+            await self._teardown(agent, context, primary_error)
+
+    async def _teardown(
+        self,
+        agent: BaseAgent,
+        context: AgentContext,
+        primary_error: BaseException | None,
+    ) -> None:
+        try:
+            await agent.teardown()
+        except Exception as exc:
+            logger.exception(
+                "agent_teardown_error request_id=%s agent=%s",
+                context.request_id,
+                agent.name,
+            )
+            if primary_error is None:
+                agent.state = AgentState.ERROR
+                if context.printer:
+                    await context.printer.send(
+                        EventType.ERROR,
+                        error_to_dict(exc),
+                        finished=True,
+                    )
+                raise
 
     async def _loop(self, agent: BaseAgent, context: AgentContext, query: str) -> str:
         if context.llm is None:

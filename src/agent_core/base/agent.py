@@ -42,6 +42,13 @@ class BaseAgent:
         the context. Default is a no-op.
         """
 
+    async def teardown(self) -> None:
+        """Called once by the handler after the run exits.
+
+        Override to release per-run resources created in `setup()` or during
+        execution. Default is a no-op.
+        """
+
     def system_prompt(self) -> str:
         """Return the system prompt for this agent. Empty disables it."""
         return ""
