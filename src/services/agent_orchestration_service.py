@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from agent_core.base.context import AgentContext
+from agent_core.llm.client import LLMClient
+from agent_core.llm.factory import create_llm_from_env
 from agent_core.registry.agent_registry import create_agent, get_agent_handler
 from agent_core.registry.handler_registry import create_handler
 from agent_core.stream.event_stream import EventStream
@@ -29,8 +32,14 @@ class AgentOrchestrationService:
     endpoints.
     """
 
-    def __init__(self, config_path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        config_path: str | Path | None = None,
+        *,
+        llm_factory: Callable[[], LLMClient | None] | None = None,
+    ) -> None:
         self._config: dict[str, Any] = self._load_config(config_path)
+        self._llm_factory = llm_factory or (lambda: create_llm_from_env(required=False))
 
     def _load_config(self, config_path: str | Path | None) -> dict[str, Any]:
         if config_path is None or yaml is None:
@@ -68,10 +77,19 @@ class AgentOrchestrationService:
         merged_agent_kwargs.update(agent_kwargs or {})
 
         context = context or AgentContext(request_id="local", query=query)
+        if context.llm is None:
+            context.llm = self._llm_factory()
+
         agent = create_agent(agent_name, context, **merged_agent_kwargs)
+        context.extras["agent"] = agent
         handler_name = cfg.get("handler") or get_agent_handler(agent_name)
         handler = create_handler(handler_name, **(handler_kwargs or {}))
-        return await handler.handle(agent, context, query)
+        try:
+            return await handler.handle(agent, context, query)
+        finally:
+            context.extras["agent_state"] = agent.state.value
+            context.extras["agent_current_step"] = agent.current_step
+            context.extras["agent_memory"] = agent.memory.to_openai()
 
     def create_streaming_context(
         self,
