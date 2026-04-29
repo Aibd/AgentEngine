@@ -230,10 +230,10 @@ class ReActHandler(AgentHandler):
 
     def _build_messages(self, agent: BaseAgent, next_step: str) -> list[Message]:
         if not next_step:
-            return list(agent.memory.messages)
+            return agent.memory.snapshot()
 
         # Inject next_step guidance before the last user message
-        msgs = list(agent.memory.messages)
+        msgs = agent.memory.snapshot()
         insert_at = len(msgs)
         for i in range(len(msgs) - 1, -1, -1):
             if msgs[i].role.value == "user":

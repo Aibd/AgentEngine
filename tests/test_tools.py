@@ -68,6 +68,11 @@ class TestRegistry:
         with pytest.raises(KeyError):
             create_tool("does_not_exist")
 
+    def test_registered_tools_returns_copy(self):
+        tools = registered_tools()
+        tools.clear()
+        assert registered_tools()
+
 
 class TestPlanningTool:
     async def test_create_plan(self):

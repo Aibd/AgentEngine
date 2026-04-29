@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from threading import RLock
 from typing import Any, Iterable
 
 from agent_core.memory.message import Message, Role
@@ -14,21 +15,34 @@ class Memory:
 
     messages: list[Message] = field(default_factory=list)
     max_messages: int = 0
+    _lock: Any = field(default_factory=RLock, init=False, repr=False)
 
     def append(self, message: Message) -> None:
-        self.messages.append(message)
-        self._trim()
+        with self._lock:
+            self.messages.append(message)
+            self._trim()
 
     def extend(self, messages: Iterable[Message]) -> None:
-        for message in messages:
-            self.messages.append(message)
-        self._trim()
+        with self._lock:
+            for message in messages:
+                self.messages.append(message)
+            self._trim()
 
     def clear(self) -> None:
-        self.messages.clear()
+        with self._lock:
+            self.messages.clear()
+
+    def snapshot(self) -> list[Message]:
+        """Return a stable copy of the current messages.
+
+        Direct `messages` access remains available for compatibility, but
+        concurrent readers should prefer this method.
+        """
+        with self._lock:
+            return list(self.messages)
 
     def to_openai(self) -> list[dict[str, Any]]:
-        return [message.to_openai() for message in self.messages]
+        return [message.to_openai() for message in self.snapshot()]
 
     # Convenience helpers ------------------------------------------------
 
@@ -57,15 +71,17 @@ class Memory:
         self.append(Message.tool(content, tool_call_id=tool_call_id))
 
     def last_user_message(self) -> str:
-        for message in reversed(self.messages):
-            if message.role == Role.USER:
-                return message.content
+        with self._lock:
+            for message in reversed(self.messages):
+                if message.role == Role.USER:
+                    return message.content
         return ""
 
     def last_assistant_message(self) -> str:
-        for message in reversed(self.messages):
-            if message.role == Role.ASSISTANT and message.content:
-                return message.content
+        with self._lock:
+            for message in reversed(self.messages):
+                if message.role == Role.ASSISTANT and message.content:
+                    return message.content
         return ""
 
     # Internal -----------------------------------------------------------

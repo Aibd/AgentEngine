@@ -95,6 +95,17 @@ class TestMemory:
         mem.clear()
         assert len(mem.messages) == 0
 
+    def test_snapshot_returns_stable_copy(self):
+        mem = Memory()
+        mem.add_user_message("hello")
+
+        snapshot = mem.snapshot()
+        snapshot.clear()
+
+        assert len(snapshot) == 0
+        assert len(mem.messages) == 1
+        assert mem.last_user_message() == "hello"
+
     def test_trim_disabled_by_default(self):
         mem = Memory()  # max_messages = 0 -> unbounded
         for i in range(50):
