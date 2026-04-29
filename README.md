@@ -87,3 +87,8 @@ Real provider smoke tests are opt-in:
 # Set RUN_INTEGRATION=1 in .env first.
 uv run --env-file .env pytest -m integration
 ```
+
+## API documentation
+
+See `docs/API.md` for the public contracts around agent lifecycle, LLM clients,
+structured errors, streaming events, registries, memory, and orchestration.
