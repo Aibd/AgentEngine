@@ -80,7 +80,7 @@ class LLMHTTPError(LLMError):
         *,
         status_code: int,
         body: str = "",
-        retryable: bool = False,
+        retryable: bool | None = None,
         details: dict[str, Any] | None = None,
     ) -> None:
         merged_details = dict(details or {})
@@ -88,7 +88,7 @@ class LLMHTTPError(LLMError):
             merged_details["body"] = body
         super().__init__(
             message,
-            retryable=retryable,
+            retryable=self.retryable if retryable is None else retryable,
             status_code=status_code,
             details=merged_details,
         )
@@ -97,6 +97,26 @@ class LLMHTTPError(LLMError):
 class LLMRateLimitError(LLMHTTPError):
     code = "llm_rate_limited"
     retryable = True
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int = 429,
+        body: str = "",
+        retry_after_seconds: float | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        merged_details = dict(details or {})
+        if retry_after_seconds is not None:
+            merged_details["retry_after_seconds"] = retry_after_seconds
+        super().__init__(
+            message,
+            status_code=status_code,
+            body=body,
+            retryable=True,
+            details=merged_details,
+        )
 
 
 class LLMTimeoutError(LLMError):

@@ -8,6 +8,8 @@ streaming tool_calls deltas, and surfaces reasoning_content for thinking models.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import json
 import logging
 import time
@@ -27,6 +29,7 @@ from agent_core.memory.message import Message
 
 
 logger = logging.getLogger(__name__)
+_RETRYABLE_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 
 
 class OpenAICompatibleClient:
@@ -180,7 +183,7 @@ class OpenAICompatibleClient:
             except (LLMError, httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError) as exc:
                 last_exc = self._to_llm_error(exc)
                 status_code = last_exc.error_status_code
-                if attempt < self.max_retries:
+                if attempt < self.max_retries and last_exc.is_retryable:
                     logger.warning(
                         "llm_post_retry attempt=%d model=%s status=%s error=%s",
                         attempt_no,
@@ -188,7 +191,7 @@ class OpenAICompatibleClient:
                         status_code,
                         last_exc.error_code,
                     )
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(self._retry_delay(attempt, last_exc))
                 else:
                     logger.error(
                         "llm_post_failed attempt=%d model=%s status=%s error=%s elapsed=%.3fs",
@@ -198,6 +201,7 @@ class OpenAICompatibleClient:
                         last_exc.error_code,
                         time.perf_counter() - started_at,
                     )
+                    raise last_exc
         assert last_exc is not None
         raise last_exc
 
@@ -310,7 +314,7 @@ class OpenAICompatibleClient:
             except (LLMError, httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError) as exc:
                 last_exc = self._to_llm_error(exc)
                 status_code = last_exc.error_status_code
-                if attempt < self.max_retries:
+                if attempt < self.max_retries and last_exc.is_retryable:
                     logger.warning(
                         "llm_stream_http_retry attempt=%d model=%s status=%s error=%s",
                         attempt_no,
@@ -318,7 +322,7 @@ class OpenAICompatibleClient:
                         status_code,
                         last_exc.error_code,
                     )
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(self._retry_delay(attempt, last_exc))
                 else:
                     logger.error(
                         "llm_stream_http_failed attempt=%d model=%s status=%s error=%s elapsed=%.3fs",
@@ -328,6 +332,7 @@ class OpenAICompatibleClient:
                         last_exc.error_code,
                         time.perf_counter() - started_at,
                     )
+                    raise last_exc
         assert last_exc is not None
         raise last_exc
 
@@ -337,13 +342,14 @@ class OpenAICompatibleClient:
         except httpx.HTTPStatusError as exc:
             body = resp.text[:2000]
             message = f"{exc}; response body: {body}"
-            retryable = resp.status_code in {408, 409, 425, 429} or resp.status_code >= 500
+            retryable = self._is_retryable_status(resp.status_code)
             details = {"url": str(exc.request.url)}
             if resp.status_code == 429:
                 raise LLMRateLimitError(
                     message,
                     status_code=resp.status_code,
                     body=body,
+                    retry_after_seconds=self._retry_after_seconds(resp),
                     details=details,
                 ) from exc
             raise LLMHTTPError(
@@ -368,8 +374,7 @@ class OpenAICompatibleClient:
                 f"{exc}; response body: {response.text[:2000]}",
                 status_code=response.status_code,
                 body=response.text[:2000],
-                retryable=response.status_code in {408, 409, 425, 429}
-                or response.status_code >= 500,
+                retryable=self._is_retryable_status(response.status_code),
                 details=self._request_details(exc),
             )
         if isinstance(exc, httpx.TransportError):
@@ -384,6 +389,31 @@ class OpenAICompatibleClient:
         if request is None:
             return {}
         return {"url": str(request.url)}
+
+    def _is_retryable_status(self, status_code: int) -> bool:
+        return status_code in _RETRYABLE_STATUS_CODES
+
+    def _retry_delay(self, attempt: int, error: LLMError) -> float:
+        retry_after = error.details.get("retry_after_seconds")
+        if isinstance(retry_after, int | float):
+            return max(0.0, float(retry_after))
+        return float(2 ** attempt)
+
+    def _retry_after_seconds(self, resp: httpx.Response) -> float | None:
+        raw = resp.headers.get("Retry-After")
+        if raw is None or raw.strip() == "":
+            return None
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            pass
+        try:
+            retry_at = parsedate_to_datetime(raw)
+        except (TypeError, ValueError):
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
 
     # -- Parsing --------------------------------------------------------
 

@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 import agent_core.llm.openai_compat as openai_compat
-from agent_core.errors import LLMHTTPError
+from agent_core.errors import LLMHTTPError, LLMRateLimitError
 from agent_core.llm.openai_compat import OpenAICompatibleClient
 from agent_core.memory.message import Message
 
@@ -76,6 +76,82 @@ async def test_post_raises_status_error_with_response_body():
     assert exc_info.value.error_code == "llm_http_error"
     assert exc_info.value.error_status_code == 403
     assert exc_info.value.details["body"] == "forbidden reason"
+
+
+async def test_post_does_not_retry_non_retryable_4xx(monkeypatch):
+    monkeypatch.setattr(openai_compat.asyncio, "sleep", _no_sleep)
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(403, text="forbidden reason", request=request)
+
+    client = _client_with_transport(handler, max_retries=2)
+    try:
+        with pytest.raises(LLMHTTPError):
+            await client.chat([Message.user("hello")])
+    finally:
+        await client.close()
+
+    assert calls == 1
+
+
+async def test_post_retries_429_using_retry_after(monkeypatch):
+    sleeps: list[float] = []
+
+    async def record_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(openai_compat.asyncio, "sleep", record_sleep)
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(
+                429,
+                text="slow down",
+                headers={"Retry-After": "2.5"},
+                request=request,
+            )
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]},
+            request=request,
+        )
+
+    client = _client_with_transport(handler, max_retries=1)
+    try:
+        result = await client.chat([Message.user("hello")])
+    finally:
+        await client.close()
+
+    assert result.content == "ok"
+    assert calls == 2
+    assert sleeps == [2.5]
+
+
+async def test_post_raises_structured_rate_limit_error():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            text="too many requests",
+            headers={"Retry-After": "7"},
+            request=request,
+        )
+
+    client = _client_with_transport(handler, max_retries=0)
+    try:
+        with pytest.raises(LLMRateLimitError) as exc_info:
+            await client.chat([Message.user("hello")])
+    finally:
+        await client.close()
+
+    assert exc_info.value.error_code == "llm_rate_limited"
+    assert exc_info.value.is_retryable is True
+    assert exc_info.value.details["retry_after_seconds"] == 7.0
 
 
 async def test_stream_retries_timeout_then_succeeds(monkeypatch):
