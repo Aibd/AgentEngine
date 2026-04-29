@@ -112,3 +112,12 @@ class TestMemory:
         assert Role.SYSTEM in roles
         # Newest messages should be kept
         assert mem.messages[-1].content == "msg4"
+
+    def test_trim_max_one_keeps_only_system(self):
+        mem = Memory(max_messages=1)
+        mem.add_system_message("sys")
+        mem.add_user_message("user")
+
+        assert len(mem.messages) == 1
+        assert mem.messages[0].role == Role.SYSTEM
+        assert mem.messages[0].content == "sys"
