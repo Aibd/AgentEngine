@@ -14,7 +14,9 @@ from agent_core.handlers.base import AgentHandler
 from agent_core.llm.client import LLMResponse
 from agent_core.memory.message import Message
 from agent_core.registry.handler_registry import register_handler
+from agent_core.runtime.events import RuntimeEvent
 from agent_core.stream.events import EventType
+from agent_core.tools.executor import ToolExecutor
 
 
 DEFAULT_TOOL_TIMEOUT_SECONDS = 30.0
@@ -278,6 +280,18 @@ class ReActHandler(AgentHandler):
         context: AgentContext,
         tool_calls: list[dict[str, Any]],
     ) -> None:
+        runtime_events = context.extras.setdefault("runtime_events", [])
+
+        async def on_tool_event(event: RuntimeEvent) -> None:
+            runtime_events.append(event)
+
+        executor = ToolExecutor(
+            run_id=str(context.extras.get("run_id", context.request_id)),
+            turn_id=str(context.extras.get("turn_id", context.request_id)),
+            on_event=on_tool_event,
+            timeout_seconds=self.tool_timeout_seconds,
+        )
+
         for tc in tool_calls:
             tool_name = tc.get("function", {}).get("name", "")
             args_raw = tc.get("function", {}).get("arguments", "")
@@ -310,46 +324,28 @@ class ReActHandler(AgentHandler):
                     tool_name,
                     sorted(tool_args.keys()),
                 )
-                try:
-                    tool_coro = tool.run(**tool_args)
-                    if self.tool_timeout_seconds is None:
-                        raw_result = await tool_coro
-                    else:
-                        raw_result = await asyncio.wait_for(
-                            tool_coro,
-                            timeout=self.tool_timeout_seconds,
-                        )
-                except asyncio.TimeoutError:
-                    raw_result = (
-                        f"Tool timeout after {self.tool_timeout_seconds}s: {tool_name}"
-                    )
-                    logger.warning(
-                        "tool_call_timeout request_id=%s tool=%s timeout=%s elapsed=%.3fs",
-                        context.request_id,
-                        tool_name,
-                        self.tool_timeout_seconds,
-                        time.perf_counter() - started_at,
-                    )
-                except Exception as exc:
-                    raw_result = f"Tool error: {exc}"
-                    logger.exception(
-                        "tool_call_error request_id=%s tool=%s elapsed=%.3fs",
+                result = await executor.execute(
+                    tool,
+                    tool_args,
+                    tool_call_id=tc.get("id", "") or None,
+                )
+                if result.ok:
+                    logger.info(
+                        "tool_call_finish request_id=%s tool=%s elapsed=%.3fs truncated=%s",
                         context.request_id,
                         tool_name,
                         time.perf_counter() - started_at,
+                        result.truncated,
                     )
                 else:
-                    logger.info(
-                        "tool_call_finish request_id=%s tool=%s elapsed=%.3fs",
+                    logger.warning(
+                        "tool_call_failed request_id=%s tool=%s error=%s elapsed=%.3fs",
                         context.request_id,
                         tool_name,
+                        result.error,
                         time.perf_counter() - started_at,
                     )
-                rendered = (
-                    raw_result
-                    if isinstance(raw_result, str)
-                    else json.dumps(raw_result, ensure_ascii=False)
-                )
+                rendered = result.content
 
             agent.memory.add_tool_message(rendered, tool_call_id=tc.get("id", ""))
 
