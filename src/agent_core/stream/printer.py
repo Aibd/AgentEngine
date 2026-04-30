@@ -2,6 +2,17 @@ from dataclasses import dataclass
 from typing import Any
 
 from agent_core.errors import AgentCoreError, error_to_dict
+from agent_core.runtime.events import (
+    RunCancelled,
+    RunCompleted,
+    RunFailed,
+    RunStarted,
+    RuntimeEvent,
+    TextDelta,
+    ToolCallCompleted,
+    ToolCallFailed,
+    ToolCallStarted,
+)
 from agent_core.stream.event_stream import EventStream
 from agent_core.stream.events import EventType
 
@@ -53,6 +64,43 @@ class Printer:
             "finished": bool(finished),
         }
         await self.event_stream.put(event)
+
+    async def from_runtime_event(self, event: RuntimeEvent) -> None:
+        """Translate a runtime event into the existing SSE envelope."""
+        if isinstance(event, RunStarted):
+            await self.start(event.input_summary)
+        elif isinstance(event, TextDelta):
+            await self.text(event.content)
+        elif isinstance(event, ToolCallStarted):
+            await self.task(f"Tool started: {event.tool_name}")
+        elif isinstance(event, ToolCallCompleted):
+            await self.tool_result(event.tool_name, event.result_summary)
+        elif isinstance(event, ToolCallFailed):
+            await self.tool_result(
+                event.tool_name,
+                f"Tool error: {event.error_message}",
+            )
+        elif isinstance(event, RunCompleted):
+            await self.result({"result": event.result_summary})
+        elif isinstance(event, RunFailed):
+            await self.error(
+                {
+                    "code": event.terminal_reason,
+                    "message": event.error_message,
+                    "category": "runtime",
+                    "retryable": False,
+                    "details": {"type": event.error_type},
+                }
+            )
+        elif isinstance(event, RunCancelled):
+            await self.error(
+                {
+                    "code": "cancelled",
+                    "message": event.reason,
+                    "category": "runtime",
+                    "retryable": False,
+                }
+            )
 
     # -- Convenience shortcuts -----------------------------------------
 

@@ -1,0 +1,1 @@
+{"responseType":"tool_result","response":{"tool":"echo","toolResult":"hi"},"responseAll":{"tool":"echo","toolResult":"hi"},"useTimes":0,"reqId":"golden-req","errorMsg":null,"resultMap":{"tool":"echo","toolResult":"hi"},"conversation_id":"golden-conv","finished":false}

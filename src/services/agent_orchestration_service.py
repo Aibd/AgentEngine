@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -12,6 +13,8 @@ from agent_core.llm.client import LLMClient
 from agent_core.llm.factory import create_llm_from_env
 from agent_core.registry.agent_registry import create_agent, get_agent_handler
 from agent_core.registry.handler_registry import create_handler
+from agent_core.runtime.events import RuntimeEvent, TextDelta
+from agent_core.runtime.turn_runner import TurnRunner
 from agent_core.stream.event_stream import EventStream
 from agent_core.stream.printer import Printer
 
@@ -110,21 +113,90 @@ class AgentOrchestrationService:
             handler_name,
             context.conversation_id,
         )
+
+        if self._use_legacy_runner():
+            return await self._run_legacy(
+                agent=agent,
+                handler=handler,
+                context=context,
+                query=query,
+                started_at=started_at,
+                agent_name=agent_name,
+                handler_name=handler_name,
+            )
+
+        async def on_runtime_event(event: RuntimeEvent) -> None:
+            # Handlers still emit the public SSE stream in Phase 0. Only forward
+            # runtime events that are not already represented by handler output.
+            if context.printer and isinstance(event, TextDelta):
+                await context.printer.from_runtime_event(event)
+
+        runner = TurnRunner(
+            session_id=context.session_id or context.conversation_id or context.request_id
+        )
+        try:
+            return await runner.run(
+                agent=agent,
+                handler=handler,
+                context=context,
+                query=query,
+                on_event=on_runtime_event,
+            )
+        finally:
+            self._record_agent_finish(
+                agent=agent,
+                context=context,
+                started_at=started_at,
+                agent_name=agent_name,
+                handler_name=handler_name,
+            )
+
+    async def _run_legacy(
+        self,
+        *,
+        agent: Any,
+        handler: AgentHandler,
+        context: AgentContext,
+        query: str,
+        started_at: float,
+        agent_name: str,
+        handler_name: str,
+    ) -> str:
         try:
             return await handler.handle(agent, context, query)
         finally:
-            context.extras["agent_state"] = agent.state.value
-            context.extras["agent_current_step"] = agent.current_step
-            context.extras["agent_memory"] = agent.memory.to_openai()
-            logger.info(
-                "agent_run_finish request_id=%s agent=%s handler=%s state=%s steps=%d elapsed=%.3fs",
-                context.request_id,
-                agent_name,
-                handler_name,
-                agent.state.value,
-                agent.current_step,
-                time.perf_counter() - started_at,
+            self._record_agent_finish(
+                agent=agent,
+                context=context,
+                started_at=started_at,
+                agent_name=agent_name,
+                handler_name=handler_name,
             )
+
+    def _record_agent_finish(
+        self,
+        *,
+        agent: Any,
+        context: AgentContext,
+        started_at: float,
+        agent_name: str,
+        handler_name: str,
+    ) -> None:
+        context.extras["agent_state"] = agent.state.value
+        context.extras["agent_current_step"] = agent.current_step
+        context.extras["agent_memory"] = agent.memory.to_openai()
+        logger.info(
+            "agent_run_finish request_id=%s agent=%s handler=%s state=%s steps=%d elapsed=%.3fs",
+            context.request_id,
+            agent_name,
+            handler_name,
+            agent.state.value,
+            agent.current_step,
+            time.perf_counter() - started_at,
+        )
+
+    def _use_legacy_runner(self) -> bool:
+        return os.getenv("USE_LEGACY_RUNNER", "").lower() in {"1", "true", "yes", "on"}
 
     def _track_managed_llm(self, llm: LLMClient | None) -> None:
         if llm is None or not hasattr(llm, "close"):
