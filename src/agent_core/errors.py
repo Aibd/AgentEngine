@@ -134,9 +134,23 @@ class LLMStreamError(LLMError):
     retryable = True
 
 
+class LLMContextWindowError(LLMError):
+    code = "llm_context_window_exceeded"
+    retryable = False
+
+
 class ToolExecutionError(AgentCoreError):
     code = "tool_execution_error"
     category = "tool"
+
+
+class RuntimeExecutionError(AgentCoreError):
+    code = "runtime_execution_error"
+    category = "runtime"
+
+
+class AgentCancelledError(RuntimeExecutionError):
+    code = "agent_cancelled"
 
 
 def error_to_dict(error: BaseException) -> dict[str, Any]:

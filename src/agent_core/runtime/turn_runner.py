@@ -5,11 +5,13 @@ import inspect
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 
 from agent_core.base.agent import BaseAgent
 from agent_core.base.context import AgentContext
-from agent_core.errors import LLMError, ToolExecutionError
+from agent_core.errors import LLMContextWindowError, LLMError, ToolExecutionError
 from agent_core.handlers.base import AgentHandler
+from agent_core.observability.event_log import RunEventLog
 from agent_core.runtime.events import (
     RunCancelled,
     RunCompleted,
@@ -29,8 +31,16 @@ class TurnRunner:
     wraps that call with run identifiers, state transitions, and runtime events.
     """
 
-    def __init__(self, session_id: str = "") -> None:
+    def __init__(
+        self,
+        session_id: str = "",
+        *,
+        log_dir: str | Path | None = None,
+        enable_event_log: bool = True,
+    ) -> None:
         self.session_id = session_id
+        self.log_dir = log_dir
+        self.enable_event_log = enable_event_log
 
     async def run(
         self,
@@ -46,10 +56,17 @@ class TurnRunner:
         session_id = self.session_id or context.session_id or context.conversation_id or context.request_id
         state = RunState(run_id=run_id, session_id=session_id, turn_id=turn_id)
         events: list[RuntimeEvent] = []
+        event_log = (
+            RunEventLog(run_id, base_dir=self.log_dir)
+            if self.enable_event_log
+            else None
+        )
         started_at = time.perf_counter()
 
         async def emit(event: RuntimeEvent) -> None:
             events.append(event)
+            if event_log is not None:
+                event_log.append(event)
             if on_event is None:
                 return
             result = on_event(event)
@@ -60,6 +77,8 @@ class TurnRunner:
         context.extras["turn_id"] = turn_id
         context.extras["runtime_events"] = events
         context.extras["run_state"] = state
+        if event_log is not None:
+            context.extras["run_event_log_path"] = str(event_log.path)
 
         state.mark_running()
         await emit(
@@ -111,6 +130,8 @@ class TurnRunner:
 
     @staticmethod
     def _classify(error: BaseException) -> TerminalReason:
+        if isinstance(error, LLMContextWindowError):
+            return TerminalReason.CONTEXT_EXCEEDED
         if isinstance(error, ToolExecutionError):
             return TerminalReason.TOOL_FAILED
         if isinstance(error, LLMError):

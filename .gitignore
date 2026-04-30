@@ -6,6 +6,8 @@
 .env.*
 !.env.example
 .DS_Store
+.continue/
+logs/
 
 # Coverage
 .coverage

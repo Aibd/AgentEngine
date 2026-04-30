@@ -58,6 +58,38 @@ never see partial tool calls.
 reqId / errorMsg / resultMap / conversation_id / finished` so frontends do
 not need to change.
 
+### Runtime events are internal diagnostics
+
+`TurnRunner` records semantic runtime events separately from the public SSE
+stream. `RuntimeEvent` objects live under `agent_core.runtime.events`; SSE
+protocol names live under `agent_core.stream.events.EventType`. Keep these
+layers separate so the internal lifecycle model can evolve without changing
+front-end contracts.
+
+Set `USE_LEGACY_RUNNER=true` to bypass `TurnRunner` and use the original
+service-to-handler path during rollout or incident recovery:
+
+```powershell
+$env:USE_LEGACY_RUNNER='true'
+uv run --extra dev pytest -q
+Remove-Item Env:\USE_LEGACY_RUNNER
+```
+
+### Run event logs
+
+Runtime events are appended to jsonl files under:
+
+```text
+${AGENT_CORE_LOG_DIR:-logs}/runs/<YYYY-MM-DD>/<run_id>.jsonl
+```
+
+Each line is one serialized runtime event with `event_type`, `run_id`,
+`turn_id`, and a timestamp. For local debugging, inspect the file referenced by
+`context.extras["run_event_log_path"]`. If a provider reports a context-window
+failure, it should be represented as `LLMContextWindowError`; `TurnRunner`
+records that as `terminal_reason="context_exceeded"` so later planning can use
+real data before adding any TokenBudget or compaction layer.
+
 ## Migration rule
 
 Do not move or delete legacy code first. Add adapters and compatibility
