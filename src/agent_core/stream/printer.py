@@ -47,19 +47,20 @@ class Printer:
             except ValueError:
                 finished = False
 
-        is_dict = isinstance(data, dict)
-        is_result_like = type_str in {EventType.RESULT.value, EventType.TOOL_RESULT.value, EventType.FINAL_RESULT.value}
+        # Build response / resultMap per event type to match the legacy
+        # GptProcessResult contract consumed by the frontend.
+        response, result_map = _build_response(type_str, data)
 
         error_msg = _error_message(data) if type_str == EventType.ERROR.value else None
 
         event = {
             "responseType": type_str,
-            "response": data,
-            "responseAll": data,
+            "response": response,
+            "responseAll": "",
             "useTimes": 0,
             "reqId": self.request_id,
             "errorMsg": error_msg,
-            "resultMap": data if is_dict and is_result_like else None,
+            "resultMap": result_map,
             "conversation_id": self.conversation_id,
             "finished": bool(finished),
         }
@@ -105,7 +106,7 @@ class Printer:
     # -- Convenience shortcuts -----------------------------------------
 
     async def start(self, query: str) -> None:
-        await self.send(EventType.START, query)
+        await self.send(EventType.START, {"query": query})
 
     async def text(self, content: str) -> None:
         await self.send(EventType.TEXT, content)
@@ -114,12 +115,14 @@ class Printer:
         await self.send(EventType.TASK, description)
 
     async def tool_thought(self, content: str) -> None:
-        await self.send(EventType.TOOL_THOUGHT, {"tool_thought": content})
+        await self.send(EventType.TOOL_THOUGHT, {"content": content})
 
     async def tool_result(self, tool: str, result: Any) -> None:
         await self.send(EventType.TOOL_RESULT, {"tool": tool, "toolResult": result})
 
     async def result(self, data: Any) -> None:
+        if isinstance(data, dict) and "taskSummary" not in data:
+            data = {"taskSummary": data.get("result", str(data)), **data}
         await self.send(EventType.RESULT, data, finished=True)
 
     async def error(self, error: str | BaseException | dict[str, Any]) -> None:
@@ -140,3 +143,40 @@ def _error_message(data: Any) -> str:
         message = data.get("message")
         return message if isinstance(message, str) else str(data)
     return str(data)
+
+
+def _build_response(type_str: str, data: Any) -> tuple[Any, Any]:
+    """Return ``(response, resultMap)`` matching the legacy GptProcessResult contract.
+
+    Legacy mapping rules:
+    - ``start``      → response = ``"开始处理: {query}"``
+    - ``done``       → response = ``"任务完成"``
+    - ``task``       → response = data + ``"\\n"``
+    - ``result``     → response = data["taskSummary"], resultMap = data
+    - ``tool_result``→ response = data["toolResult"], resultMap = data
+    - ``search_result`` / ``final_result`` → response = data, resultMap = None
+    - others         → response = data, resultMap = None
+    """
+    if type_str == EventType.START.value:
+        if isinstance(data, dict):
+            return f"开始处理: {data.get('query', '')}", None
+        return f"开始处理: {data}", None
+
+    if type_str == EventType.DONE.value:
+        return "任务完成", None
+
+    if type_str == EventType.TASK.value:
+        return str(data) + "\n", None
+
+    if type_str == EventType.RESULT.value:
+        if isinstance(data, dict):
+            return data.get("taskSummary", data.get("result", "")), data
+        return str(data), None
+
+    if type_str == EventType.TOOL_RESULT.value:
+        if isinstance(data, dict):
+            return data.get("toolResult", ""), data
+        return str(data), None
+
+    # tool_thought, search_result, final_result, error, text, …
+    return data, None

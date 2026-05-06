@@ -1,10 +1,15 @@
 ﻿"""Agent context — auto-registers SkillTool so every agent gets skill support."""
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent_core.llm.client import LLMClient
 from agent_core.stream.printer import Printer
 from agent_core.tools.collection import ToolCollection
+
+if TYPE_CHECKING:
+    from agent_core.persistence.port import PersistencePort
 
 
 @dataclass
@@ -18,6 +23,7 @@ class AgentContext:
     conversation_id: str = ""
     user: Any = None
     db: Any = None
+    persistence: PersistencePort | None = None
     extras: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

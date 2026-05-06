@@ -58,6 +58,10 @@ class ReActHandler(AgentHandler):
                 agent.max_steps,
             )
 
+            # Load prior conversation history if persistence is available.
+            if context.persistence and context.conversation_id:
+                await agent.memory.load_from_db(context.persistence, context.conversation_id)
+
             if context.printer:
                 await context.printer.send(EventType.START, query)
 
@@ -98,6 +102,16 @@ class ReActHandler(AgentHandler):
                 await context.printer.send(EventType.ERROR, error_to_dict(exc), finished=True)
             raise
         finally:
+            # Persist conversation messages before teardown.
+            if context.persistence and context.conversation_id:
+                try:
+                    await agent.memory.save_to_db(context.persistence, context.conversation_id)
+                except Exception:
+                    logger.exception(
+                        "memory_save_error request_id=%s conversation_id=%s",
+                        context.request_id,
+                        context.conversation_id,
+                    )
             await self._teardown(agent, context, primary_error)
 
     async def _teardown(
@@ -285,10 +299,15 @@ class ReActHandler(AgentHandler):
         async def on_tool_event(event: RuntimeEvent) -> None:
             runtime_events.append(event)
 
+        async def on_stream_event(event_type: str, data: Any) -> None:
+            if context.printer:
+                await context.printer.send(event_type, data)
+
         executor = ToolExecutor(
             run_id=str(context.extras.get("run_id", context.request_id)),
             turn_id=str(context.extras.get("turn_id", context.request_id)),
             on_event=on_tool_event,
+            on_stream_event=on_stream_event,
             timeout_seconds=self.tool_timeout_seconds,
         )
 
