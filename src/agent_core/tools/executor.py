@@ -16,11 +16,12 @@ from agent_core.runtime.events import (
     ToolCallFailed,
     ToolCallStarted,
 )
-from agent_core.tools.base import Tool
+from agent_core.tools.base import StreamingTool, Tool, ToolStreamEvent
 
 logger = logging.getLogger(__name__)
 
 EventCallback = Callable[[RuntimeEvent], Awaitable[None] | None]
+StreamCallback = Callable[[str, Any], Awaitable[None] | None]
 
 
 @dataclass(slots=True)
@@ -44,11 +45,13 @@ class ToolExecutor:
         run_id: str,
         turn_id: str,
         on_event: EventCallback | None = None,
+        on_stream_event: StreamCallback | None = None,
         timeout_seconds: float | None = None,
     ) -> None:
         self.run_id = run_id
         self.turn_id = turn_id
         self.on_event = on_event
+        self.on_stream_event = on_stream_event
         self.timeout_seconds = timeout_seconds
 
     async def execute(
@@ -58,16 +61,21 @@ class ToolExecutor:
         *,
         tool_call_id: str | None = None,
     ) -> ToolExecutionResult:
+        if isinstance(tool, StreamingTool):
+            return await self._execute_streaming(tool, arguments, tool_call_id=tool_call_id)
+        return await self._execute_plain(tool, arguments, tool_call_id=tool_call_id)
+
+    # -- Plain (non-streaming) execution ----------------------------------
+
+    async def _execute_plain(
+        self,
+        tool: Tool,
+        arguments: dict[str, Any],
+        *,
+        tool_call_id: str | None = None,
+    ) -> ToolExecutionResult:
         call_id = tool_call_id or f"tc_{uuid.uuid4().hex[:10]}"
-        await self._emit(
-            ToolCallStarted(
-                run_id=self.run_id,
-                turn_id=self.turn_id,
-                tool_call_id=call_id,
-                tool_name=tool.name,
-                arguments=arguments,
-            )
-        )
+        await self._emit_started(call_id, tool.name, arguments)
         if tool.is_destructive:
             logger.warning(
                 "destructive tool invoked: name=%s arg_keys=%s",
@@ -82,68 +90,127 @@ class ToolExecutor:
         except asyncio.TimeoutError:
             elapsed = time.perf_counter() - started_at
             message = f"Tool timeout after {timeout}s: {tool.name}"
-            await self._emit(
-                ToolCallFailed(
-                    run_id=self.run_id,
-                    turn_id=self.turn_id,
-                    tool_call_id=call_id,
-                    tool_name=tool.name,
-                    error_type="TimeoutError",
-                    error_message=message,
-                    elapsed_seconds=elapsed,
-                )
-            )
+            await self._emit_failed(call_id, tool.name, "TimeoutError", message, elapsed)
             return ToolExecutionResult(
-                tool_name=tool.name,
-                ok=False,
-                content=message,
-                error=message,
-                elapsed_seconds=elapsed,
-                tool_call_id=call_id,
+                tool_name=tool.name, ok=False, content=message, error=message,
+                elapsed_seconds=elapsed, tool_call_id=call_id,
             )
         except Exception as exc:
             elapsed = time.perf_counter() - started_at
             message = f"Tool error: {exc}"
-            await self._emit(
-                ToolCallFailed(
-                    run_id=self.run_id,
-                    turn_id=self.turn_id,
-                    tool_call_id=call_id,
-                    tool_name=tool.name,
-                    error_type=type(exc).__name__,
-                    error_message=str(exc),
-                    elapsed_seconds=elapsed,
-                )
-            )
+            await self._emit_failed(call_id, tool.name, type(exc).__name__, str(exc), elapsed)
             return ToolExecutionResult(
-                tool_name=tool.name,
-                ok=False,
-                content=message,
-                error=message,
-                elapsed_seconds=elapsed,
-                tool_call_id=call_id,
+                tool_name=tool.name, ok=False, content=message, error=message,
+                elapsed_seconds=elapsed, tool_call_id=call_id,
             )
 
         elapsed = time.perf_counter() - started_at
         content, truncated = self._summarize(raw, tool)
+        await self._emit_completed(call_id, tool.name, content, elapsed)
+        return ToolExecutionResult(
+            tool_name=tool.name, ok=True, content=content, raw=raw,
+            truncated=truncated, elapsed_seconds=elapsed, tool_call_id=call_id,
+        )
+
+    # -- Streaming execution ----------------------------------------------
+
+    async def _execute_streaming(
+        self,
+        tool: StreamingTool,
+        arguments: dict[str, Any],
+        *,
+        tool_call_id: str | None = None,
+    ) -> ToolExecutionResult:
+        call_id = tool_call_id or f"tc_{uuid.uuid4().hex[:10]}"
+        await self._emit_started(call_id, tool.name, arguments)
+        if tool.is_destructive:
+            logger.warning(
+                "destructive tool invoked: name=%s arg_keys=%s",
+                tool.name,
+                sorted(arguments.keys()),
+            )
+
+        timeout = self.timeout_seconds if self.timeout_seconds is not None else tool.timeout_seconds
+        started_at = time.perf_counter()
+        accumulated_parts: list[str] = []
+        final_data: Any = None
+        error_holder: list[BaseException] = []
+
+        async def _consume() -> None:
+            nonlocal final_data
+            async for event in tool.run_stream(**arguments):
+                # Forward intermediate events to the stream callback (Printer).
+                if self.on_stream_event and not event.is_final:
+                    result = self.on_stream_event(event.event_type, event.data)
+                    if inspect.isawaitable(result):
+                        await result
+
+                if event.is_final:
+                    final_data = event.data
+                else:
+                    accumulated_parts.append(str(event.data))
+
+        try:
+            await asyncio.wait_for(_consume(), timeout=timeout)
+        except asyncio.TimeoutError:
+            elapsed = time.perf_counter() - started_at
+            message = f"Tool timeout after {timeout}s: {tool.name}"
+            await self._emit_failed(call_id, tool.name, "TimeoutError", message, elapsed)
+            return ToolExecutionResult(
+                tool_name=tool.name, ok=False, content=message, error=message,
+                elapsed_seconds=elapsed, tool_call_id=call_id,
+            )
+        except Exception as exc:
+            elapsed = time.perf_counter() - started_at
+            message = f"Tool error: {exc}"
+            await self._emit_failed(call_id, tool.name, type(exc).__name__, str(exc), elapsed)
+            return ToolExecutionResult(
+                tool_name=tool.name, ok=False, content=message, error=message,
+                elapsed_seconds=elapsed, tool_call_id=call_id,
+            )
+
+        elapsed = time.perf_counter() - started_at
+
+        # Build the final content: prefer final_data, fallback to accumulated.
+        if final_data is not None:
+            content, truncated = self._summarize(final_data, tool)
+        else:
+            raw_text = "\n".join(accumulated_parts)
+            content, truncated = self._summarize(raw_text, tool)
+
+        await self._emit_completed(call_id, tool.name, content, elapsed)
+        return ToolExecutionResult(
+            tool_name=tool.name, ok=True, content=content,
+            raw=final_data if final_data is not None else accumulated_parts,
+            truncated=truncated, elapsed_seconds=elapsed, tool_call_id=call_id,
+        )
+
+    # -- Event emission helpers -------------------------------------------
+
+    async def _emit_started(self, call_id: str, tool_name: str, arguments: dict) -> None:
         await self._emit(
-            ToolCallCompleted(
-                run_id=self.run_id,
-                turn_id=self.turn_id,
-                tool_call_id=call_id,
-                tool_name=tool.name,
-                result_summary=content[:200],
-                elapsed_seconds=elapsed,
+            ToolCallStarted(
+                run_id=self.run_id, turn_id=self.turn_id,
+                tool_call_id=call_id, tool_name=tool_name, arguments=arguments,
             )
         )
-        return ToolExecutionResult(
-            tool_name=tool.name,
-            ok=True,
-            content=content,
-            raw=raw,
-            truncated=truncated,
-            elapsed_seconds=elapsed,
-            tool_call_id=call_id,
+
+    async def _emit_completed(self, call_id: str, tool_name: str, content: str, elapsed: float) -> None:
+        await self._emit(
+            ToolCallCompleted(
+                run_id=self.run_id, turn_id=self.turn_id,
+                tool_call_id=call_id, tool_name=tool_name,
+                result_summary=content[:200], elapsed_seconds=elapsed,
+            )
+        )
+
+    async def _emit_failed(self, call_id: str, tool_name: str, error_type: str, message: str, elapsed: float) -> None:
+        await self._emit(
+            ToolCallFailed(
+                run_id=self.run_id, turn_id=self.turn_id,
+                tool_call_id=call_id, tool_name=tool_name,
+                error_type=error_type, error_message=message, elapsed_seconds=elapsed,
+            )
         )
 
     async def _emit(self, event: RuntimeEvent) -> None:
