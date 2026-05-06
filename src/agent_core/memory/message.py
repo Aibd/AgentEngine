@@ -79,3 +79,22 @@ class Message:
     @classmethod
     def tool(cls, content: str, tool_call_id: str | None = None) -> "Message":
         return cls(Role.TOOL, content, tool_call_id=tool_call_id)
+
+    @classmethod
+    def from_openai(cls, data: dict[str, Any]) -> "Message":
+        """Reconstruct a Message from an OpenAI-format dict (as produced by ``to_openai``)."""
+        role = Role(data.get("role", "user"))
+        content = data.get("content", "")
+        # Multimodal content is a list; extract the text part.
+        if isinstance(content, list):
+            text_parts = [p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]
+            content = "".join(text_parts)
+        return cls(
+            role=role,
+            content=content or "",
+            reasoning_content=data.get("reasoning_content", ""),
+            name=data.get("name"),
+            tool_call_id=data.get("tool_call_id"),
+            tool_calls=data.get("tool_calls"),
+            base64_image=None,  # not persisted
+        )
