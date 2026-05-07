@@ -1,7 +1,24 @@
-import type { SseEvent } from "./types";
+import type { ResponseType, SseEvent } from "./types";
 
 type TraceHandler = (event: SseEvent) => void;
 type DoneHandler = () => void;
+
+const EVENT_TYPES: ResponseType[] = [
+  "start",
+  "step",
+  "thinking",
+  "text",
+  "tool_call_start",
+  "tool_result",
+  "step_end",
+  "usage",
+  "done",
+  "error",
+  "task",
+  "tool_thought",
+  "search_result",
+  "final_result",
+];
 
 export function runAgentTrace(
   query: string,
@@ -30,9 +47,14 @@ export function runAgentTrace(
 
 export function connectEventSource(url: string, onEvent: TraceHandler): () => void {
   const source = new EventSource(url);
-  source.onmessage = (message) => {
-    onEvent(JSON.parse(message.data) as SseEvent);
-  };
+  for (const eventType of EVENT_TYPES) {
+    source.addEventListener(eventType, (message) => {
+      onEvent({
+        event: eventType,
+        data: JSON.parse((message as MessageEvent).data) as Record<string, unknown>,
+      });
+    });
+  }
   return () => source.close();
 }
 
@@ -62,29 +84,55 @@ async function consumeSse(
     const parts = buffer.split("\n\n");
     buffer = parts.pop() ?? "";
     for (const part of parts) {
-      const data = part
-        .split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trimStart())
-        .join("\n");
-      if (data) {
-        onEvent(JSON.parse(data) as SseEvent);
+      const parsed = parseSsePart(part);
+      if (parsed) {
+        onEvent(parsed);
       }
     }
   }
 }
 
+function parseSsePart(part: string): SseEvent | null {
+  let event = "message";
+  const dataLines: string[] = [];
+
+  for (const rawLine of part.split("\n")) {
+    const line = rawLine.trimEnd();
+    if (!line || line.startsWith(":")) {
+      continue;
+    }
+    if (line.startsWith("event:")) {
+      event = line.slice(6).trim();
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  }
+
+  if (!dataLines.length || !isResponseType(event)) {
+    return null;
+  }
+
+  return {
+    event,
+    data: JSON.parse(dataLines.join("\n")) as Record<string, unknown>,
+  };
+}
+
 function createErrorEvent(error: unknown): SseEvent {
   const message = error instanceof Error ? error.message : String(error);
   return {
-    responseType: "error",
-    response: { message },
-    responseAll: "",
-    useTimes: 0,
-    reqId: "web-client",
-    errorMsg: message,
-    resultMap: null,
-    conversation_id: "web-conversation",
-    finished: true,
+    event: "error",
+    data: {
+      code: "web_stream_error",
+      message,
+      category: "runtime",
+      retryable: false,
+      request_id: "web-client",
+      conversation_id: "web-conversation",
+    },
   };
+}
+
+function isResponseType(value: string): value is ResponseType {
+  return EVENT_TYPES.includes(value as ResponseType);
 }

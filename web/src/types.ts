@@ -7,24 +7,16 @@ export type ResponseType =
   | "tool_result"
   | "step_end"
   | "usage"
-  | "result"
-  | "error"
   | "done"
+  | "error"
   | "task"
   | "tool_thought"
   | "search_result"
   | "final_result";
 
 export type SseEvent = {
-  responseType: ResponseType;
-  response: unknown;
-  responseAll: string;
-  useTimes: number;
-  reqId: string;
-  errorMsg: string | null;
-  resultMap: Record<string, unknown> | null;
-  conversation_id: string;
-  finished: boolean;
+  event: ResponseType;
+  data: Record<string, unknown>;
 };
 
 export type UsageSummary = {

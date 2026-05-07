@@ -11,71 +11,72 @@ export function createEmptyTrace(): RunTrace {
 }
 
 export function reduceTraceEvent(trace: RunTrace, event: SseEvent): RunTrace {
-  switch (event.responseType) {
+  const data = event.data;
+
+  switch (event.event) {
     case "start":
       return {
         ...trace,
-        requestId: event.reqId,
-        conversationId: event.conversation_id,
-        query: getQuery(event),
+        requestId: stringValue(data.request_id),
+        conversationId: stringValue(data.conversation_id),
+        query: stringValue(data.query),
         status: "running",
         steps: [],
         usage: undefined,
         finalText: undefined,
         error: undefined,
+        errorPayload: undefined,
       };
     case "step":
       return {
         ...trace,
-        steps: [...trace.steps, createStep(event)],
+        steps: [...trace.steps, createStep(data)],
       };
     case "thinking":
       return updateCurrentStep(trace, (step) => ({
         ...step,
-        thinking: [...step.thinking, String(event.response ?? "")],
+        thinking: [...step.thinking, stringValue(data.delta)],
       }));
     case "text":
       return updateCurrentStep(trace, (step) => ({
         ...step,
-        text: [...step.text, String(event.response ?? "")],
+        text: [...step.text, stringValue(data.delta)],
       }));
     case "tool_call_start":
       return updateCurrentStep(trace, (step) => ({
         ...step,
-        tools: upsertTool(step.tools, createTool(event)),
+        tools: upsertTool(step.tools, createTool(data)),
       }));
     case "tool_result":
       return updateCurrentStep(trace, (step) => ({
         ...step,
-        tools: completeTool(step.tools, event),
+        tools: completeTool(step.tools, data),
       }));
     case "step_end":
       return updateCurrentStep(trace, (step) => ({
         ...step,
         status: "completed",
-        hasToolCalls: Boolean(event.resultMap?.has_tool_calls),
-        elapsedSeconds: toNumber(event.resultMap?.elapsed_seconds),
+        hasToolCalls: Boolean(data.has_tool_calls),
+        elapsedSeconds: msToSeconds(data.elapsed_ms),
       }));
     case "usage":
       return {
         ...trace,
-        usage: createUsage(event),
+        usage: createUsage(data),
       };
-    case "result":
+    case "done":
     case "final_result":
       return {
         ...trace,
         status: "completed",
-        finalText: getFinalText(event),
+        finalText: stringValue(data.result ?? data.value),
       };
     case "error": {
-      const payload = (typeof event.response === "object" && event.response !== null
-        ? (event.response as Record<string, unknown>)
-        : event.resultMap) as RunTrace["errorPayload"];
+      const payload = data as RunTrace["errorPayload"];
       return {
         ...trace,
         status: "failed",
-        error: event.errorMsg ?? (payload?.message ?? "Unknown error"),
+        error: payload?.message ?? "Unknown error",
         errorPayload: payload,
       };
     }
@@ -88,9 +89,9 @@ export function reduceTraceEvents(events: SseEvent[]): RunTrace {
   return events.reduce(reduceTraceEvent, createEmptyTrace());
 }
 
-function createStep(event: SseEvent): StepTrace {
+function createStep(data: Record<string, unknown>): StepTrace {
   return {
-    turn: toNumber(event.resultMap?.turn) || 1,
+    turn: toNumber(data.turn) || 1,
     status: "running",
     thinking: [],
     text: [],
@@ -98,28 +99,26 @@ function createStep(event: SseEvent): StepTrace {
   };
 }
 
-function createTool(event: SseEvent): ToolTrace {
-  const resultMap = event.resultMap ?? {};
+function createTool(data: Record<string, unknown>): ToolTrace {
   return {
-    id: String(resultMap.tool_call_id ?? crypto.randomUUID()),
-    name: String(resultMap.tool ?? event.response ?? "tool"),
-    arguments: asRecord(resultMap.arguments),
+    id: stringValue(data.tool_call_id) || crypto.randomUUID(),
+    name: stringValue(data.tool) || "tool",
+    arguments: asRecord(data.arguments),
     status: "running",
   };
 }
 
-function completeTool(tools: ToolTrace[], event: SseEvent): ToolTrace[] {
-  const resultMap = event.resultMap ?? {};
-  const id = String(resultMap.tool_call_id ?? "");
-  const ok = resultMap.ok !== false;
+function completeTool(tools: ToolTrace[], data: Record<string, unknown>): ToolTrace[] {
+  const id = stringValue(data.tool_call_id);
+  const ok = data.ok !== false;
   const updated: ToolTrace = {
     id,
-    name: String(resultMap.tool ?? "tool"),
+    name: stringValue(data.tool) || "tool",
     arguments: {},
     status: ok ? "completed" : "failed",
-    result: resultMap.toolResult ?? event.response,
-    elapsedSeconds: toNumber(resultMap.elapsed_seconds),
-    errorType: typeof resultMap.error_type === "string" ? resultMap.error_type : undefined,
+    result: data.result,
+    elapsedSeconds: msToSeconds(data.elapsed_ms),
+    errorType: typeof data.error_type === "string" ? data.error_type : undefined,
   };
 
   if (!id) {
@@ -162,37 +161,25 @@ function updateCurrentStep(trace: RunTrace, updater: (step: StepTrace) => StepTr
   };
 }
 
-function createUsage(event: SseEvent): UsageSummary {
+function createUsage(data: Record<string, unknown>): UsageSummary {
   return {
-    promptTokens: toNumber(event.resultMap?.prompt_tokens),
-    completionTokens: toNumber(event.resultMap?.completion_tokens),
-    totalTokens: toNumber(event.resultMap?.total_tokens),
-    totalSeconds: toNumber(event.resultMap?.total_seconds),
+    promptTokens: toNumber(data.prompt_tokens),
+    completionTokens: toNumber(data.completion_tokens),
+    totalTokens: toNumber(data.total_tokens),
+    totalSeconds: toNumber(data.total_seconds),
   };
-}
-
-function getQuery(event: SseEvent): string {
-  if (event.resultMap && typeof event.resultMap.query === "string") {
-    return event.resultMap.query;
-  }
-  if (typeof event.response === "string") {
-    return event.response.replace(/^.*?:\s*/, "");
-  }
-  return "";
-}
-
-function getFinalText(event: SseEvent): string {
-  if (event.resultMap && typeof event.resultMap.result === "string") {
-    return event.resultMap.result;
-  }
-  if (event.resultMap && typeof event.resultMap.taskSummary === "string") {
-    return event.resultMap.taskSummary;
-  }
-  return String(event.response ?? "");
 }
 
 function toNumber(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function msToSeconds(value: unknown): number {
+  return toNumber(value) / 1000;
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

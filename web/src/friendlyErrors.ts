@@ -1,7 +1,7 @@
 /**
- * User-facing translations for AgentCoreError codes coming from the SSE error
- * payload's resultMap. Mirror of scripts/renderers/friendly_errors.py — keep
- * the two in sync when adding new codes.
+ * User-facing translations for AgentCoreError codes coming from SSE v2 error
+ * data. Mirror of scripts/renderers/friendly_errors.py - keep the two in sync
+ * when adding new codes.
  */
 
 export type FriendlyError = {
@@ -14,49 +14,49 @@ export type FriendlyError = {
 const TEMPLATES: Record<string, [string, string, string]> = {
   llm_rate_limited: [
     "服务繁忙",
-    "上游模型限流了，请稍后再试。",
-    "如果反复出现，可以降低并发或升级供应商套餐。",
+    "模型服务正在限流，请稍后再试。",
+    "稍等片刻后重试，或降低请求频率。",
   ],
   llm_timeout: [
     "请求超时",
-    "模型在规定时间内没有返回。",
-    "可以重试一次，或把问题拆得更短。",
+    "模型响应时间过长。",
+    "可以重试，或缩短提示词和工具步骤。",
   ],
   llm_connection_error: [
-    "无法连接模型服务",
-    "网络或上游服务不可用。",
-    "检查网络、API 端点 (LLM_BASE_URL) 和供应商状态页。",
+    "连接失败",
+    "无法连接到配置的模型服务。",
+    "检查 LLM_BASE_URL 和网络连接。",
   ],
   llm_stream_error: [
     "流式响应中断",
-    "模型在生成过程中断开了连接。",
-    "重试通常能恢复；持续出现请检查代理或网关。",
+    "模型流式响应意外结束。",
+    "请重试；如果持续出现，检查模型服务日志。",
   ],
   llm_context_window_exceeded: [
-    "对话超出模型上下文",
-    "累计输入太长，模型无法继续。",
-    "请新开一个会话，或把任务拆小后再试。",
+    "上下文过长",
+    "提示词超过了模型上下文窗口。",
+    "减少输入内容，或新开会话后再试。",
   ],
   llm_http_error: [
-    "模型服务返回错误",
-    "上游模型返回了非 2xx 响应。",
-    "查看 errorMsg / details 里的状态码定位问题。",
+    "模型接口错误",
+    "模型 API 返回了非成功响应。",
+    "查看 SSE error data 和 details 字段。",
   ],
   tool_execution_error: [
     "工具执行失败",
-    "工具在执行时抛出了异常。",
-    "查看工具结果里的错误细节，或在另一种参数下重试。",
+    "工具运行时抛出了错误。",
+    "检查工具结果和 runtime JSONL 日志。",
   ],
-  agent_cancelled: ["运行已取消", "用户中止了任务。", ""],
+  agent_cancelled: ["运行已取消", "本次运行已取消。", ""],
   runtime_execution_error: [
-    "运行时错误",
-    "Agent 运行过程中遇到了未预期的状态。",
-    "如果反复出现，请抓 logs/runs/<日期>/<run_id>.jsonl 排查。",
+    "运行失败",
+    "Agent 运行时发生错误。",
+    "查看 logs/runs/<date>/<run_id>.jsonl 获取详情。",
   ],
   unexpected_error: [
-    "未预期错误",
-    "发生了一个未分类的异常。",
-    "请把错误信息和重现步骤反馈给开发者。",
+    "未知错误",
+    "发生了未预期的错误。",
+    "检查运行日志和堆栈信息。",
   ],
 };
 

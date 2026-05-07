@@ -79,7 +79,7 @@ export function App() {
             trace: reduceTraceEvent(session.trace, event),
           })),
         );
-        if (event.finished || event.responseType === "error") {
+        if (event.event === "done" || event.event === "error") {
           setIsRunning(false);
         }
       },
