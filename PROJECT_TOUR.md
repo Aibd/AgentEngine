@@ -13,7 +13,7 @@
 | 角色 | 例子 | 长什么样 |
 |---|---|---|
 | 普通对话 Agent | `general_chat` | 没工具,纯聊天 |
-| 多步研究 Agent | `deep_research` | 注册 `PlanningTool`,边规划边调工具 |
+| 多步研究 Agent | `deep_research` | 不挂显式规划工具,靠模型自己拆步骤 + 调工具 |
 | 老代码适配器 | `file_clerk` | 用 `LegacyHandler` 包住旧实现,慢慢迁移 |
 
 ---
@@ -49,7 +49,7 @@
 │ ③ base/           │ │ ④ llm/   │ │ ⑤ memory/ │ │ ⑥ tools/           │
 │ BaseAgent         │ │ OpenAI-  │ │ Message · │ │ Tool · Collection ·│
 │ AgentContext      │ │ Compat   │ │ Memory    │ │ Registry · Executor│
-│ AgentState        │ │ Client   │ │ (自动裁剪) │ │ + PlanningTool等   │
+│ AgentState        │ │ Client   │ │ (自动裁剪) │ │ + SkillTool 等     │
 └───────────────────┘ └──────────┘ └───────────┘ └────────────────────┘
                                         │
                                         ▼
@@ -268,53 +268,74 @@ collection.to_openai_tools() │  → [{"type":"function",
                 下一轮 LLM 调用就能看到工具结果
 ```
 
-**两个内置工具:**
+**内置工具:**
 
 | 工具 | 作用 |
 |---|---|
-| `PlanningTool` | 让 LLM 写"步骤清单",把多步任务显式化(Deep Research 用它) |
 | `SkillTool` | 自动注入 Claude Code 风格的 skills(扫 `.agent/skills/`),让 Agent 拿来即用 |
+
+> Deep Research 采用模型原生规划：模型先拆解任务，再通过 `next_step_prompt()` 引导逐步执行。执行过程会被 `step`、`thinking`、`tool_call_start`、`tool_result`、`step_end`、`usage`、`result` 这些事件展示出来。
 
 ---
 
 ## 7. 流式协议(给前端的契约)
 
-每条事件被 `Printer` 包成同一个信封:
+> 完整规范见 [docs/STREAMING_PROTOCOL.md](docs/STREAMING_PROTOCOL.md)。
+
+每条事件被 `Printer` 包成同一个 SSE 信封:
 
 ```
 ┌────────────────────── SSE 信封 (Printer.send) ──────────────────────┐
 │ {                                                                    │
-│   "responseType":   "start" | "text" | "task" | "tool_thought"      │
-│                   | "tool_result" | "result" | "error" | "done"     │
-│   "response":       <主体数据>                                       │
-│   "responseAll":    <主体数据(冗余,兼容旧前端)>                    │
-│   "useTimes":       0,                                              │
-│   "reqId":          "<request_id>",                                 │
-│   "errorMsg":       null | "...",                                   │
-│   "resultMap":      null | {...},                                   │
-│   "conversation_id":"<conv_id>",                                    │
-│   "finished":       false | true     ← true = 整次会话结束          │
+│   "responseType":    <事件类型,见下表>                                │
+│   "response":        <主体文本(给老前端看)>                           │
+│   "responseAll":     ""                                              │
+│   "useTimes":        0,                                              │
+│   "reqId":           "<request_id>",                                 │
+│   "errorMsg":        null | "...",                                   │
+│   "resultMap":       null | {...}    ← 结构化数据,新前端读这个       │
+│   "conversation_id": "<conv_id>",                                    │
+│   "finished":        false | true                                    │
 │ }                                                                    │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-**前端事件序列(典型):**
+**事件类型表:**
 
+| responseType        | 时机                | resultMap 关键字段                                   | finished |
+|---------------------|---------------------|----------------------------------------------------|----------|
+| `start`             | run 启动            | —                                                  | false    |
+| `step`              | 第 N 轮开始         | `turn`                                             | false    |
+| `thinking`          | 模型 CoT 增量        | —(`response` 是 delta 字符串)                       | false    |
+| `text`              | 最终答案增量          | —(`response` 是 delta 字符串)                       | false    |
+| `tool_call_start`   | 工具开始执行          | `tool / arguments / tool_call_id`                  | false    |
+| `tool_result`       | 工具完成             | `tool / toolResult / ok / elapsed_seconds / tool_call_id / [error_type]` | false |
+| `step_end`          | 第 N 轮结束          | `turn / has_tool_calls / elapsed_seconds`          | false    |
+| `usage`             | run 结束前          | `prompt_tokens / completion_tokens / total_tokens / total_seconds` | false    |
+| `result`            | **终态:成功**       | `taskSummary / result`                             | **true** |
+| `error`             | **终态:失败**       | `code / message / category / retryable / [details]` | **true** |
+
+**典型事件序列(单轮无工具):**
 ```
-START ──► TEXT TEXT TEXT ... ──► TOOL_RESULT ──► TEXT TEXT ... ──► RESULT(finished=true)
-   │                                                                      │
-   │             多次 TEXT 是 LLM 流式打字效果                             │
-   │             TOOL_RESULT 是工具调用结果,夹杂在 TEXT 之间               │
-                                                                          ▼
-                                                        前端拼装最终回复 + 关闭 SSE
+start ──▶ step ──▶ thinking ... ──▶ text ... ──▶ step_end ──▶ usage ──▶ result
 ```
 
-**事件双轨并行:**
+**典型事件序列(两轮带工具):**
+```
+start ──▶ step ──▶ thinking ──▶ tool_call_start ──▶ tool_result ──▶ step_end
+                                                                          │
+                                ▼─── (loop) ────────────────────────────┘
+                                step ──▶ text ──▶ step_end ──▶ usage ──▶ result
+```
 
-| 通道 | 类型 | 给谁看 | 例子 |
-|---|---|---|---|
-| `EventStream` (前端 SSE) | `EventType` | 终端用户 | `TEXT`, `TOOL_RESULT`, `RESULT`, `ERROR` |
-| `RuntimeEvent` (内部) | `RuntimeEvent` 子类 | 后端日志、监控 | `RunStarted`, `ToolCallStarted`, `RunCompleted` |
+**事件双轨并行(刻意分层):**
+
+| 通道                       | 类型             | 给谁看           | 例子                                                  |
+|----------------------------|-----------------|------------------|------------------------------------------------------|
+| `EventStream`(前端 SSE)   | `EventType`      | 终端用户 / Web   | `text` / `tool_result` / `result` / `error`           |
+| `RuntimeEvent`(内部)       | `RuntimeEvent` 子类 | 后端日志 / 监控 | `RunStarted` / `ToolCallStarted` / `UsageReport` / `RunCompleted` |
+
+`Printer.from_runtime_event()` 提供两层之间的标准翻译。前端契约稳定 ↔ 内部模型可演进。
 
 `Printer.from_runtime_event()` 提供两层之间的标准翻译,你可以选择用或不用。
 
@@ -385,10 +406,10 @@ service = AgentOrchestrationService(config_path="config/agents.yaml")
 │ ─────────────────────────────────────────────────────────────────── │
 │ 用途   : 多步研究                                                    │
 │ Handler: ReActHandler                                                │
-│ 工具   : PlanningTool (在 setup() 里 add)                           │
-│ 特点   : system_prompt 强制 LLM 先做计划                             │
-│         next_step_prompt 每轮提醒"推进到下一步"                      │
-│         max_steps = 10,留足规划空间                                 │
+│ 工具   : 通过 SkillLoader 按名字加载;不挂显式 planning 工具          │
+│ 特点   : system_prompt 引导模型自己拆解任务、逐步执行、合成报告       │
+│         next_step_prompt 每轮提醒"推进下一个子任务"                  │
+│         max_steps = 10,留足思考空间                                 │
 └────────────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────┐
@@ -436,7 +457,7 @@ result = await service.run(
 )
 ```
 
-把 `agent_name` 换成 `deep_research`,LLM 会先调 `PlanningTool` 写个计划再答。
+把 `agent_name` 换成 `deep_research`,LLM 会自己先在思维链里拆好计划,再一步步答。
 
 ---
 
@@ -466,9 +487,24 @@ src/
 └─ services/
    └─ agent_orchestration_service.py  ← 应用入口
 
+scripts/
+├─ chat.py               ← 简单 CLI(打 raw 事件)
+├─ chat_pretty.py        ← Claude Code 风格 CLI(Rich 卡片)
+└─ renderers/
+   ├─ rich_renderer.py   ← 终端渲染器
+   └─ friendly_errors.py ← 错误码 → 用户语
+
+web/
+├─ src/App.tsx           ← React 应用主入口
+├─ src/types.ts          ← SseEvent / RunTrace / ErrorPayload
+├─ src/traceReducer.ts   ← SSE → UI 状态归约器
+├─ src/traceTransport.ts ← fetch + SSE 解析
+└─ src/friendlyErrors.ts ← 错误码 → 用户语(与 Python 镜像)
+
 config/agents.yaml      ← 开关 + 默认参数
 tests/                  ← 完整 pytest 套件(含 SSE 黄金兼容测试)
 docs/API.md             ← 公共契约文档
+docs/STREAMING_PROTOCOL.md ← SSE 协议规范(本文档的扩写版)
 run_agent.py            ← 五分钟体验脚本
 ```
 
@@ -489,7 +525,74 @@ run_agent.py            ← 五分钟体验脚本
 
 ---
 
-## 13. 你接下来可能想做什么
+## 13. 产品形态:终端 + Web 双前端
+
+同一份 SSE 事件流,被两个独立的渲染器消费:
+
+```
+                   AgentOrchestrationService.run()
+                              │
+                              ▼  (SSE 事件流)
+                       EventStream
+                       /         \
+                      /           \
+                     ▼             ▼
+        ┌────────────────┐    ┌─────────────────┐
+        │ scripts/       │    │ web/            │
+        │ chat_pretty.py │    │ React + Vite    │
+        │  Rich 卡片      │    │  折叠思考 + 工具卡 │
+        │ Claude Code 风格 │    │  Kimi 风格       │
+        └────────────────┘    └─────────────────┘
+```
+
+**终端 — Claude Code 风格静态卡片:**
+
+```
+─── 🤖 deep_research  调研 src/agent_core 的整体结构 ───
+
+  ▸ Turn 1
+    💭 Thinking (21 chars hidden — pass --show-reasoning expanded to view)
+┌─ 🔧 read_file ─────────────────────┐
+│ { "path": "README.md" }           │
+└────────────────────────────────────┘
+┌─ ✓ read_file · Result  (0.04s) ───┐
+│ # Agent Core Refactor             │
+└────────────────────────────────────┘
+
+  ▸ Turn 2
+┌─ 📝 Answer ────────────────────────┐
+│ 这个项目是一个 Agent Core 框架...   │
+└────────────────────────────────────┘
+┌──────── ✓ Done ────────────────────┐
+│         Total tokens  351          │
+│             Duration  2.00s        │
+└────────────────────────────────────┘
+```
+
+跑法:
+```bash
+PYTHONIOENCODING=utf-8 uv run python scripts/chat_pretty.py general_chat "你好"
+PYTHONIOENCODING=utf-8 uv run python scripts/chat_pretty.py deep_research "..." --show-reasoning expanded
+```
+
+**Web — React + FastAPI:**
+
+```
+后端:  uv run uvicorn services.web_api:app --port 8000
+前端:  cd web && npm run dev          # http://localhost:5173
+```
+
+后端的 `/api/runs/stream?query=...&agent_name=...` 直接 SSE 出 `Printer` 信封,前端 [traceReducer.ts](web/src/traceReducer.ts) 把流量归约成 `RunTrace`,UI 按 step / tool / final / usage 分卡片渲染。
+
+**两端共享一份「错误码 → 用户友好语」表:**
+- Python: [scripts/renderers/friendly_errors.py](scripts/renderers/friendly_errors.py)
+- TypeScript: [web/src/friendlyErrors.ts](web/src/friendlyErrors.ts)
+
+加新错误码时**必须**两边一起改,文档在 [docs/STREAMING_PROTOCOL.md](docs/STREAMING_PROTOCOL.md) 的标准码表。
+
+---
+
+## 14. 你接下来可能想做什么
 
 - **加一个新 Agent**:复制 `general_chat`,改 system prompt 和 setup,在 yaml 里登记。
 - **加一个新工具**:继承 `Tool`,加 `@register_tool("xxx")`,在 Agent 的 setup 里 add。

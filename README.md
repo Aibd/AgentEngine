@@ -1,73 +1,57 @@
 # Agent Core Refactor
 
-Standalone scaffold for the Agent module refactor. Lives outside the existing
-`gjsk_wiseagent_ai` project so the new core can evolve without breaking
-FileClerk or current deep research behavior.
+Agent 模块重构的独立脚手架。位于现有的 `gjsk_wiseagent_ai` 项目之外，以便新的核心可以在不破坏 FileClerk 或当前深度研究行为的情况下独立演进。
 
-## Layout
+## 目录结构
 
 ```
 src/
-  agent_core/    framework code, no business service imports
-    base/        BaseAgent (data container) + AgentContext + AgentState
+  agent_core/    框架代码，不依赖业务服务导入
+    base/        BaseAgent（数据容器）+ AgentContext + AgentState
     handlers/    ReActHandler / PipelineHandler / LegacyHandler
-    llm/         OpenAI-compatible client, mock client contract, env factory
-    memory/      Message + Memory (with trim + multimodal)
-    prompts/     PromptLoader (cached YAML)
-    registry/    decorator-based agent + handler registries
-    stream/      EventStream + Printer (full SSE envelope)
-    tools/       Tool / ToolCollection / Registry / PlanningTool
-  agents/        business agent declarations + legacy adapters
-  services/      application-facing entry point
-config/agents.yaml  agent enablement and default handler/model config
-tests/         pytest suite covering every framework module
+    llm/         OpenAI 兼容客户端、Mock 客户端契约、环境变量工厂
+    memory/      Message + Memory（支持裁剪 + 多模态）
+    prompts/     PromptLoader（缓存 YAML）
+    registry/    基于装饰器的 Agent + Handler 注册表
+    stream/      EventStream + Printer（完整 SSE 信封）
+    tools/       Tool / ToolCollection / Registry / ReadFileTool / SkillTool
+  agents/        业务 Agent 声明 + 旧版适配器
+  services/      面向应用的入口点
+config/agents.yaml  Agent 启用和默认处理器/模型配置
+tests/         覆盖每个框架模块的 pytest 测试套件
 ```
 
-## Architecture decisions
+## 架构决策
 
-### Loop logic lives in handlers, not agents
+### 循环逻辑放在 Handler 中，而不是 Agent 中
 
-`BaseAgent` is a pure context container holding `memory`, `state`, `current_step`,
-and three hooks subclasses can override:
+`BaseAgent` 是一个纯上下文容器，持有 `memory`、`state`、`current_step`，以及子类可以覆盖的三个钩子：
 
-- `setup()`: register tools, seed memory, inject extras
-- `system_prompt()`: return the system prompt string
-- `next_step_prompt()`: optional per-turn guidance
+- `setup()`：注册工具、初始化记忆、注入额外数据
+- `system_prompt()`：返回系统提示词字符串
+- `next_step_prompt()`：可选的每轮指导
 
-The actual think→act loop runs inside `ReActHandler` (or `PipelineHandler`,
-`LegacyHandler`). This keeps agents declarative and lets configuration
-(`agents.yaml`) decide which loop pattern any given agent uses without
-inheritance gymnastics.
+真正的 think→act 循环运行在 `ReActHandler`（或 `PipelineHandler`、`LegacyHandler`）内部。这使得 Agent 保持声明式，并且允许通过配置（`agents.yaml`）决定任何 Agent 使用哪种循环模式，而无需复杂的继承操作。
 
-### Tool calls flow as raw OpenAI dicts end-to-end
+### 工具调用以原始 OpenAI 字典形式端到端流动
 
-`LLMResponse.tool_calls` and `Message.tool_calls` both carry the OpenAI raw
-dict shape (`{id, type, function: {name, arguments}}`). No `ToolCall` dataclass
-in between. This means the assistant message written into memory can be sent
-back to the LLM verbatim on the next turn.
+`LLMResponse.tool_calls` 和 `Message.tool_calls` 都携带 OpenAI 原始字典格式（`{id, type, function: {name, arguments}}`）。中间没有 `ToolCall` 数据类。这意味着写入记忆的助手消息可以在下一轮原样发回给 LLM。
 
-### Streaming tool_calls are accumulated by index
+### 流式 tool_calls 按索引累积
 
-`OpenAICompatibleClient._collect_stream` rebuilds full `tool_calls` from
-`delta.tool_calls[*].function.arguments` chunks before returning. Handlers
-never see partial tool calls.
+`OpenAICompatibleClient._collect_stream` 在返回前从 `delta.tool_calls[*].function.arguments` 片段重建完整的 `tool_calls`。Handler 永远不会看到不完整的工具调用。
 
-### Printer envelope matches the existing SSE contract
+### Printer 信封与现有 SSE 契约匹配
 
-`Printer` emits dicts with `responseType / response / responseAll / useTimes /
-reqId / errorMsg / resultMap / conversation_id / finished` so frontends do
-not need to change.
+`Printer` 发出包含 `responseType / response / responseAll / useTimes / reqId / errorMsg / resultMap / conversation_id / finished` 的字典，因此前端无需更改。
 
-### Runtime events are internal diagnostics
+升级后的 trace 协议专为 Claude Code / Codex 风格的静态卡片设计：`start -> step -> thinking/text/tool_call_start/tool_result -> step_end -> usage -> result`。Web 渲染器应按步骤分组事件，在工具运行时将其显示为卡片，并在完成后将卡片冻结在原位，而不是重写历史。
 
-`TurnRunner` records semantic runtime events separately from the public SSE
-stream. `RuntimeEvent` objects live under `agent_core.runtime.events`; SSE
-protocol names live under `agent_core.stream.events.EventType`. Keep these
-layers separate so the internal lifecycle model can evolve without changing
-front-end contracts.
+### 运行时事件是内部诊断信息
 
-Set `USE_LEGACY_RUNNER=true` to bypass `TurnRunner` and use the original
-service-to-handler path during rollout or incident recovery:
+`TurnRunner` 将语义运行时事件与公共 SSE 流分开记录。`RuntimeEvent` 对象位于 `agent_core.runtime.events` 下；SSE 协议名称位于 `agent_core.stream.events.EventType` 下。保持这些层分离，以便内部生命周期模型可以在不改变前端契约的情况下演进。
+
+在推出或故障恢复期间，设置 `USE_LEGACY_RUNNER=true` 以绕过 `TurnRunner` 并使用原始的服务到 Handler 路径：
 
 ```powershell
 $env:USE_LEGACY_RUNNER='true'
@@ -75,52 +59,43 @@ uv run --extra dev pytest -q
 Remove-Item Env:\USE_LEGACY_RUNNER
 ```
 
-### Run event logs
+### 运行事件日志
 
-Runtime events are appended to jsonl files under:
+运行时事件追加到以下路径的 jsonl 文件中：
 
 ```text
 ${AGENT_CORE_LOG_DIR:-logs}/runs/<YYYY-MM-DD>/<run_id>.jsonl
 ```
 
-Each line is one serialized runtime event with `event_type`, `run_id`,
-`turn_id`, and a timestamp. For local debugging, inspect the file referenced by
-`context.extras["run_event_log_path"]`. If a provider reports a context-window
-failure, it should be represented as `LLMContextWindowError`; `TurnRunner`
-records that as `terminal_reason="context_exceeded"` so later planning can use
-real data before adding any TokenBudget or compaction layer.
+每行是一个序列化的运行时事件，包含 `event_type`、`run_id`、`turn_id` 和时间戳。对于本地调试，检查 `context.extras["run_event_log_path"]` 引用的文件。如果提供商报告上下文窗口失败，应将其表示为 `LLMContextWindowError`；`TurnRunner` 将其记录为 `terminal_reason="context_exceeded"`，以便后续规划可以在添加任何 TokenBudget 或压缩层之前使用真实数据。
 
-## Migration rule
+## 迁移规则
 
-Do not move or delete legacy code first. Add adapters and compatibility
-handlers, then switch callers after contract tests pass.
+不要先移动或删除旧代码。添加适配器和兼容性 Handler，然后在契约测试通过后再切换调用方。
 
-Recommended first integration path:
+推荐的首个集成路径：
 
-1. Keep existing `PlanSolveHandlerImpl` reachable via `LegacyHandler`.
-2. Register new agents (`general_chat`, `deep_research`) beside it.
-3. Wrap FileClerk through `FileClerkAdapter`; do not rewrite FileClerk
-   internals in this phase.
-4. SSE field stability is enforced by `Printer` itself.
+1. 通过 `LegacyHandler` 保持现有的 `PlanSolveHandlerImpl` 可访问。
+2. 在其旁边注册新 Agent（`general_chat`、`deep_research`）。
+3. 通过 `FileClerkAdapter` 包装 FileClerk；在此阶段不要重写 FileClerk 内部。
+4. SSE 字段稳定性由 `Printer` 本身强制执行。
 
-## Running tests
+## 运行测试
 
 ```bash
 uv sync --extra dev
 uv run --env-file .env pytest
 ```
 
-`pyproject.toml` sets `pythonpath = ["src"]` and `asyncio_mode = "auto"` so
-no extra config is needed.
+`pyproject.toml` 设置了 `pythonpath = ["src"]` 和 `asyncio_mode = "auto"`，因此不需要额外配置。
 
-Real provider smoke tests are opt-in:
+真实提供商的冒烟测试是可选的：
 
 ```bash
-# Set RUN_INTEGRATION=1 in .env first.
+# 首先在 .env 中设置 RUN_INTEGRATION=1。
 uv run --env-file .env pytest -m integration
 ```
 
-## API documentation
+## API 文档
 
-See `docs/API.md` for the public contracts around agent lifecycle, LLM clients,
-structured errors, streaming events, registries, memory, and orchestration.
+有关 Agent 生命周期、LLM 客户端、结构化错误、流式事件、注册表、记忆和编排的公共契约，请参阅 `docs/API.md`。
