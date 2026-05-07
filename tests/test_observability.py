@@ -6,7 +6,7 @@ import httpx
 
 from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
-from agent_core.handlers.react import ReActHandler
+from agent_core.runtime.turn import run_turn
 from agent_core.llm.client import LLMResponse
 from agent_core.llm.openai_compat import OpenAICompatibleClient
 from agent_core.memory.message import Message
@@ -58,10 +58,10 @@ async def test_react_logs_run_and_tool_without_argument_values(caplog):
     )
 
     agent = AgentRun(spec=_TOOL_AGENT_SPEC, context=context)
-    result = await ReActHandler().handle(agent, context, "run")
+    result = await run_turn(agent, context, "run")
 
     assert result == "done"
-    assert "react_run_start request_id=req-log" in caplog.text
+    assert "agent_run_start request_id=req-log" in caplog.text
     assert "tool_call_start request_id=req-log tool=echo" in caplog.text
     assert "secret-value" not in caplog.text
 

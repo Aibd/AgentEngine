@@ -10,7 +10,6 @@ from pathlib import Path
 from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
 from agent_core.errors import LLMContextWindowError, LLMError, ToolExecutionError
-from agent_core.handlers.base import AgentHandler
 from agent_core.observability.event_log import RunEventLog
 from agent_core.runtime.events import (
     RunCancelled,
@@ -20,15 +19,18 @@ from agent_core.runtime.events import (
     RuntimeEvent,
 )
 from agent_core.runtime.run_state import RunState, TerminalReason
+from agent_core.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS, run_turn
 
 EventCallback = Callable[[RuntimeEvent], Awaitable[None] | None]
+TurnFn = Callable[[AgentRun, AgentContext, str], Awaitable[str]]
 
 
 class TurnRunner:
     """Lifecycle manager for one agent turn.
 
-    The handler owns the think/act loop. The runner wraps that call with
-    run identifiers, state transitions, and runtime events.
+    Wraps a turn function with run identifiers, state transitions, and the
+    JSONL event log. Defaults to `run_turn()`; tests can substitute a custom
+    callable to exercise lifecycle behaviour without driving an LLM.
     """
 
     def __init__(
@@ -46,10 +48,11 @@ class TurnRunner:
         self,
         *,
         agent: AgentRun,
-        handler: AgentHandler,
         context: AgentContext,
         query: str,
         on_event: EventCallback | None = None,
+        tool_timeout_seconds: float | None = DEFAULT_TOOL_TIMEOUT_SECONDS,
+        turn_fn: TurnFn | None = None,
     ) -> str:
         run_id = f"run_{uuid.uuid4().hex[:12]}"
         turn_id = f"turn_{uuid.uuid4().hex[:12]}"
@@ -91,7 +94,15 @@ class TurnRunner:
         )
 
         try:
-            result = await handler.handle(agent, context, query)
+            if turn_fn is None:
+                result = await run_turn(
+                    agent,
+                    context,
+                    query,
+                    tool_timeout_seconds=tool_timeout_seconds,
+                )
+            else:
+                result = await turn_fn(agent, context, query)
         except asyncio.CancelledError:
             state.mark_cancelled()
             await emit(

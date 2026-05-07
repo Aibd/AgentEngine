@@ -6,7 +6,7 @@ from dataclasses import replace
 from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
 from agent_core.base.state import AgentState
-from agent_core.handlers.react import ReActHandler
+from agent_core.runtime.turn import run_turn
 from agent_core.llm.client import LLMResponse
 from agent_core.memory.message import Role
 from agent_core.spec import AgentSpec
@@ -87,14 +87,13 @@ async def _drain(stream: EventStream) -> list[dict]:
     return events
 
 
-class TestReActHandler:
+class TestRunTurn:
     async def test_single_turn_completes(self):
         llm = MockLLMClient([LLMResponse(content="The answer is 4.", finish_reason="stop")])
         context, stream = _make_context(llm)
         agent = _agent(SIMPLE_SPEC, context, max_steps=5)
 
-        handler = ReActHandler()
-        result = await handler.handle(agent, context, "What is 2+2?")
+        result = await run_turn(agent, context, "What is 2+2?")
 
         assert result == "The answer is 4."
         assert agent.state == AgentState.FINISHED
@@ -112,8 +111,7 @@ class TestReActHandler:
         context, _ = _make_context(llm)
         agent = _agent(SIMPLE_SPEC, context, max_steps=3)
 
-        handler = ReActHandler()
-        await handler.handle(agent, context, "hi")
+        await run_turn(agent, context, "hi")
 
         # First two messages in memory should be system + user
         assert agent.memory.messages[0].role == Role.SYSTEM
@@ -142,8 +140,7 @@ class TestReActHandler:
         context, stream = _make_context(llm, with_tools=True)
         agent = _agent(RESEARCHY_SPEC, context, max_steps=5)
 
-        handler = ReActHandler()
-        result = await handler.handle(agent, context, "make a plan")
+        result = await run_turn(agent, context, "make a plan")
 
         assert "plan" in result.lower()
         assert agent.state == AgentState.FINISHED
@@ -187,8 +184,7 @@ class TestReActHandler:
         context, _ = _make_context(llm)
         agent = _agent(SIMPLE_SPEC, context, max_steps=5)
 
-        handler = ReActHandler()
-        await handler.handle(agent, context, "use missing tool")
+        await run_turn(agent, context, "use missing tool")
 
         assert agent.state == AgentState.FINISHED
         # Tool message should record the "Unknown tool" string
@@ -214,8 +210,7 @@ class TestReActHandler:
         context.tool_collection.add(_SlowTool())
         agent = _agent(SIMPLE_SPEC, context, max_steps=5)
 
-        handler = ReActHandler(tool_timeout_seconds=0.01)
-        result = await handler.handle(agent, context, "use slow tool")
+        result = await run_turn(agent, context, "use slow tool", tool_timeout_seconds=0.01)
 
         assert result == "Recovered after timeout."
         tool_msgs = [m for m in agent.memory.messages if m.role == Role.TOOL]
@@ -238,8 +233,7 @@ class TestReActHandler:
         context, _ = _make_context(llm, with_tools=True)
         agent = _agent(RESEARCHY_SPEC, context, max_steps=2)
 
-        handler = ReActHandler()
-        await handler.handle(agent, context, "loop forever")
+        await run_turn(agent, context, "loop forever")
 
         assert agent.current_step == 2
         assert len(llm.calls) == 2
@@ -251,8 +245,7 @@ class TestReActHandler:
 
         assert context.tool_collection.get("echo") is None
 
-        handler = ReActHandler()
-        await handler.handle(agent, context, "hi")
+        await run_turn(agent, context, "hi")
 
         # setup() should have registered echo tool
         assert context.tool_collection.get("echo") is not None

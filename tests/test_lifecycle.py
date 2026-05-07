@@ -8,7 +8,7 @@ import pytest
 from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
 from agent_core.base.state import AgentState
-from agent_core.handlers.react import ReActHandler
+from agent_core.runtime.turn import run_turn
 from agent_core.llm.client import LLMChunk, LLMResponse
 from agent_core.spec import AgentSpec
 from mock_llm import MockLLMClient
@@ -62,7 +62,7 @@ async def test_service_close_closes_managed_llm_once():
 async def test_react_cancellation_marks_agent_cancelled():
     context = AgentContext(request_id="cancel-react", query="q", llm=_HangingLLM())
     agent = _make_run(context)
-    task = asyncio.create_task(ReActHandler().handle(agent, context, "q"))
+    task = asyncio.create_task(run_turn(agent, context, "q"))
 
     await asyncio.sleep(0)
     task.cancel()
@@ -80,7 +80,7 @@ async def test_react_teardown_runs_on_success():
     )
     agent, counter = _make_run_with_teardown(context)
 
-    result = await ReActHandler().handle(agent, context, "q")
+    result = await run_turn(agent, context, "q")
 
     assert result == "ok"
     assert agent.state == AgentState.FINISHED
@@ -90,7 +90,7 @@ async def test_react_teardown_runs_on_success():
 async def test_react_teardown_runs_on_cancel():
     context = AgentContext(request_id="cancel-teardown", query="q", llm=_HangingLLM())
     agent, counter = _make_run_with_teardown(context)
-    task = asyncio.create_task(ReActHandler().handle(agent, context, "q"))
+    task = asyncio.create_task(run_turn(agent, context, "q"))
 
     await asyncio.sleep(0)
     task.cancel()

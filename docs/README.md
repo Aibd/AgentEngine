@@ -1,7 +1,8 @@
 # Agent 框架
 
-> ⚠️ **此文档正在重构中。** Phase 2（Agent 数据化）已完成；Phase 3–5 正在进行。
-> 当前架构以 `AgentSpec + AgentRun` 取代了 `BaseAgent + @register_agent`。
+> ⚠️ **此文档正在重构中。** Phase 2（Agent 数据化）+ Phase 3（单循环函数）已完成；Phase 4–5 正在进行。
+> 当前架构：`AgentSpec + AgentRun` 取代 `BaseAgent + @register_agent`；`runtime/turn.py::run_turn()`
+> 取代 `ReActHandler`，`handlers/` 目录已删除。
 > 请参阅 [REFACTOR_PLAN.md](REFACTOR_PLAN.md) 了解完整路线图。
 
 可复用的 Agent 基座框架，用于构建各类上层 AI 应用（深度研究、通用对话、文件处理等）。
@@ -18,9 +19,6 @@ app/agent/
 │   │   ├── agent.py             # AgentRun —— 单次运行状态容器
 │   │   ├── context.py           # AgentContext —— 单次运行环境
 │   │   └── state.py             # AgentState —— 生命周期枚举
-│   ├── handlers/                # 执行策略（决定 Agent 怎么跑，Phase 3 后将内联）
-│   │   ├── base.py              # AgentHandler 抽象基类
-│   │   └── react.py             # ReActHandler —— 思考-行动循环
 │   ├── llm/                     # LLM 客户端
 │   │   ├── client.py            # LLMClient Protocol + LLMResponse/LLMChunk
 │   │   ├── factory.py           # create_llm_from_env —— 环境变量创建客户端
@@ -35,9 +33,8 @@ app/agent/
 │   │   ├── collection.py        # ToolCollection —— 每个 Agent 的工具集合
 │   │   └── builtin/             # 内置工具
 │   │       └── skill_tool.py    # SkillTool —— 技能调用
-│   ├── registry/                # 注册系统
-│   │   └── handler_registry.py  # @register_handler 装饰器
 │   ├── runtime/                 # 运行时生命周期
+│   │   ├── turn.py              # run_turn —— 唯一 think→act 循环函数
 │   │   ├── turn_runner.py       # TurnRunner —— 单轮运行管理
 │   │   ├── run_state.py         # RunState —— 运行状态跟踪
 │   │   └── events.py            # RuntimeEvent —— 内部生命周期事件
@@ -178,15 +175,15 @@ class AgentContext:
     extras: dict[str, Any]          # 扩展字段
 ```
 
-### handlers —— 执行策略
+### runtime/turn —— 唯一的 think→act 循环
 
-**ReActHandler** (`handlers/react.py`)：最常用的 Agent 循环。
+**run_turn()** (`runtime/turn.py`)：所有 Agent 共用的循环函数。
 
 ```
 1. agent.setup()
 2. 加载历史记忆（如果有 persistence）
 3. 注入 system_prompt + 用户消息到 Memory
-4. 循环（最多 max_steps 次）：
+4. 循环（最多 spec.max_steps 次）：
    a. 构建消息列表（注入 next_step_prompt）
    b. 调用 LLM（流式）
    c. 如果 LLM 返回 tool_calls → 执行工具 → 结果写入 Memory → 继续循环
@@ -195,22 +192,7 @@ class AgentContext:
 6. agent.teardown()
 ```
 
-**PipelineHandler** (`handlers/pipeline.py`)：固定步骤流水线。
-
-```python
-# 步骤依次执行，每步接收上一步的输出
-steps = [step1, step2, step3]
-output = ""
-for step in steps:
-    output = await step(context, output)
-```
-
-**LegacyHandler** (`handlers/legacy.py`)：桥接旧系统。
-
-```python
-# 注入一个工厂函数，返回有 run(query) 方法的旧 Agent
-handler = LegacyHandler(factory=lambda ctx: OldAgent(ctx))
-```
+> Phase 1 已删除 `PipelineHandler` 和 `LegacyHandler`；Phase 3 把 `ReActHandler` 内联为 `run_turn()`，`handlers/` 目录不再存在。要扩展循环，直接修改函数或在 Service 中传入自定义 `turn_fn` 给 `TurnRunner.run()`。
 
 ### llm —— LLM 客户端
 
@@ -398,14 +380,7 @@ collection.to_openai_tools()     # 转为 OpenAI 格式列表
 
 **Agent Registry**：已替换为 `agents/__init__.py` 中的显式 `REGISTRY` dict（见"如何新增一个 Agent"）。`@register_agent` 装饰器已删除。
 
-**Handler Registry** (`registry/handler_registry.py`)：
-
-```python
-@register_handler("react")
-class ReActHandler(AgentHandler): ...
-
-handler = create_handler("react", tool_timeout_seconds=60)
-```
+**Handler Registry**：Phase 3 已删除——循环唯一，无需注册策略。`@register_tool` 仍然在 `tools/registry.py` 提供工具注册。
 
 ### runtime —— 运行时
 

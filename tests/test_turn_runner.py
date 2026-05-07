@@ -5,49 +5,45 @@ import asyncio
 import pytest
 
 from agent_core.base.agent import AgentRun
-from agent_core.spec import AgentSpec
 from agent_core.base.context import AgentContext
 from agent_core.errors import LLMTimeoutError, ToolExecutionError
-from agent_core.handlers.base import AgentHandler
 from agent_core.runtime.events import RunCancelled, RunCompleted, RunFailed, RunStarted, RuntimeEvent
 from agent_core.runtime.run_state import RunStatus, TerminalReason
 from agent_core.runtime.turn_runner import TurnRunner
+from agent_core.spec import AgentSpec
 
 
-class _OkHandler(AgentHandler):
-    async def handle(self, agent: AgentRun, context: AgentContext, query: str) -> str:
-        return f"ok:{query}"
+async def _ok_turn(agent: AgentRun, context: AgentContext, query: str) -> str:
+    return f"ok:{query}"
 
 
-class _FailingHandler(AgentHandler):
-    def __init__(self, error: BaseException) -> None:
-        self.error = error
+def _failing_turn(error: BaseException):
+    async def _turn(agent: AgentRun, context: AgentContext, query: str) -> str:
+        raise error
 
-    async def handle(self, agent: AgentRun, context: AgentContext, query: str) -> str:
-        raise self.error
+    return _turn
 
 
-async def _run_with(handler: AgentHandler) -> tuple[list[RuntimeEvent], AgentContext, str | None]:
+async def _run_with(turn_fn) -> tuple[list[RuntimeEvent], AgentContext, str | None]:
     context = AgentContext(request_id="req-1", query="hello")
     agent = AgentRun(spec=AgentSpec(name="turn_runner_test"), context=context)
     events: list[RuntimeEvent] = []
-    result: str | None = None
 
     async def on_event(event: RuntimeEvent) -> None:
         events.append(event)
 
     result = await TurnRunner("session-1").run(
         agent=agent,
-        handler=handler,
         context=context,
         query="hello",
         on_event=on_event,
+        turn_fn=turn_fn,
     )
     return events, context, result
 
 
 async def test_turn_runner_happy_path_records_state_and_events() -> None:
-    events, context, result = await _run_with(_OkHandler())
+    events, context, result = await _run_with(_ok_turn)
 
     assert result == "ok:hello"
     assert isinstance(events[0], RunStarted)
@@ -80,10 +76,10 @@ async def test_turn_runner_classifies_failures(
     with pytest.raises(type(error)):
         await TurnRunner("session-1").run(
             agent=agent,
-            handler=_FailingHandler(error),
             context=context,
             query="hello",
             on_event=on_event,
+            turn_fn=_failing_turn(error),
         )
 
     assert isinstance(events[-1], RunFailed)
@@ -103,10 +99,10 @@ async def test_turn_runner_records_cancelled() -> None:
     with pytest.raises(asyncio.CancelledError):
         await TurnRunner("session-1").run(
             agent=agent,
-            handler=_FailingHandler(asyncio.CancelledError()),
             context=context,
             query="hello",
             on_event=on_event,
+            turn_fn=_failing_turn(asyncio.CancelledError()),
         )
 
     assert isinstance(events[-1], RunCancelled)
@@ -114,8 +110,8 @@ async def test_turn_runner_records_cancelled() -> None:
 
 
 async def test_turn_runner_generates_unique_ids() -> None:
-    _, first_context, _ = await _run_with(_OkHandler())
-    _, second_context, _ = await _run_with(_OkHandler())
+    _, first_context, _ = await _run_with(_ok_turn)
+    _, second_context, _ = await _run_with(_ok_turn)
 
     assert first_context.extras["run_id"] != second_context.extras["run_id"]
     assert first_context.extras["turn_id"] != second_context.extras["turn_id"]

@@ -40,8 +40,8 @@
                                         │ handler.handle(agent, ctx, query)
                                         ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  ② handlers/   ReActHandler · PipelineHandler · LegacyHandler           │
-│      "循环策略" 在这里。think→act 的真正实现                              │
+│  ② runtime/turn.py  run_turn() — 唯一的 think→act 循环                  │
+│      Phase 3 已将原 ReActHandler 内联为函数,handlers/ 目录已删除          │
 └─────────────────────────────────────────────────────────────────────────┘
                           │            │            │
                           ▼            ▼            ▼
@@ -59,7 +59,7 @@
 └─────────────────────────────────────────────────────────────────────────┘
 
 辅助层:
-  registry/      @register_agent / @register_handler / @register_tool 装饰器
+  tools/registry @register_tool 装饰器（Agent / Handler 已改为显式注册或函数）
   prompts/       PromptLoader  (读 YAML 提示词,带缓存)
   skills/        SkillLoader   (扫 .agent/skills/SKILL.md)
   observability/ RunEventLog   (logs/runs/<日期>/<run_id>.jsonl)
@@ -75,7 +75,7 @@
 下图就是 `run_agent.py` 调一次 `general_chat` 时,各模块之间发生的事:
 
 ```
-用户              Service             TurnRunner          ReActHandler        LLM Client          ToolExecutor        Printer
+用户              Service             TurnRunner          run_turn()          LLM Client          ToolExecutor        Printer
  │                   │                   │                   │                   │                   │                  │
  │  run("general_chat", query)           │                   │                   │                   │                  │
  ├──────────────────►│                   │                   │                   │                   │                  │
@@ -174,7 +174,7 @@ REGISTRY["my_agent"] = SPEC
 
 ## 5. ReAct 循环细节(代码视角)
 
-`ReActHandler._loop` 在 [src/agent_core/handlers/react.py](src/agent_core/handlers/react.py) 里:
+`run_turn()._loop` 在 [src/agent_core/runtime/turn.py](src/agent_core/runtime/turn.py) 里:
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
@@ -392,7 +392,7 @@ service = AgentOrchestrationService(config_path="config/agents.yaml")
 │ general_chat                                                        │
 │ ─────────────────────────────────────────────────────────────────── │
 │ 用途   : 普通问答                                                    │
-│ Handler: ReActHandler                                                │
+│ 循环   : run_turn()                                                  │
 │ 工具   : 无 (但 SkillTool 由 AgentContext 自动挂上)                  │
 │ 特点   : 没工具调用 → 一轮就 break;最简单的 agent 模板               │
 └────────────────────────────────────────────────────────────────────┘
@@ -401,7 +401,7 @@ service = AgentOrchestrationService(config_path="config/agents.yaml")
 │ deep_research                                                       │
 │ ─────────────────────────────────────────────────────────────────── │
 │ 用途   : 多步研究                                                    │
-│ Handler: ReActHandler                                                │
+│ 循环   : run_turn()                                                  │
 │ 工具   : 通过 SkillLoader 按名字加载;不挂显式 planning 工具          │
 │ 特点   : system_prompt 引导模型自己拆解任务、逐步执行、合成报告       │
 │         next_step_prompt 每轮提醒"推进下一个子任务"                  │
@@ -457,13 +457,11 @@ src/
 ├─ agent_core/                     ← 框架代码,不依赖任何业务
 │  ├─ spec.py      AgentSpec(frozen dataclass) ← NEW
 │  ├─ base/        AgentRun · AgentContext · AgentState
-│  ├─ handlers/    react（Phase 3 后内联为函数）
+│  ├─ runtime/     turn.py(run_turn 唯一循环) · turn_runner · run_state · events
 │  ├─ llm/         OpenAICompatibleClient · 工厂 · 协议
 │  ├─ memory/      Message · Memory(自动裁剪)
 │  ├─ tools/       Tool · Collection · Registry · Executor + builtin/
 │  ├─ stream/      EventStream · Printer · EventType
-│  ├─ runtime/     TurnRunner · RunState · RuntimeEvent
-│  ├─ registry/    @register_handler（agent_registry 已删除）
 │  ├─ prompts/     YAML 提示词加载器(带缓存)
 │  ├─ skills/      Claude Code 风格 SKILL.md 扫描
 │  ├─ observability/ JSONL 运行日志

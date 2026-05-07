@@ -8,10 +8,9 @@
 agent_core/
   spec.py        AgentSpec — 不可变 Agent 配置（frozen dataclass）
   base/          AgentRun（per-run 状态容器）, AgentContext, AgentState
-  handlers/      ReActHandler（Phase 3 后将内联为函数）
   llm/           OpenAI 兼容客户端和 LLM 协议类型
   memory/        Message 和 Memory
-  runtime/       TurnRunner, RunState, 语义 RuntimeEvent 类
+  runtime/       run_turn（唯一 think→act 循环）, TurnRunner, RunState, 语义 RuntimeEvent 类
   stream/        EventStream, EventType, Printer SSE 信封
   tools/         Tool, StreamingTool, ToolExecutor, 注册表, 集合
   tools/builtin/ ReadFileTool, SkillTool

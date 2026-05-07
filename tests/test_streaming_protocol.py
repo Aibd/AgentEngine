@@ -1,6 +1,6 @@
 """Tests for the streaming protocol upgrade (Phase 1).
 
-These verify ReActHandler emits the expected SSE event sequence for the
+These verify run_turn() emits the expected SSE event sequence for the
 shapes the renderers depend on:
 
   start -> step -> [thinking ...] -> [text ...] -> [tool_call_start ->
@@ -16,7 +16,7 @@ from dataclasses import replace
 
 from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
-from agent_core.handlers.react import ReActHandler
+from agent_core.runtime.turn import run_turn
 from agent_core.llm.client import LLMResponse
 from agent_core.memory.memory import Memory
 from agent_core.runtime.events import (
@@ -83,9 +83,8 @@ class TestNoToolPath:
         ])
         ctx, stream = await _build_context(llm=llm)
         agent = _make_agent(ctx)
-        handler = ReActHandler()
 
-        await handler.handle(agent, ctx, "hello")
+        await run_turn(agent, ctx, "hello")
 
         types = [e["responseType"] for e in await _drain(stream)]
         assert types == ["start", "step", "text", "step_end", "usage", "result"]
@@ -97,7 +96,7 @@ class TestNoToolPath:
         ctx, stream = await _build_context(llm=llm)
         agent = _make_agent(ctx)
 
-        await ReActHandler().handle(agent, ctx, "hi")
+        await run_turn(agent, ctx, "hi")
 
         usage = next(e for e in await _drain(stream) if e["responseType"] == "usage")
         assert usage["resultMap"]["prompt_tokens"] == 12
@@ -120,7 +119,7 @@ class TestThinkingPath:
         ctx, stream = await _build_context(llm=llm)
         agent = _make_agent(ctx)
 
-        await ReActHandler().handle(agent, ctx, "hi")
+        await run_turn(agent, ctx, "hi")
 
         types = [e["responseType"] for e in await _drain(stream)]
         # Order matters: step → text events → step_end (thinking is interleaved
@@ -152,7 +151,7 @@ class TestToolCallPath:
         ctx, stream = await _build_context(llm=llm)
         agent = _make_agent(ctx, max_steps=3)
 
-        await ReActHandler().handle(agent, ctx, "use echo")
+        await run_turn(agent, ctx, "use echo")
 
         events = await _drain(stream)
         types = [e["responseType"] for e in events]
@@ -198,7 +197,7 @@ class TestToolCallPath:
         ctx, stream = await _build_context(llm=llm)
         agent = _make_agent(ctx, max_steps=3)
 
-        await ReActHandler().handle(agent, ctx, "use missing")
+        await run_turn(agent, ctx, "use missing")
 
         events = await _drain(stream)
         tool_result = next(e for e in events if e["responseType"] == "tool_result")
@@ -238,7 +237,7 @@ class TestToolCallPath:
         ctx, stream = await _build_context(llm=llm)
         agent = _make_agent(ctx, max_steps=5)
 
-        result = await ReActHandler().handle(agent, ctx, "research with tools")
+        result = await run_turn(agent, ctx, "research with tools")
 
         assert result == "final answer"
         assert len(llm.calls) == 3

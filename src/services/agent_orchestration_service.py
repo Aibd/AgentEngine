@@ -9,19 +9,15 @@ from typing import Any, cast
 
 from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
-from agent_core.handlers.base import AgentHandler
 from agent_core.llm.client import LLMClient
 from agent_core.llm.factory import create_llm_from_env
-from agent_core.registry.handler_registry import create_handler
 from agent_core.runtime.events import RuntimeEvent, TextDelta
+from agent_core.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS
 from agent_core.runtime.turn_runner import TurnRunner
 from agent_core.spec import AgentSpec
 from agent_core.stream.event_stream import EventStream
 from agent_core.stream.printer import Printer
 from agents import REGISTRY as AGENT_REGISTRY
-
-# Boot-time import to register the built-in ReAct handler.
-import agent_core.handlers  # noqa: F401
 
 try:
     import yaml
@@ -40,9 +36,10 @@ def _default_llm_factory() -> LLMClient | None:
 class AgentOrchestrationService:
     """Application-facing entry point.
 
-    Looks up agent + handler by name, optionally reading per-agent settings
-    from `config/agents.yaml`. Provides a streaming context factory for SSE
-    endpoints.
+    Looks up an `AgentSpec` by name (optionally reading per-agent settings
+    from `config/agents.yaml`), constructs an `AgentRun`, and dispatches it
+    through `TurnRunner` → `run_turn()`. Provides a streaming context factory
+    for SSE endpoints.
     """
 
     def __init__(
@@ -82,7 +79,7 @@ class AgentOrchestrationService:
         agent_name: str,
         query: str,
         context: AgentContext | None = None,
-        handler_kwargs: dict[str, Any] | None = None,
+        tool_timeout_seconds: float | None = DEFAULT_TOOL_TIMEOUT_SECONDS,
     ) -> str:
         self._validate_run_inputs(agent_name=agent_name, query=query)
         if not self.is_enabled(agent_name):
@@ -99,20 +96,16 @@ class AgentOrchestrationService:
         agent = AgentRun(spec=spec, context=context)
         context.extras["agent"] = agent
         context.extras["agent_spec"] = spec
-        cfg = self.agent_config(agent_name)
-        handler_name = cfg.get("handler") or "react"
-        handler = cast(AgentHandler, create_handler(handler_name, **(handler_kwargs or {})))
         logger.info(
-            "agent_run_start request_id=%s agent=%s handler=%s conversation_id=%s",
+            "agent_run_start request_id=%s agent=%s conversation_id=%s",
             context.request_id,
             agent_name,
-            handler_name,
             context.conversation_id,
         )
 
         async def on_runtime_event(event: RuntimeEvent) -> None:
-            # Handlers still emit the public SSE stream in Phase 0. Only forward
-            # runtime events that are not already represented by handler output.
+            # `run_turn()` drives the public SSE stream itself; only forward
+            # runtime events that aren't already represented by its output.
             if context.printer and isinstance(event, TextDelta):
                 await context.printer.from_runtime_event(event)
 
@@ -122,10 +115,10 @@ class AgentOrchestrationService:
         try:
             return await runner.run(
                 agent=agent,
-                handler=handler,
                 context=context,
                 query=query,
                 on_event=on_runtime_event,
+                tool_timeout_seconds=tool_timeout_seconds,
             )
         finally:
             self._record_agent_finish(
@@ -133,7 +126,6 @@ class AgentOrchestrationService:
                 context=context,
                 started_at=started_at,
                 agent_name=agent_name,
-                handler_name=handler_name,
             )
 
     def _resolve_spec(self, agent_name: str) -> AgentSpec:
@@ -153,16 +145,14 @@ class AgentOrchestrationService:
         context: AgentContext,
         started_at: float,
         agent_name: str,
-        handler_name: str,
     ) -> None:
         context.extras["agent_state"] = agent.state.value
         context.extras["agent_current_step"] = agent.current_step
         context.extras["agent_memory"] = agent.memory.to_openai()
         logger.info(
-            "agent_run_finish request_id=%s agent=%s handler=%s state=%s steps=%d elapsed=%.3fs",
+            "agent_run_finish request_id=%s agent=%s state=%s steps=%d elapsed=%.3fs",
             context.request_id,
             agent_name,
-            handler_name,
             agent.state.value,
             agent.current_step,
             time.perf_counter() - started_at,
