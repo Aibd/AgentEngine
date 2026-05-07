@@ -1,5 +1,9 @@
 # Agent 框架
 
+> ⚠️ **此文档正在重构中。** Phase 2（Agent 数据化）已完成；Phase 3–5 正在进行。
+> 当前架构以 `AgentSpec + AgentRun` 取代了 `BaseAgent + @register_agent`。
+> 请参阅 [REFACTOR_PLAN.md](REFACTOR_PLAN.md) 了解完整路线图。
+
 可复用的 Agent 基座框架，用于构建各类上层 AI 应用（深度研究、通用对话、文件处理等）。
 
 ---
@@ -9,15 +13,14 @@
 ```
 app/agent/
 ├── agent_core/                  # 核心框架（与业务无关）
-│   ├── base/                    # Agent 基类、上下文、状态
-│   │   ├── agent.py             # BaseAgent —— Agent 数据容器
+│   ├── spec.py                  # AgentSpec —— 不可变 Agent 配置（frozen dataclass）
+│   ├── base/                    # Agent 运行状态、上下文
+│   │   ├── agent.py             # AgentRun —— 单次运行状态容器
 │   │   ├── context.py           # AgentContext —— 单次运行环境
 │   │   └── state.py             # AgentState —— 生命周期枚举
-│   ├── handlers/                # 执行策略（决定 Agent 怎么跑）
+│   ├── handlers/                # 执行策略（决定 Agent 怎么跑，Phase 3 后将内联）
 │   │   ├── base.py              # AgentHandler 抽象基类
-│   │   ├── react.py             # ReActHandler —— 思考-行动循环
-│   │   ├── pipeline.py          # PipelineHandler —— 固定步骤流水线
-│   │   └── legacy.py            # LegacyHandler —— 桥接旧系统
+│   │   └── react.py             # ReActHandler —— 思考-行动循环
 │   ├── llm/                     # LLM 客户端
 │   │   ├── client.py            # LLMClient Protocol + LLMResponse/LLMChunk
 │   │   ├── factory.py           # create_llm_from_env —— 环境变量创建客户端
@@ -33,7 +36,6 @@ app/agent/
 │   │   └── builtin/             # 内置工具
 │   │       └── skill_tool.py    # SkillTool —— 技能调用
 │   ├── registry/                # 注册系统
-│   │   ├── agent_registry.py    # @register_agent 装饰器
 │   │   └── handler_registry.py  # @register_handler 装饰器
 │   ├── runtime/                 # 运行时生命周期
 │   │   ├── turn_runner.py       # TurnRunner —— 单轮运行管理
@@ -53,15 +55,12 @@ app/agent/
 │   │   └── event_log.py         # RunEventLog —— JSONL 运行日志
 │   └── errors.py                # 结构化错误层次
 │
-├── agents/                      # 具体 Agent 实现（业务相关）
-│   ├── general_chat/            # 通用对话 Agent
-│   │   ├── agent.py             # GeneralChatAgent
-│   │   └── prompts.yaml
-│   ├── deep_research/           # 深度研究 Agent
-│   │   ├── agent.py             # DeepResearchAgent
-│   │   └── prompts.yaml
-│   └── adapters/                # 旧系统适配器
-│       └── file_clerk_adapter.py
+├── agents/                      # 具体 Agent 规格（业务相关）
+│   ├── __init__.py              # REGISTRY: dict[str, AgentSpec] — 显式注册表
+│   ├── general_chat/
+│   │   └── spec.py              # SPEC = AgentSpec(name="general_chat", ...)
+│   └── deep_research/
+│       └── spec.py              # SPEC = AgentSpec(name="deep_research", ...)
 │
 └── services/                    # 应用层入口
     └── agent_orchestration_service.py  # AgentOrchestrationService
@@ -71,36 +70,39 @@ app/agent/
 
 ## 核心设计理念
 
-### 1. Agent / Handler 分离
+### 1. AgentSpec（不可变配置）+ AgentRun（运行状态）
 
-**Agent** 只定义"知道什么"（系统提示词、工具、记忆），不决定"怎么跑"。
-**Handler** 决定"怎么跑"（循环策略），通过装饰器与 Agent 解耦。
+**AgentSpec** 是 `frozen=True` 的 dataclass——声明"这个 Agent 是什么"（名称、系统提示词、最大步数、setup/teardown 钩子）。它与运行无关，可以安全地跨请求共享。
 
-```
-@register_agent("deep_research", handler="react")
-class DeepResearchAgent(BaseAgent):
-    ...
-```
-
-同一个 Agent 可以用不同 Handler 运行，同一个 Handler 可以驱动不同 Agent。
-
-### 2. 装饰器注册
+**AgentRun** 是可变的 per-run 容器——持有 Memory、当前步数、AgentState。每次请求创建一个新实例。
 
 ```python
-# 注册 Agent
-@register_agent("general_chat", handler="react")
-class GeneralChatAgent(BaseAgent): ...
+# agents/general_chat/spec.py
+SPEC = AgentSpec(
+    name="general_chat",
+    system_prompt="You are a helpful assistant.",
+    max_steps=3,
+)
 
-# 注册 Handler
-@register_handler("react")
-class ReActHandler(AgentHandler): ...
-
-# 注册工具
-@register_tool("my_tool")
-class MyTool(Tool): ...
+# 使用 dataclasses.replace() 从 YAML 覆盖字段（不修改冻结对象）
+spec = replace(SPEC, max_steps=5)
+agent = AgentRun(spec=spec, context=ctx)
 ```
 
-启动时通过 `import` 触发注册，无需手动配置。
+### 2. 显式注册表
+
+```python
+# agents/__init__.py
+from agents.general_chat.spec import SPEC as GENERAL_CHAT
+from agents.deep_research.spec import SPEC as DEEP_RESEARCH
+
+REGISTRY: dict[str, AgentSpec] = {
+    GENERAL_CHAT.name: GENERAL_CHAT,
+    DEEP_RESEARCH.name: DEEP_RESEARCH,
+}
+```
+
+不再使用 `@register_agent` 装饰器——显式比隐式好，消除了导入顺序依赖。
 
 ### 3. 双层事件模型
 
@@ -115,24 +117,47 @@ class MyTool(Tool): ...
 
 ## 模块详解
 
-### base —— Agent 基础
+### spec —— AgentSpec（不可变配置）
 
-**BaseAgent** (`base/agent.py`)：纯数据容器，不实现循环逻辑。
+**AgentSpec** (`spec.py`)：冻结的 dataclass，声明 Agent 身份。
 
 ```python
-class BaseAgent:
-    name: str = "base"
+@dataclass(frozen=True, slots=True)
+class AgentSpec:
+    name: str
+    system_prompt: str = ""
+    next_step_prompt: str = ""
+    description: str = ""
+    max_steps: int = 10          # >= 1
+    max_messages: int = 0        # 0 = 不限
+    setup: SetupHook | None = None    # async (ctx) -> None
+    teardown: SetupHook | None = None
+    extras: dict[str, object] = field(default_factory=dict)
+```
+
+### base —— AgentRun（运行状态）
+
+**AgentRun** (`base/agent.py`)：可变的 per-run 容器，不实现循环逻辑。
+
+```python
+@dataclass(slots=True)
+class AgentRun:
+    spec: AgentSpec
     context: AgentContext      # 运行环境
-    memory: Memory             # 对话记忆
-    max_steps: int = 10        # 最大循环步数
+    memory: Memory             # 对话记忆（由 spec.max_messages 初始化）
     current_step: int = 0      # 当前步数
     state: AgentState          # IDLE / RUNNING / FINISHED / ERROR / CANCELLED
 
-    def setup(self) -> None: ...           # 运行前初始化（注册工具等）
-    async def teardown(self) -> None: ...  # 运行后清理
-    def system_prompt(self) -> str: ...    # 系统提示词
-    def next_step_prompt(self) -> str: ... # 每轮注入的引导语
-    def pipeline_steps(self) -> list: ...  # Pipeline 模式的步骤列表
+    # 属性代理（从 spec 读取）
+    @property
+    def name(self) -> str: ...
+    @property
+    def max_steps(self) -> int: ...
+    def system_prompt(self) -> str: ...
+    def next_step_prompt(self) -> str: ...
+
+    async def setup(self) -> None: ...    # 委托给 spec.setup(context)
+    async def teardown(self) -> None: ... # 委托给 spec.teardown(context)
 ```
 
 **AgentContext** (`base/context.py`)：单次运行的完整环境。
@@ -371,21 +396,7 @@ collection.to_openai_tools()     # 转为 OpenAI 格式列表
 
 ### registry —— 注册系统
 
-**Agent Registry** (`registry/agent_registry.py`)：
-
-```python
-@register_agent("deep_research", handler="react")
-class DeepResearchAgent(BaseAgent): ...
-
-# 创建实例
-agent = create_agent("deep_research", context, max_steps=15)
-
-# 获取关联的 handler 名
-handler_name = get_agent_handler("deep_research")  # → "react"
-
-# 列出所有已注册 agent
-agents = registered_agents()
-```
+**Agent Registry**：已替换为 `agents/__init__.py` 中的显式 `REGISTRY` dict（见"如何新增一个 Agent"）。`@register_agent` 装饰器已删除。
 
 **Handler Registry** (`registry/handler_registry.py`)：
 
@@ -520,51 +531,44 @@ AgentCoreError
 
 ## 如何新增一个 Agent
 
-### 第一步：创建 Agent 类
+### 第一步：创建 spec.py
 
 ```python
-# agents/my_agent/agent.py
-from agent_core.base.agent import BaseAgent
-from agent_core.registry.agent_registry import register_agent
+# agents/my_agent/spec.py
+from agent_core.spec import AgentSpec
+from agent_core.base.context import AgentContext
 
-@register_agent("my_agent", handler="react")
-class MyAgent(BaseAgent):
-    description = "我的自定义 Agent"
+async def _setup(context: AgentContext) -> None:
+    """运行前初始化：注册工具等"""
+    # context.tool_collection.add(MyTool())
+    pass
 
-    def setup(self) -> None:
-        """注册工具、初始化资源"""
-        pass
-
-    def system_prompt(self) -> str:
-        return (
-            "你是一个专业的助手。"
-            "面对复杂任务，先拆解为子任务，再逐步执行。"
-        )
-
-    def next_step_prompt(self) -> str:
-        return "继续执行下一个子任务。如果所有子任务已完成，输出最终结果。"
+SPEC = AgentSpec(
+    name="my_agent",
+    description="我的自定义 Agent",
+    system_prompt=(
+        "你是一个专业的助手。"
+        "面对复杂任务，先拆解为子任务，再逐步执行。"
+    ),
+    next_step_prompt="继续执行下一个子任务。如果所有子任务已完成，输出最终结果。",
+    max_steps=10,
+    setup=_setup,
+)
 ```
 
-### 第二步：创建提示词（可选）
-
-```yaml
-# agents/my_agent/prompts.yaml
-version: 1
-system: |
-  你是一个专业的研究助手。
-  面对复杂任务，先拆解为子任务，再逐步执行。
-next_step: |
-  继续执行下一个子任务。如果所有子任务已完成，输出最终结果。
-```
-
-### 第三步：在 AgentOrchestrationService 中注册
+### 第二步：加入 REGISTRY
 
 ```python
-# services/agent_orchestration_service.py
-import agents.my_agent  # noqa: F401  —— 触发 @register_agent
+# agents/__init__.py
+from agents.my_agent.spec import SPEC as MY_AGENT
+
+REGISTRY: dict[str, AgentSpec] = {
+    ...,
+    MY_AGENT.name: MY_AGENT,
+}
 ```
 
-### 第四步：调用
+### 第三步：调用
 
 ```python
 service = AgentOrchestrationService()

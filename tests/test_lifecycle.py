@@ -5,11 +5,12 @@ from typing import AsyncIterator
 
 import pytest
 
-from agent_core.base.agent import BaseAgent
+from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
 from agent_core.base.state import AgentState
 from agent_core.handlers.react import ReActHandler
 from agent_core.llm.client import LLMChunk, LLMResponse
+from agent_core.spec import AgentSpec
 from mock_llm import MockLLMClient
 from services.agent_orchestration_service import AgentOrchestrationService
 
@@ -32,13 +33,18 @@ class _HangingLLM:
         yield LLMChunk()
 
 
-class _TeardownAgent(BaseAgent):
-    def __init__(self, context: AgentContext) -> None:
-        super().__init__(context)
-        self.teardown_calls = 0
+def _make_run(context: AgentContext, *, name: str = "lifecycle_test", max_steps: int = 10) -> AgentRun:
+    return AgentRun(spec=AgentSpec(name=name, max_steps=max_steps), context=context)
 
-    async def teardown(self) -> None:
-        self.teardown_calls += 1
+
+def _make_run_with_teardown(context: AgentContext) -> tuple[AgentRun, dict]:
+    counter = {"calls": 0}
+
+    async def teardown(_ctx: AgentContext) -> None:
+        counter["calls"] += 1
+
+    spec = AgentSpec(name="teardown_test", teardown=teardown)
+    return AgentRun(spec=spec, context=context), counter
 
 
 async def test_service_close_closes_managed_llm_once():
@@ -55,7 +61,7 @@ async def test_service_close_closes_managed_llm_once():
 
 async def test_react_cancellation_marks_agent_cancelled():
     context = AgentContext(request_id="cancel-react", query="q", llm=_HangingLLM())
-    agent = BaseAgent(context)
+    agent = _make_run(context)
     task = asyncio.create_task(ReActHandler().handle(agent, context, "q"))
 
     await asyncio.sleep(0)
@@ -72,18 +78,18 @@ async def test_react_teardown_runs_on_success():
         query="q",
         llm=MockLLMClient([LLMResponse(content="ok", finish_reason="stop")]),
     )
-    agent = _TeardownAgent(context)
+    agent, counter = _make_run_with_teardown(context)
 
     result = await ReActHandler().handle(agent, context, "q")
 
     assert result == "ok"
     assert agent.state == AgentState.FINISHED
-    assert agent.teardown_calls == 1
+    assert counter["calls"] == 1
 
 
 async def test_react_teardown_runs_on_cancel():
     context = AgentContext(request_id="cancel-teardown", query="q", llm=_HangingLLM())
-    agent = _TeardownAgent(context)
+    agent, counter = _make_run_with_teardown(context)
     task = asyncio.create_task(ReActHandler().handle(agent, context, "q"))
 
     await asyncio.sleep(0)
@@ -92,6 +98,4 @@ async def test_react_teardown_runs_on_cancel():
         await task
 
     assert agent.state == AgentState.CANCELLED
-    assert agent.teardown_calls == 1
-
-
+    assert counter["calls"] == 1

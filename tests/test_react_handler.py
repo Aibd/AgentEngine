@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 
-from agent_core.base.agent import BaseAgent
+from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
 from agent_core.base.state import AgentState
 from agent_core.handlers.react import ReActHandler
 from agent_core.llm.client import LLMResponse
-from mock_llm import MockLLMClient
 from agent_core.memory.message import Role
+from agent_core.spec import AgentSpec
 from agent_core.stream.event_stream import EventStream
 from agent_core.stream.printer import Printer
 from agent_core.tools.base import Tool
 from agent_core.tools.collection import ToolCollection
+from mock_llm import MockLLMClient
 
 
 class _EchoTool(Tool):
@@ -24,22 +26,28 @@ class _EchoTool(Tool):
         return kwargs.get("text", "echo")
 
 
-class _SimpleAgent(BaseAgent):
-    name = "simple"
+SIMPLE_SPEC = AgentSpec(
+    name="simple",
+    system_prompt="You are a helpful assistant.",
+)
 
-    def system_prompt(self) -> str:
-        return "You are a helpful assistant."
+
+async def _setup_research(context: AgentContext) -> None:
+    if context.tool_collection and context.tool_collection.get("echo") is None:
+        context.tool_collection.add(_EchoTool())
 
 
-class _ResearchLikeAgent(BaseAgent):
-    name = "researchy"
+RESEARCHY_SPEC = AgentSpec(
+    name="researchy",
+    system_prompt="Plan first, then execute.",
+    setup=_setup_research,
+)
 
-    def setup(self) -> None:
-        if self.context.tool_collection.get("echo") is None:
-            self.context.tool_collection.add(_EchoTool())
 
-    def system_prompt(self) -> str:
-        return "Plan first, then execute."
+def _agent(spec: AgentSpec, context: AgentContext, *, max_steps: int | None = None) -> AgentRun:
+    if max_steps is not None and max_steps != spec.max_steps:
+        spec = replace(spec, max_steps=max_steps)
+    return AgentRun(spec=spec, context=context)
 
 
 class _SlowTool(Tool):
@@ -83,7 +91,7 @@ class TestReActHandler:
     async def test_single_turn_completes(self):
         llm = MockLLMClient([LLMResponse(content="The answer is 4.", finish_reason="stop")])
         context, stream = _make_context(llm)
-        agent = _SimpleAgent(context, max_steps=5)
+        agent = _agent(SIMPLE_SPEC, context, max_steps=5)
 
         handler = ReActHandler()
         result = await handler.handle(agent, context, "What is 2+2?")
@@ -102,7 +110,7 @@ class TestReActHandler:
     async def test_system_prompt_injected(self):
         llm = MockLLMClient([LLMResponse(content="ok", finish_reason="stop")])
         context, _ = _make_context(llm)
-        agent = _SimpleAgent(context, max_steps=3)
+        agent = _agent(SIMPLE_SPEC, context, max_steps=3)
 
         handler = ReActHandler()
         await handler.handle(agent, context, "hi")
@@ -132,7 +140,7 @@ class TestReActHandler:
             LLMResponse(content="Plan created with 2 steps.", finish_reason="stop"),
         ])
         context, stream = _make_context(llm, with_tools=True)
-        agent = _ResearchLikeAgent(context, max_steps=5)
+        agent = _agent(RESEARCHY_SPEC, context, max_steps=5)
 
         handler = ReActHandler()
         result = await handler.handle(agent, context, "make a plan")
@@ -177,10 +185,10 @@ class TestReActHandler:
             LLMResponse(content="I'll skip that tool.", finish_reason="stop"),
         ])
         context, _ = _make_context(llm)
-        agent = _SimpleAgent(context, max_steps=5)
+        agent = _agent(SIMPLE_SPEC, context, max_steps=5)
 
         handler = ReActHandler()
-        result = await handler.handle(agent, context, "use missing tool")
+        await handler.handle(agent, context, "use missing tool")
 
         assert agent.state == AgentState.FINISHED
         # Tool message should record the "Unknown tool" string
@@ -204,7 +212,7 @@ class TestReActHandler:
         ])
         context, _ = _make_context(llm)
         context.tool_collection.add(_SlowTool())
-        agent = _SimpleAgent(context, max_steps=5)
+        agent = _agent(SIMPLE_SPEC, context, max_steps=5)
 
         handler = ReActHandler(tool_timeout_seconds=0.01)
         result = await handler.handle(agent, context, "use slow tool")
@@ -228,7 +236,7 @@ class TestReActHandler:
         )
         llm = MockLLMClient([looping] * 10)
         context, _ = _make_context(llm, with_tools=True)
-        agent = _ResearchLikeAgent(context, max_steps=2)
+        agent = _agent(RESEARCHY_SPEC, context, max_steps=2)
 
         handler = ReActHandler()
         await handler.handle(agent, context, "loop forever")
@@ -239,7 +247,7 @@ class TestReActHandler:
     async def test_setup_hook_runs_before_loop(self):
         llm = MockLLMClient([LLMResponse(content="ok", finish_reason="stop")])
         context, _ = _make_context(llm)  # no echo tool initially
-        agent = _ResearchLikeAgent(context, max_steps=3)
+        agent = _agent(RESEARCHY_SPEC, context, max_steps=3)
 
         assert context.tool_collection.get("echo") is None
 
@@ -250,11 +258,8 @@ class TestReActHandler:
         assert context.tool_collection.get("echo") is not None
 
     async def test_invalid_max_steps_raises(self):
-        llm = MockLLMClient([LLMResponse(content="ok", finish_reason="stop")])
-        context, _ = _make_context(llm)
-
         try:
-            _SimpleAgent(context, max_steps=0)
+            AgentSpec(name="bad", max_steps=0)
         except ValueError as exc:
             assert "max_steps" in str(exc)
         else:

@@ -79,8 +79,8 @@
  │                   │                   │                   │                   │                   │                  │
  │  run("general_chat", query)           │                   │                   │                   │                  │
  ├──────────────────►│                   │                   │                   │                   │                  │
- │                   │ create_agent()                        │                   │                   │                  │
- │                   │ create_handler()                      │                   │                   │                  │
+ │                   │ _resolve_spec()                       │                   │                   │                  │
+ │                   │ AgentRun(spec,ctx)                    │                   │                   │                  │
  │                   │ TurnRunner.run() ►│                   │                   │                   │                  │
  │                   │                   │ 生成 run_id        │                   │                   │                  │
  │                   │                   │ emit RunStarted   │                   │                   │                  │
@@ -131,47 +131,44 @@
 
 ---
 
-## 4. 核心抽象:Agent vs Handler(本项目最关键的设计)
+## 4. 核心抽象:AgentSpec + AgentRun(当前架构)
 
-很多 Agent 框架把"循环逻辑"塞进 Agent 类,导致每写一个新 Agent 就要继承一坨基类,改循环还要改基类。
+**AgentSpec** 是 `frozen=True` 的 dataclass——声明"这个 Agent 是什么"（提示词、步数上限、setup/teardown 钩子）。它与运行无关，可跨请求共享。
 
-**本项目反过来:**
+**AgentRun** 是可变的 per-run 容器——持有 Memory、当前步数、AgentState。每次请求创建一个新实例。
 
 ```
 ┌──────────────────────────────────┐        ┌──────────────────────────────────┐
-│         BaseAgent  (容器)         │        │       Handler  (策略)            │
+│         AgentSpec  (不可变配置)   │        │       AgentRun  (运行状态)        │
+│  frozen=True, slots=True         │        │  slots=True (可变)               │
 │                                  │        │                                  │
-│  • memory                        │        │  • ReActHandler   think→act      │
-│  • state                         │  ←──→  │  • PipelineHandler 固定步骤      │
-│  • current_step / max_steps      │        │  • LegacyHandler   旧代码桥      │
-│  • setup()      注册工具/提示词   │        │                                  │
-│  • teardown()   清理              │        │  handle(agent, context, query)   │
-│  • system_prompt()                │        │    → 控制怎么循环、怎么调 LLM    │
-│  • next_step_prompt()             │        │    → 控制怎么调度工具            │
+│  • name                          │        │  • spec: AgentSpec               │
+│  • system_prompt                 │  ─────►│  • context: AgentContext         │
+│  • next_step_prompt              │        │  • memory: Memory                │
+│  • max_steps                     │        │  • current_step: int             │
+│  • max_messages                  │        │  • state: AgentState             │
+│  • setup: async (ctx)->None      │        │                                  │
+│  • teardown: async (ctx)->None   │        │  await agent.setup()   # 委托    │
 └──────────────────────────────────┘        └──────────────────────────────────┘
-        声明性的"我是谁"                           过程性的"怎么跑"
+        声明性的"我是谁"                           运行时的"现在在哪"
 ```
 
 写一个新 Agent 只需要:
 
 ```python
-@register_agent("my_agent", handler="react")
-class MyAgent(BaseAgent):
-    def system_prompt(self) -> str:
-        return "你是一个 ..."
+# agents/my_agent/spec.py
+SPEC = AgentSpec(
+    name="my_agent",
+    system_prompt="你是一个 ...",
+    max_steps=10,
+    setup=_my_setup,  # async (ctx: AgentContext) -> None
+)
 
-    async def setup(self) -> None:
-        self.context.tool_collection.add(MySearchTool())
+# agents/__init__.py — 加一行
+REGISTRY["my_agent"] = SPEC
 ```
 
-**循环策略**则在 `agents.yaml` 里随便切:
-
-```yaml
-agents:
-  my_agent:
-    handler: react        # 也可以改成 pipeline / legacy
-    max_steps: 10
-```
+`max_steps` 等参数仍可在 `agents.yaml` 里覆盖（Service 用 `dataclasses.replace()` 创建新冻结对象，不修改原始 SPEC）。
 
 ---
 
@@ -377,13 +374,12 @@ service = AgentOrchestrationService(config_path="config/agents.yaml")
         ┌────── 调用 service.run(name) ──────┐
         │                                    │
         │ ① is_enabled(name)?  否 → 报错      │
-        │ ② 合并 config 里的 max_steps 等参数  │
-        │ ③ handler = cfg.handler            │
-        │            ?? get_agent_handler(name) (装饰器登记的默认)
-        │ ④ create_agent(name, ctx, **kw)    │
-        │ ⑤ create_handler(handler, **kw)    │
-        │ ⑥ 走 TurnRunner / 或 LegacyHandler │
-        │   (USE_LEGACY_RUNNER=true 切换)    │
+        │ ② spec = AGENT_REGISTRY[name]      │
+        │ ③ 合并 config 里的 max_steps         │
+        │   → replace(spec, max_steps=N)     │  ← frozen spec 安全
+        │ ④ agent = AgentRun(spec, context)  │
+        │ ⑤ handler = create_handler("react")│
+        │ ⑥ TurnRunner.run(agent, handler)   │
         └────────────────────────────────────┘
 ```
 
@@ -412,16 +408,9 @@ service = AgentOrchestrationService(config_path="config/agents.yaml")
 │         max_steps = 10,留足思考空间                                 │
 └────────────────────────────────────────────────────────────────────┘
 
-┌────────────────────────────────────────────────────────────────────┐
-│ file_clerk  (适配器)                                                 │
-│ ─────────────────────────────────────────────────────────────────── │
-│ 用途   : 复用老的 FileClerk 实现                                     │
-│ Handler: PipelineHandler                                             │
-│ 关键   : legacy_factory 注入老对象,把它当成 pipeline 的一个 step     │
-│         旧代码内部的 queue 消息桥接到新的 Printer 上                 │
-│ 意义   : 演示"先包装,再迁移"的渐进路线                              │
-└────────────────────────────────────────────────────────────────────┘
 ```
+
+> `file_clerk` 适配器（`LegacyHandler` + `PipelineHandler`）已在 Phase 1 删除。
 
 ---
 
@@ -466,23 +455,24 @@ result = await service.run(
 ```
 src/
 ├─ agent_core/                     ← 框架代码,不依赖任何业务
-│  ├─ base/        BaseAgent · AgentContext · AgentState
-│  ├─ handlers/    react · pipeline · legacy
+│  ├─ spec.py      AgentSpec(frozen dataclass) ← NEW
+│  ├─ base/        AgentRun · AgentContext · AgentState
+│  ├─ handlers/    react（Phase 3 后内联为函数）
 │  ├─ llm/         OpenAICompatibleClient · 工厂 · 协议
 │  ├─ memory/      Message · Memory(自动裁剪)
 │  ├─ tools/       Tool · Collection · Registry · Executor + builtin/
 │  ├─ stream/      EventStream · Printer · EventType
 │  ├─ runtime/     TurnRunner · RunState · RuntimeEvent
-│  ├─ registry/    @register_agent / @register_handler
+│  ├─ registry/    @register_handler（agent_registry 已删除）
 │  ├─ prompts/     YAML 提示词加载器(带缓存)
 │  ├─ skills/      Claude Code 风格 SKILL.md 扫描
 │  ├─ observability/ JSONL 运行日志
 │  └─ errors.py    AgentCoreError 家族(可序列化、可重试标记)
 │
-├─ agents/                         ← 具体 Agent 声明
-│  ├─ general_chat/
-│  ├─ deep_research/
-│  └─ adapters/file_clerk_adapter.py
+├─ agents/                         ← Agent 规格声明
+│  ├─ __init__.py  REGISTRY: dict[str, AgentSpec] ← NEW
+│  ├─ general_chat/spec.py
+│  └─ deep_research/spec.py
 │
 └─ services/
    └─ agent_orchestration_service.py  ← 应用入口

@@ -4,7 +4,8 @@ import asyncio
 
 import pytest
 
-from agent_core.base.agent import BaseAgent
+from agent_core.base.agent import AgentRun
+from agent_core.spec import AgentSpec
 from agent_core.base.context import AgentContext
 from agent_core.errors import LLMTimeoutError, ToolExecutionError
 from agent_core.handlers.base import AgentHandler
@@ -14,7 +15,7 @@ from agent_core.runtime.turn_runner import TurnRunner
 
 
 class _OkHandler(AgentHandler):
-    async def handle(self, agent: BaseAgent, context: AgentContext, query: str) -> str:
+    async def handle(self, agent: AgentRun, context: AgentContext, query: str) -> str:
         return f"ok:{query}"
 
 
@@ -22,13 +23,13 @@ class _FailingHandler(AgentHandler):
     def __init__(self, error: BaseException) -> None:
         self.error = error
 
-    async def handle(self, agent: BaseAgent, context: AgentContext, query: str) -> str:
+    async def handle(self, agent: AgentRun, context: AgentContext, query: str) -> str:
         raise self.error
 
 
 async def _run_with(handler: AgentHandler) -> tuple[list[RuntimeEvent], AgentContext, str | None]:
     context = AgentContext(request_id="req-1", query="hello")
-    agent = BaseAgent(context)
+    agent = AgentRun(spec=AgentSpec(name="turn_runner_test"), context=context)
     events: list[RuntimeEvent] = []
     result: str | None = None
 
@@ -70,7 +71,7 @@ async def test_turn_runner_classifies_failures(
     reason: TerminalReason,
 ) -> None:
     context = AgentContext(request_id="req-1", query="hello")
-    agent = BaseAgent(context)
+    agent = AgentRun(spec=AgentSpec(name="turn_runner_test"), context=context)
     events: list[RuntimeEvent] = []
 
     async def on_event(event: RuntimeEvent) -> None:
@@ -93,7 +94,7 @@ async def test_turn_runner_classifies_failures(
 
 async def test_turn_runner_records_cancelled() -> None:
     context = AgentContext(request_id="req-1", query="hello")
-    agent = BaseAgent(context)
+    agent = AgentRun(spec=AgentSpec(name="turn_runner_test"), context=context)
     events: list[RuntimeEvent] = []
 
     async def on_event(event: RuntimeEvent) -> None:

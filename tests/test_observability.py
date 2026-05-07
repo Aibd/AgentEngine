@@ -4,12 +4,13 @@ import logging
 
 import httpx
 
-from agent_core.base.agent import BaseAgent
+from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
 from agent_core.handlers.react import ReActHandler
 from agent_core.llm.client import LLMResponse
 from agent_core.llm.openai_compat import OpenAICompatibleClient
 from agent_core.memory.message import Message
+from agent_core.spec import AgentSpec
 from agent_core.tools.base import Tool
 from agent_core.tools.collection import ToolCollection
 from mock_llm import MockLLMClient
@@ -28,8 +29,7 @@ class _EchoTool(Tool):
         return kwargs.get("text", "")
 
 
-class _ToolAgent(BaseAgent):
-    name = "tool_agent"
+_TOOL_AGENT_SPEC = AgentSpec(name="tool_agent")
 
 
 async def test_react_logs_run_and_tool_without_argument_values(caplog):
@@ -57,7 +57,8 @@ async def test_react_logs_run_and_tool_without_argument_values(caplog):
         tool_collection=ToolCollection([_EchoTool()]),
     )
 
-    result = await ReActHandler().handle(_ToolAgent(context), context, "run")
+    agent = AgentRun(spec=_TOOL_AGENT_SPEC, context=context)
+    result = await ReActHandler().handle(agent, context, "run")
 
     assert result == "done"
     assert "react_run_start request_id=req-log" in caplog.text

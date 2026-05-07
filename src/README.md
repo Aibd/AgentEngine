@@ -6,8 +6,9 @@
 
 ```text
 agent_core/
-  base/          BaseAgent, AgentContext, AgentState
-  handlers/      ReActHandler, PipelineHandler, LegacyHandler
+  spec.py        AgentSpec — 不可变 Agent 配置（frozen dataclass）
+  base/          AgentRun（per-run 状态容器）, AgentContext, AgentState
+  handlers/      ReActHandler（Phase 3 后将内联为函数）
   llm/           OpenAI 兼容客户端和 LLM 协议类型
   memory/        Message 和 Memory
   runtime/       TurnRunner, RunState, 语义 RuntimeEvent 类
@@ -16,6 +17,11 @@ agent_core/
   tools/builtin/ ReadFileTool, SkillTool
   persistence/   PersistencePort 协议
   observability/ RunEventLog JSONL 写入器
+
+agents/
+  __init__.py    REGISTRY: dict[str, AgentSpec] — 显式注册表
+  general_chat/  spec.py — SPEC = AgentSpec(name="general_chat", ...)
+  deep_research/ spec.py — SPEC = AgentSpec(name="deep_research", ...)
 ```
 
 ## 规划模型

@@ -1,3 +1,3 @@
-﻿from agents.general_chat.agent import GeneralChatAgent
+from agents.general_chat.spec import SPEC
 
-__all__ = ["GeneralChatAgent"]
+__all__ = ["SPEC"]

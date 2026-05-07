@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
-from agent_core.base.agent import BaseAgent
+from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
 from agent_core.errors import LLMContextWindowError, LLMError, ToolExecutionError
 from agent_core.handlers.base import AgentHandler
@@ -27,8 +27,8 @@ EventCallback = Callable[[RuntimeEvent], Awaitable[None] | None]
 class TurnRunner:
     """Lifecycle manager for one agent turn.
 
-    Handlers still own the concrete ReAct/Pipeline/Legacy strategy. The runner
-    wraps that call with run identifiers, state transitions, and runtime events.
+    The handler owns the think/act loop. The runner wraps that call with
+    run identifiers, state transitions, and runtime events.
     """
 
     def __init__(
@@ -45,7 +45,7 @@ class TurnRunner:
     async def run(
         self,
         *,
-        agent: BaseAgent,
+        agent: AgentRun,
         handler: AgentHandler,
         context: AgentContext,
         query: str,

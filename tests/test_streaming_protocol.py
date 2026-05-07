@@ -12,11 +12,13 @@ on this ordering — regressions here will break the user-facing UI.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
+from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
 from agent_core.handlers.react import ReActHandler
 from agent_core.llm.client import LLMResponse
 from agent_core.memory.memory import Memory
-from agent_core.registry.agent_registry import create_agent
 from agent_core.runtime.events import (
     ReasoningDelta,
     ToolCallCompleted,
@@ -29,9 +31,15 @@ from agent_core.stream.event_stream import EventStream
 from agent_core.stream.printer import Printer
 from agent_core.tools.base import Tool
 from agent_core.tools.collection import ToolCollection
+from agents.general_chat.spec import SPEC as GENERAL_CHAT_SPEC
 from mock_llm import MockLLMClient
 
-import agents.general_chat  # noqa: F401 - registers the test agent
+
+def _make_agent(context: AgentContext, *, max_steps: int | None = None) -> AgentRun:
+    spec = GENERAL_CHAT_SPEC
+    if max_steps is not None and max_steps != spec.max_steps:
+        spec = replace(spec, max_steps=max_steps)
+    return AgentRun(spec=spec, context=context)
 
 
 class _StaticTool(Tool):
@@ -74,7 +82,7 @@ class TestNoToolPath:
             LLMResponse(content="hi", finish_reason="stop", usage={"prompt_tokens": 10, "completion_tokens": 2}),
         ])
         ctx, stream = await _build_context(llm=llm)
-        agent = create_agent("general_chat", ctx)
+        agent = _make_agent(ctx)
         handler = ReActHandler()
 
         await handler.handle(agent, ctx, "hello")
@@ -87,7 +95,7 @@ class TestNoToolPath:
             LLMResponse(content="ok", finish_reason="stop", usage={"prompt_tokens": 12, "completion_tokens": 3}),
         ])
         ctx, stream = await _build_context(llm=llm)
-        agent = create_agent("general_chat", ctx)
+        agent = _make_agent(ctx)
 
         await ReActHandler().handle(agent, ctx, "hi")
 
@@ -110,7 +118,7 @@ class TestThinkingPath:
             ),
         ])
         ctx, stream = await _build_context(llm=llm)
-        agent = create_agent("general_chat", ctx)
+        agent = _make_agent(ctx)
 
         await ReActHandler().handle(agent, ctx, "hi")
 
@@ -142,7 +150,7 @@ class TestToolCallPath:
             LLMResponse(content="done", finish_reason="stop"),
         ])
         ctx, stream = await _build_context(llm=llm)
-        agent = create_agent("general_chat", ctx, max_steps=3)
+        agent = _make_agent(ctx, max_steps=3)
 
         await ReActHandler().handle(agent, ctx, "use echo")
 
@@ -188,7 +196,7 @@ class TestToolCallPath:
             LLMResponse(content="recovered", finish_reason="stop"),
         ])
         ctx, stream = await _build_context(llm=llm)
-        agent = create_agent("general_chat", ctx, max_steps=3)
+        agent = _make_agent(ctx, max_steps=3)
 
         await ReActHandler().handle(agent, ctx, "use missing")
 
@@ -228,7 +236,7 @@ class TestToolCallPath:
             ),
         ])
         ctx, stream = await _build_context(llm=llm)
-        agent = create_agent("general_chat", ctx, max_steps=5)
+        agent = _make_agent(ctx, max_steps=5)
 
         result = await ReActHandler().handle(agent, ctx, "research with tools")
 

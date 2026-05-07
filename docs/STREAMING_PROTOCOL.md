@@ -1,5 +1,9 @@
 # 流式协议
 
+> ⚠️ **此文档正在重构中。** Phase 5 将删除 `responseAll`、`useTimes` 兼容字段，并将
+> `responseType` 从 JSON 正文移至 SSE 原生 `event:` 行。届时将同步更新本文档。
+> 请参阅 [REFACTOR_PLAN.md](REFACTOR_PLAN.md) 了解完整路线图。
+
 Agent Core 将事件作为单个 SSE 流发出，由终端渲染器（`scripts/chat_pretty.py`）和 React UI（`web/`）共同消费。本文档是服务器与渲染器之间的**传输层契约**。
 
 > 添加新的事件类型是安全的。删除或重新利用现有类型是破坏性变更——如果这样做，请提升契约版本。

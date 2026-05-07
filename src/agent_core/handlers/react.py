@@ -6,7 +6,7 @@ import logging
 import time
 from typing import Any
 
-from agent_core.base.agent import BaseAgent
+from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
 from agent_core.base.state import AgentState
 from agent_core.errors import error_to_dict
@@ -28,8 +28,8 @@ class ReActHandler(AgentHandler):
     """Standard ReAct loop: LLM proposes tool calls, handler executes them,
     results feed back into memory until the LLM emits a content-only reply.
 
-    Drives BaseAgent purely through its memory and hooks; the agent does not
-    implement think/act itself.
+    Drives AgentRun purely through its memory and lifecycle hooks; per-run
+    state lives on the AgentRun, declarative configuration on its AgentSpec.
     """
 
     name = "react"
@@ -43,12 +43,12 @@ class ReActHandler(AgentHandler):
             raise ValueError("tool_timeout_seconds must be greater than 0")
         self.tool_timeout_seconds = tool_timeout_seconds
 
-    async def handle(self, agent: BaseAgent, context: AgentContext, query: str) -> str:
+    async def handle(self, agent: AgentRun, context: AgentContext, query: str) -> str:
         started_at = time.perf_counter()
         primary_error: BaseException | None = None
 
         try:
-            agent.setup()
+            await agent.setup()
             agent.state = AgentState.RUNNING
 
             logger.info(
@@ -116,7 +116,7 @@ class ReActHandler(AgentHandler):
 
     async def _teardown(
         self,
-        agent: BaseAgent,
+        agent: AgentRun,
         context: AgentContext,
         primary_error: BaseException | None,
     ) -> None:
@@ -138,7 +138,7 @@ class ReActHandler(AgentHandler):
                     )
                 raise
 
-    async def _loop(self, agent: BaseAgent, context: AgentContext, query: str) -> str:
+    async def _loop(self, agent: AgentRun, context: AgentContext, query: str) -> str:
         if context.llm is None:
             agent.memory.add_user_message(query)
             return ""
@@ -305,7 +305,7 @@ class ReActHandler(AgentHandler):
                 if func.get("arguments"):
                     slot["function"]["arguments"] += func["arguments"]
 
-    def _build_messages(self, agent: BaseAgent, next_step: str) -> list[Message]:
+    def _build_messages(self, agent: AgentRun, next_step: str) -> list[Message]:
         if not next_step:
             return agent.memory.snapshot()
 
@@ -321,7 +321,7 @@ class ReActHandler(AgentHandler):
 
     async def _execute_tool_calls(
         self,
-        agent: BaseAgent,
+        agent: AgentRun,
         context: AgentContext,
         tool_calls: list[dict[str, Any]],
     ) -> None:

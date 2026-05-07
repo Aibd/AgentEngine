@@ -3,24 +3,25 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
+from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
 from agent_core.handlers.base import AgentHandler
 from agent_core.llm.client import LLMClient
 from agent_core.llm.factory import create_llm_from_env
-from agent_core.registry.agent_registry import create_agent, get_agent_handler
 from agent_core.registry.handler_registry import create_handler
 from agent_core.runtime.events import RuntimeEvent, TextDelta
 from agent_core.runtime.turn_runner import TurnRunner
+from agent_core.spec import AgentSpec
 from agent_core.stream.event_stream import EventStream
 from agent_core.stream.printer import Printer
+from agents import REGISTRY as AGENT_REGISTRY
 
-# Boot-time imports register built-in handlers and sample agents.
+# Boot-time import to register the built-in ReAct handler.
 import agent_core.handlers  # noqa: F401
-import agents.deep_research  # noqa: F401
-import agents.general_chat  # noqa: F401
 
 try:
     import yaml
@@ -81,18 +82,13 @@ class AgentOrchestrationService:
         agent_name: str,
         query: str,
         context: AgentContext | None = None,
-        agent_kwargs: dict[str, Any] | None = None,
         handler_kwargs: dict[str, Any] | None = None,
     ) -> str:
         self._validate_run_inputs(agent_name=agent_name, query=query)
         if not self.is_enabled(agent_name):
             raise RuntimeError(f"Agent disabled in config: {agent_name}")
 
-        cfg = self.agent_config(agent_name)
-        merged_agent_kwargs: dict[str, Any] = {}
-        if "max_steps" in cfg:
-            merged_agent_kwargs["max_steps"] = cfg["max_steps"]
-        merged_agent_kwargs.update(agent_kwargs or {})
+        spec = self._resolve_spec(agent_name)
 
         context = context or AgentContext(request_id="local", query=query)
         if context.llm is None:
@@ -100,9 +96,11 @@ class AgentOrchestrationService:
             self._track_managed_llm(context.llm)
 
         started_at = time.perf_counter()
-        agent = create_agent(agent_name, context, **merged_agent_kwargs)
+        agent = AgentRun(spec=spec, context=context)
         context.extras["agent"] = agent
-        handler_name = cfg.get("handler") or get_agent_handler(agent_name)
+        context.extras["agent_spec"] = spec
+        cfg = self.agent_config(agent_name)
+        handler_name = cfg.get("handler") or "react"
         handler = cast(AgentHandler, create_handler(handler_name, **(handler_kwargs or {})))
         logger.info(
             "agent_run_start request_id=%s agent=%s handler=%s conversation_id=%s",
@@ -137,6 +135,16 @@ class AgentOrchestrationService:
                 agent_name=agent_name,
                 handler_name=handler_name,
             )
+
+    def _resolve_spec(self, agent_name: str) -> AgentSpec:
+        spec = AGENT_REGISTRY.get(agent_name)
+        if spec is None:
+            raise KeyError(f"Agent not registered: {agent_name}")
+        cfg = self.agent_config(agent_name)
+        max_steps = cfg.get("max_steps")
+        if max_steps is not None and max_steps != spec.max_steps:
+            return replace(spec, max_steps=int(max_steps))
+        return spec
 
     def _record_agent_finish(
         self,

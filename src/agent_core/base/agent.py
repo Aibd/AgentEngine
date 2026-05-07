@@ -1,62 +1,53 @@
-from collections.abc import Awaitable, Callable
+"""Per-run mutable state for an agent invocation.
+
+`AgentRun` replaces the old `BaseAgent` class hierarchy. It is no longer
+something you subclass — it is a plain data container for the *runtime*
+state of one agent execution: memory, step counter, lifecycle state.
+
+Identity, prompts, and limits live on `AgentSpec` (frozen, run-invariant).
+The think→act loop receives both: spec for what to do, run for what is
+happening right now.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 
 from agent_core.base.context import AgentContext
 from agent_core.base.state import AgentState
 from agent_core.memory.memory import Memory
+from agent_core.spec import AgentSpec
 
-PipelineStep = Callable[[AgentContext, str], Awaitable[str]]
 
+@dataclass(slots=True)
+class AgentRun:
+    spec: AgentSpec
+    context: AgentContext
+    memory: Memory = field(init=False)
+    current_step: int = 0
+    state: AgentState = AgentState.IDLE
 
-class BaseAgent:
-    """Pure context container for an agent run.
+    def __post_init__(self) -> None:
+        self.memory = Memory(max_messages=self.spec.max_messages)
 
-    Loop logic lives in handlers (ReActHandler, PipelineHandler, ...).
-    Subclasses customise per-agent behaviour by overriding `setup()` and
-    `system_prompt()` hooks; they no longer implement think/act loops.
-    """
+    @property
+    def name(self) -> str:
+        return self.spec.name
 
-    name: str = "base"
-    description: str = ""
-
-    def __init__(
-        self,
-        context: AgentContext,
-        *,
-        max_steps: int = 10,
-        max_messages: int = 0,
-    ) -> None:
-        if max_steps < 1:
-            raise ValueError("max_steps must be at least 1")
-        if max_messages < 0:
-            raise ValueError("max_messages must be at least 0")
-        self.context = context
-        self.memory = Memory(max_messages=max_messages)
-        self.max_steps = max_steps
-        self.current_step = 0
-        self.state = AgentState.IDLE
-
-    def setup(self) -> None:
-        """Called once by the handler before the loop starts.
-
-        Override to register tools, seed memory, or inject extras into
-        the context. Default is a no-op.
-        """
-
-    async def teardown(self) -> None:
-        """Called once by the handler after the run exits.
-
-        Override to release per-run resources created in `setup()` or during
-        execution. Default is a no-op.
-        """
+    @property
+    def max_steps(self) -> int:
+        return self.spec.max_steps
 
     def system_prompt(self) -> str:
-        """Return the system prompt for this agent. Empty disables it."""
-        return ""
+        return self.spec.system_prompt
 
     def next_step_prompt(self) -> str:
-        """Optional guidance injected before the last user message each turn."""
-        return ""
+        return self.spec.next_step_prompt
 
-    def pipeline_steps(self) -> list[PipelineStep]:
-        """Optional fixed workflow steps for PipelineHandler."""
-        return []
+    async def setup(self) -> None:
+        if self.spec.setup is not None:
+            await self.spec.setup(self.context)
+
+    async def teardown(self) -> None:
+        if self.spec.teardown is not None:
+            await self.spec.teardown(self.context)

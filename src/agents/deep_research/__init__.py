@@ -1,3 +1,3 @@
-﻿from agents.deep_research.agent import DeepResearchAgent
+from agents.deep_research.spec import SPEC
 
-__all__ = ["DeepResearchAgent"]
+__all__ = ["SPEC"]
