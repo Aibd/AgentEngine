@@ -20,7 +20,6 @@ if not exist ".env" (
     echo LLM_TIMEOUT=120>> .env
     echo LLM_MAX_RETRIES=2>> .env
     echo AGENT_CORE_LOG_DIR=logs>> .env
-    echo USE_LEGACY_RUNNER=false>> .env
     echo ✅ 已创建.env示例文件
     echo 请编辑.env文件设置正确的LLM_API_KEY
     echo.

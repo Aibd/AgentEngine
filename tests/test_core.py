@@ -28,28 +28,6 @@ async def test_deep_research_agent_runs():
     assert result == "report draft"
 
 
-async def test_file_clerk_adapter_runs_legacy_factory():
-    class _LegacyFileClerk:
-        def __init__(self, queue):
-            self.queue = queue
-
-        async def run(self):
-            await self.queue.put({"status": "end", "content": "done"})
-            return "legacy finished"
-
-    service = AgentOrchestrationService()
-    context = AgentContext(request_id="t3", query="file please")
-
-    result = await service.run(
-        agent_name="file_clerk",
-        query="file please",
-        context=context,
-        agent_kwargs={"legacy_factory": lambda queue: _LegacyFileClerk(queue)},
-    )
-
-    assert result == "legacy finished"
-
-
 async def test_streaming_context_factory():
     service = AgentOrchestrationService()
     context, stream = service.create_streaming_context(

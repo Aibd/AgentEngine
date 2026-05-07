@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -22,7 +21,6 @@ from agent_core.stream.printer import Printer
 import agent_core.handlers  # noqa: F401
 import agents.deep_research  # noqa: F401
 import agents.general_chat  # noqa: F401
-import agents.adapters  # noqa: F401
 
 try:
     import yaml
@@ -114,17 +112,6 @@ class AgentOrchestrationService:
             context.conversation_id,
         )
 
-        if self._use_legacy_runner():
-            return await self._run_legacy(
-                agent=agent,
-                handler=handler,
-                context=context,
-                query=query,
-                started_at=started_at,
-                agent_name=agent_name,
-                handler_name=handler_name,
-            )
-
         async def on_runtime_event(event: RuntimeEvent) -> None:
             # Handlers still emit the public SSE stream in Phase 0. Only forward
             # runtime events that are not already represented by handler output.
@@ -142,28 +129,6 @@ class AgentOrchestrationService:
                 query=query,
                 on_event=on_runtime_event,
             )
-        finally:
-            self._record_agent_finish(
-                agent=agent,
-                context=context,
-                started_at=started_at,
-                agent_name=agent_name,
-                handler_name=handler_name,
-            )
-
-    async def _run_legacy(
-        self,
-        *,
-        agent: Any,
-        handler: AgentHandler,
-        context: AgentContext,
-        query: str,
-        started_at: float,
-        agent_name: str,
-        handler_name: str,
-    ) -> str:
-        try:
-            return await handler.handle(agent, context, query)
         finally:
             self._record_agent_finish(
                 agent=agent,
@@ -194,9 +159,6 @@ class AgentOrchestrationService:
             agent.current_step,
             time.perf_counter() - started_at,
         )
-
-    def _use_legacy_runner(self) -> bool:
-        return os.getenv("USE_LEGACY_RUNNER", "").lower() in {"1", "true", "yes", "on"}
 
     def _track_managed_llm(self, llm: LLMClient | None) -> None:
         if llm is None or not hasattr(llm, "close"):

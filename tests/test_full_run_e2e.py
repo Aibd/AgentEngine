@@ -9,7 +9,6 @@ from services.agent_orchestration_service import AgentOrchestrationService
 
 async def test_full_run_records_runtime_events_and_sse(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("AGENT_CORE_LOG_DIR", str(tmp_path))
-    monkeypatch.delenv("USE_LEGACY_RUNNER", raising=False)
     service = AgentOrchestrationService()
     context, stream = service.create_streaming_context(
         request_id="req-e2e",
