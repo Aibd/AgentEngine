@@ -18,8 +18,8 @@ if str(SRC) not in sys.path:
 
 from agent_core.base.context import AgentContext  # noqa: E402
 from agent_core.llm.factory import create_llm_from_env  # noqa: E402
-from agent_core.stream.event_stream import EventStream  # noqa: E402
 from agent_core.stream.printer import Printer  # noqa: E402
+from agent_core.stream.sse_queue import SseEventQueue  # noqa: E402
 from services import AgentOrchestrationService  # noqa: E402
 
 
@@ -73,7 +73,7 @@ async def run() -> int:
     llm = create_llm_from_env(required=True)
     assert llm is not None
 
-    event_stream = EventStream() if args.trace else None
+    event_stream = SseEventQueue() if args.trace else None
     printer = (
         Printer(
             request_id=args.request_id,
@@ -110,7 +110,7 @@ async def run() -> int:
     return 0
 
 
-def print_trace(context: AgentContext, event_stream: EventStream | None) -> None:
+def print_trace(context: AgentContext, event_stream: SseEventQueue | None) -> None:
     print("\n--- events ---")
     for event in drain_events(event_stream):
         print(json.dumps(event, ensure_ascii=False, indent=2))
@@ -120,7 +120,7 @@ def print_trace(context: AgentContext, event_stream: EventStream | None) -> None
         print(f"[{index}] {json.dumps(message, ensure_ascii=False, indent=2)}")
 
 
-def drain_events(event_stream: EventStream | None) -> list[dict[str, Any]]:
+def drain_events(event_stream: SseEventQueue | None) -> list[dict[str, Any]]:
     if event_stream is None:
         return []
     events: list[dict[str, Any]] = []

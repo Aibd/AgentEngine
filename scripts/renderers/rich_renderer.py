@@ -13,8 +13,8 @@ Design principles:
   ``tool_call_start`` arrives; the result panel prints as soon as
   ``tool_result`` arrives. The model "speaks" the tool call.
 
-The renderer consumes events through ``handle(event)`` so it can be driven by
-the SSE stream from any source (the CLI uses ``EventStream``).
+The renderer consumes SSE v2 frames through ``handle(event)`` so it can be
+driven by the stream from any source.
 """
 
 from __future__ import annotations
@@ -74,30 +74,32 @@ class RichRenderer:
     # ------------------------------------------------------------------
 
     def handle(self, event: dict[str, Any]) -> None:
-        kind = event.get("responseType")
-        data = event.get("response")
-        result_map = event.get("resultMap")
+        if "comment" in event:
+            return
+        kind = event.get("event")
+        data = event.get("data")
+        payload = data if isinstance(data, dict) else {"value": data}
 
         if kind == "start":
-            self._on_start(data)
+            self._on_start(payload)
         elif kind == "step":
-            self._on_step(result_map or {})
+            self._on_step(payload)
         elif kind == "thinking":
-            self._on_thinking(data)
+            self._on_thinking(payload.get("delta", ""))
         elif kind == "text":
-            self._on_text(data)
+            self._on_text(payload.get("delta", ""))
         elif kind == "tool_call_start":
-            self._on_tool_call_start(result_map or {})
+            self._on_tool_call_start(payload)
         elif kind == "tool_result":
-            self._on_tool_result(result_map or {})
+            self._on_tool_result(payload)
         elif kind == "step_end":
-            self._on_step_end(result_map or {})
+            self._on_step_end(payload)
         elif kind == "usage":
-            self._on_usage(result_map or {})
-        elif kind == "result":
-            self._on_result(result_map or {})
+            self._on_usage(payload)
+        elif kind == "done":
+            self._on_done(payload)
         elif kind == "error":
-            self._on_error(result_map if isinstance(result_map, dict) else (data if isinstance(data, dict) else {"message": str(data)}))
+            self._on_error(payload)
 
     def finish(self) -> None:
         """Print the closing summary card. Call once after the stream ends."""
@@ -129,8 +131,8 @@ class RichRenderer:
     # Event handlers
     # ------------------------------------------------------------------
 
-    def _on_start(self, data: Any) -> None:
-        query = data if isinstance(data, str) else (data.get("query", "") if isinstance(data, dict) else "")
+    def _on_start(self, data: dict[str, Any]) -> None:
+        query = data.get("query", "")
         # The legacy mapping prefixes "开始处理: ". Strip it for nicer display.
         if isinstance(query, str) and query.startswith("开始处理: "):
             query = query[len("开始处理: "):]
@@ -192,9 +194,9 @@ class RichRenderer:
     def _on_tool_result(self, result_map: dict[str, Any]) -> None:
         tool = result_map.get("tool", "?")
         ok = bool(result_map.get("ok", True))
-        elapsed = float(result_map.get("elapsed_seconds", 0.0))
+        elapsed = float(result_map.get("elapsed_ms", 0)) / 1000
         error_type = result_map.get("error_type", "")
-        result_text = self._coerce_text(result_map.get("toolResult", ""))
+        result_text = self._coerce_text(result_map.get("result", ""))
 
         if ok:
             badge_icon, badge_style, border_style = "✓", "green", "green"
@@ -233,7 +235,7 @@ class RichRenderer:
     def _on_step_end(self, result_map: dict[str, Any]) -> None:
         if self._current is None:
             return
-        self._current.elapsed_seconds = float(result_map.get("elapsed_seconds", 0.0))
+        self._current.elapsed_seconds = float(result_map.get("elapsed_ms", 0)) / 1000
         self._current.has_tool_calls = bool(result_map.get("has_tool_calls", False))
 
         # Flush any unrendered thinking/text from this turn before closing it.
@@ -246,11 +248,8 @@ class RichRenderer:
     def _on_usage(self, result_map: dict[str, Any]) -> None:
         self._usage = dict(result_map)
 
-    def _on_result(self, result_map: dict[str, Any]) -> None:
-        if isinstance(result_map, dict):
-            self._final_result = self._coerce_text(
-                result_map.get("taskSummary") or result_map.get("result") or ""
-            )
+    def _on_done(self, result_map: dict[str, Any]) -> None:
+        self._final_result = self._coerce_text(result_map.get("result", ""))
 
     def _on_error(self, payload: dict[str, Any]) -> None:
         self._error_payload = payload
