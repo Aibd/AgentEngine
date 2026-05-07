@@ -11,12 +11,13 @@ from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
 from agent_core.llm.client import LLMClient
 from agent_core.llm.factory import create_llm_from_env
-from agent_core.runtime.events import RuntimeEvent, TextDelta
+from agent_core.runtime.events import RuntimeEvent
 from agent_core.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS
 from agent_core.runtime.turn_runner import TurnRunner
 from agent_core.spec import AgentSpec
-from agent_core.stream.event_stream import EventStream
 from agent_core.stream.printer import Printer
+from agent_core.stream.sse_queue import SseEventQueue
+from agent_core.stream.sse_sink import SseSink
 from agents import REGISTRY as AGENT_REGISTRY
 
 try:
@@ -80,12 +81,13 @@ class AgentOrchestrationService:
         query: str,
         context: AgentContext | None = None,
         tool_timeout_seconds: float | None = DEFAULT_TOOL_TIMEOUT_SECONDS,
+        agent_kwargs: dict[str, Any] | None = None,
     ) -> str:
         self._validate_run_inputs(agent_name=agent_name, query=query)
         if not self.is_enabled(agent_name):
             raise RuntimeError(f"Agent disabled in config: {agent_name}")
 
-        spec = self._resolve_spec(agent_name)
+        spec = self._resolve_spec(agent_name, agent_kwargs=agent_kwargs)
 
         context = context or AgentContext(request_id="local", query=query)
         if context.llm is None:
@@ -103,11 +105,10 @@ class AgentOrchestrationService:
             context.conversation_id,
         )
 
+        sse_sink = SseSink(context.printer)
+
         async def on_runtime_event(event: RuntimeEvent) -> None:
-            # `run_turn()` drives the public SSE stream itself; only forward
-            # runtime events that aren't already represented by its output.
-            if context.printer and isinstance(event, TextDelta):
-                await context.printer.from_runtime_event(event)
+            await sse_sink.consume(event)
 
         runner = TurnRunner(
             session_id=context.session_id or context.conversation_id or context.request_id
@@ -128,12 +129,17 @@ class AgentOrchestrationService:
                 agent_name=agent_name,
             )
 
-    def _resolve_spec(self, agent_name: str) -> AgentSpec:
+    def _resolve_spec(
+        self,
+        agent_name: str,
+        *,
+        agent_kwargs: dict[str, Any] | None = None,
+    ) -> AgentSpec:
         spec = AGENT_REGISTRY.get(agent_name)
         if spec is None:
             raise KeyError(f"Agent not registered: {agent_name}")
         cfg = self.agent_config(agent_name)
-        max_steps = cfg.get("max_steps")
+        max_steps = (agent_kwargs or {}).get("max_steps", cfg.get("max_steps"))
         if max_steps is not None and max_steps != spec.max_steps:
             return replace(spec, max_steps=int(max_steps))
         return spec
@@ -201,8 +207,8 @@ class AgentOrchestrationService:
         request_id: str,
         query: str,
         conversation_id: str = "",
-    ) -> tuple[AgentContext, EventStream]:
-        event_stream = EventStream()
+    ) -> tuple[AgentContext, SseEventQueue]:
+        event_stream = SseEventQueue()
         printer = Printer(
             request_id=request_id,
             event_stream=event_stream,

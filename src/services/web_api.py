@@ -63,19 +63,27 @@ async def run_stream(
     query = query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="query must not be empty")
+    request_id = f"web-{uuid.uuid4().hex[:12]}"
 
     async def events() -> AsyncIterator[str]:
-        async for payload in _run_agent_events(
+        async for frame in _run_agent_events(
             query=query,
             agent_name=agent_name,
             conversation_id=conversation_id,
+            request_id=request_id,
         ):
-            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            yield _format_sse_frame(frame)
 
     return StreamingResponse(
         events(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "X-Streaming-Protocol": "agent-core.sse.v2",
+            "X-Request-ID": request_id,
+            "X-Conversation-ID": conversation_id,
+        },
     )
 
 
@@ -84,9 +92,10 @@ async def _run_agent_events(
     query: str,
     agent_name: str,
     conversation_id: str,
+    request_id: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     service = AgentOrchestrationService(config_path=REPO_ROOT / "config" / "agents.yaml")
-    request_id = f"web-{uuid.uuid4().hex[:12]}"
+    request_id = request_id or f"web-{uuid.uuid4().hex[:12]}"
     context, event_stream = service.create_streaming_context(
         request_id=request_id,
         query=query,
@@ -119,3 +128,13 @@ async def _run_agent_events(
         else:
             await task
         await service.close()
+
+
+def _format_sse_frame(frame: dict[str, Any]) -> str:
+    comment = frame.get("comment")
+    if comment is not None:
+        return "\n".join(f": {line}" for line in str(comment).splitlines()) + "\n\n"
+
+    event = str(frame.get("event", "message"))
+    data = json.dumps(frame.get("data", {}), ensure_ascii=False)
+    return f"event: {event}\ndata: {data}\n\n"

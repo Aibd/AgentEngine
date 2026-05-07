@@ -4,6 +4,10 @@
 the former `ReActHandler` polymorphism: there is no handler dispatch, no
 strategy class to register — orchestration calls this function directly.
 
+All observable events flow through a single `emit(RuntimeEvent)` channel.
+The SSE bridge (`Printer.from_runtime_event`) and any other sinks subscribe
+to that channel - `run_turn()` itself never touches `context.printer`.
+
 Mirrors the codex/claude-code-src pattern where the loop is a single function
 parameterised by data (AgentSpec) instead of a hierarchy of handler classes.
 """
@@ -11,24 +15,35 @@ parameterised by data (AgentSpec) instead of a hierarchy of handler classes.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
 from agent_core.base.state import AgentState
-from agent_core.errors import error_to_dict
 from agent_core.llm.client import LLMResponse
 from agent_core.memory.message import Message
-from agent_core.runtime.events import RuntimeEvent
-from agent_core.stream.events import EventType
+from agent_core.runtime.events import (
+    ReasoningDelta,
+    RuntimeEvent,
+    TextDelta,
+    ToolCallFailed,
+    ToolCallStarted,
+    TurnEnded,
+    TurnStarted,
+    UsageReport,
+)
 from agent_core.tools.executor import ToolExecutor
 
 
 DEFAULT_TOOL_TIMEOUT_SECONDS = 30.0
 logger = logging.getLogger(__name__)
+
+EmitFn = Callable[[RuntimeEvent], Awaitable[None] | None]
 
 
 async def run_turn(
@@ -37,14 +52,23 @@ async def run_turn(
     query: str,
     *,
     tool_timeout_seconds: float | None = DEFAULT_TOOL_TIMEOUT_SECONDS,
+    emit: EmitFn | None = None,
 ) -> str:
     """Drive one agent run to completion.
 
     Owns lifecycle: setup → memory hydration → loop → state transition →
     teardown. Returns the final assistant content.
+
+    `emit` receives every RuntimeEvent the loop produces. The default no-ops;
+    `TurnRunner` supplies a real emitter that fans out to the SSE bridge and
+    JSONL log.
     """
     if tool_timeout_seconds is not None and tool_timeout_seconds <= 0:
         raise ValueError("tool_timeout_seconds must be greater than 0")
+
+    run_id = str(context.extras.get("run_id", context.request_id))
+    turn_id = str(context.extras.get("turn_id", context.request_id))
+    emit_event = _coerce_emit(emit)
 
     started_at = time.perf_counter()
     primary_error: BaseException | None = None
@@ -63,10 +87,15 @@ async def run_turn(
         if context.persistence and context.conversation_id:
             await agent.memory.load_from_db(context.persistence, context.conversation_id)
 
-        if context.printer:
-            await context.printer.send(EventType.START, query)
-
-        result = await _loop(agent, context, query, tool_timeout_seconds=tool_timeout_seconds)
+        result = await _loop(
+            agent,
+            context,
+            query,
+            tool_timeout_seconds=tool_timeout_seconds,
+            emit=emit_event,
+            run_id=run_id,
+            turn_id=turn_id,
+        )
         agent.state = AgentState.FINISHED
         logger.info(
             "agent_run_finish request_id=%s agent=%s steps=%d elapsed=%.3fs",
@@ -75,11 +104,9 @@ async def run_turn(
             agent.current_step,
             time.perf_counter() - started_at,
         )
-        if context.printer:
-            await context.printer.send(EventType.RESULT, {"result": result}, finished=True)
         return result
-    except asyncio.CancelledError as exc:
-        primary_error = exc
+    except asyncio.CancelledError:
+        primary_error = asyncio.CancelledError()
         agent.state = AgentState.CANCELLED
         logger.warning(
             "agent_run_cancelled request_id=%s agent=%s steps=%d elapsed=%.3fs",
@@ -99,8 +126,6 @@ async def run_turn(
             agent.current_step,
             time.perf_counter() - started_at,
         )
-        if context.printer:
-            await context.printer.send(EventType.ERROR, error_to_dict(exc), finished=True)
         raise
     finally:
         if context.persistence and context.conversation_id:
@@ -115,6 +140,21 @@ async def run_turn(
         await _teardown(agent, context, primary_error)
 
 
+def _coerce_emit(emit: EmitFn | None) -> Callable[[RuntimeEvent], Awaitable[None]]:
+    async def _noop(event: RuntimeEvent) -> None:
+        return None
+
+    if emit is None:
+        return _noop
+
+    async def _wrapped(event: RuntimeEvent) -> None:
+        result = emit(event)
+        if inspect.isawaitable(result):
+            await result
+
+    return _wrapped
+
+
 async def _teardown(
     agent: AgentRun,
     context: AgentContext,
@@ -122,7 +162,7 @@ async def _teardown(
 ) -> None:
     try:
         await agent.teardown()
-    except Exception as exc:
+    except Exception:
         logger.exception(
             "agent_teardown_error request_id=%s agent=%s",
             context.request_id,
@@ -130,12 +170,6 @@ async def _teardown(
         )
         if primary_error is None:
             agent.state = AgentState.ERROR
-            if context.printer:
-                await context.printer.send(
-                    EventType.ERROR,
-                    error_to_dict(exc),
-                    finished=True,
-                )
             raise
 
 
@@ -145,6 +179,9 @@ async def _loop(
     query: str,
     *,
     tool_timeout_seconds: float | None,
+    emit: Callable[[RuntimeEvent], Awaitable[None]],
+    run_id: str,
+    turn_id: str,
 ) -> str:
     if context.llm is None:
         agent.memory.add_user_message(query)
@@ -166,8 +203,9 @@ async def _loop(
         agent.current_step += 1
         turn_started_at = time.perf_counter()
 
-        if context.printer:
-            await context.printer.step(agent.current_step)
+        await emit(
+            TurnStarted(run_id=run_id, turn_id=turn_id, turn=agent.current_step)
+        )
 
         messages = _build_messages(agent, next_step)
         tools = (
@@ -176,7 +214,9 @@ async def _loop(
             else None
         )
 
-        response = await _chat_streaming(context, messages, tools=tools)
+        response = await _chat_streaming(
+            context, messages, tools=tools, emit=emit, run_id=run_id, turn_id=turn_id
+        )
 
         if response.usage:
             prompt_tokens_total += int(response.usage.get("prompt_tokens", 0) or 0)
@@ -200,23 +240,34 @@ async def _loop(
                 context,
                 response.tool_calls,
                 tool_timeout_seconds=tool_timeout_seconds,
+                emit=emit,
+                run_id=run_id,
+                turn_id=turn_id,
             )
 
-        if context.printer:
-            await context.printer.step_end(
-                agent.current_step, has_tool_calls, turn_elapsed
+        await emit(
+            TurnEnded(
+                run_id=run_id,
+                turn_id=turn_id,
+                turn=agent.current_step,
+                has_tool_calls=has_tool_calls,
+                elapsed_seconds=turn_elapsed,
             )
+        )
 
         if not has_tool_calls:
             break
 
-    if context.printer:
-        await context.printer.usage(
+    await emit(
+        UsageReport(
+            run_id=run_id,
+            turn_id=turn_id,
             prompt_tokens=prompt_tokens_total,
             completion_tokens=completion_tokens_total,
             total_tokens=prompt_tokens_total + completion_tokens_total,
             total_seconds=time.perf_counter() - loop_started_at,
         )
+    )
 
     return final_answer
 
@@ -226,6 +277,9 @@ async def _chat_streaming(
     messages: list[Message],
     *,
     tools: list[dict[str, Any]] | None,
+    emit: Callable[[RuntimeEvent], Awaitable[None]],
+    run_id: str,
+    turn_id: str,
 ) -> LLMResponse:
     if context.llm is None:
         return LLMResponse()
@@ -253,12 +307,16 @@ async def _chat_streaming(
         async for chunk in chat_stream(messages, tools=tools):
             if chunk.content:
                 content_parts.append(chunk.content)
-                if context.printer:
-                    await context.printer.send(EventType.TEXT, chunk.content)
+                await emit(
+                    TextDelta(run_id=run_id, turn_id=turn_id, content=chunk.content)
+                )
             if chunk.reasoning_content:
                 reasoning_parts.append(chunk.reasoning_content)
-                if context.printer:
-                    await context.printer.thinking(chunk.reasoning_content)
+                await emit(
+                    ReasoningDelta(
+                        run_id=run_id, turn_id=turn_id, content=chunk.reasoning_content
+                    )
+                )
             if chunk.usage:
                 usage = chunk.usage
             if chunk.finish_reason:
@@ -338,21 +396,14 @@ async def _execute_tool_calls(
     tool_calls: list[dict[str, Any]],
     *,
     tool_timeout_seconds: float | None,
+    emit: Callable[[RuntimeEvent], Awaitable[None]],
+    run_id: str,
+    turn_id: str,
 ) -> None:
-    runtime_events = context.extras.setdefault("runtime_events", [])
-
-    async def on_tool_event(event: RuntimeEvent) -> None:
-        runtime_events.append(event)
-
-    async def on_stream_event(event_type: str, data: Any) -> None:
-        if context.printer:
-            await context.printer.send(event_type, data)
-
     executor = ToolExecutor(
-        run_id=str(context.extras.get("run_id", context.request_id)),
-        turn_id=str(context.extras.get("turn_id", context.request_id)),
-        on_event=on_tool_event,
-        on_stream_event=on_stream_event,
+        run_id=run_id,
+        turn_id=turn_id,
+        on_event=emit,
         timeout_seconds=tool_timeout_seconds,
     )
 
@@ -368,72 +419,69 @@ async def _execute_tool_calls(
         except json.JSONDecodeError:
             tool_args = {}
 
-        if context.printer:
-            await context.printer.tool_call_start(
-                tool_name,
-                tool_args,
-                tool_call_id=tc.get("id", ""),
-            )
-
         tool = (
             context.tool_collection.get(tool_name)
             if context.tool_collection
             else None
         )
-        ok = True
-        elapsed = 0.0
-        error_type = ""
+
         if tool is None:
+            tool_call_id = tc.get("id", "") or ""
             rendered = f"Unknown tool: {tool_name}"
-            ok = False
-            error_type = "ToolNotFound"
             logger.warning(
                 "tool_call_missing request_id=%s tool=%s",
                 context.request_id,
                 tool_name,
             )
-        else:
-            started_at = time.perf_counter()
+            await emit(
+                ToolCallStarted(
+                    run_id=run_id,
+                    turn_id=turn_id,
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    arguments=tool_args,
+                )
+            )
+            await emit(
+                ToolCallFailed(
+                    run_id=run_id,
+                    turn_id=turn_id,
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    error_type="ToolNotFound",
+                    error_message=rendered,
+                    elapsed_seconds=0.0,
+                )
+            )
+            agent.memory.add_tool_message(rendered, tool_call_id=tool_call_id)
+            continue
+
+        logger.info(
+            "tool_call_start request_id=%s tool=%s arg_keys=%s",
+            context.request_id,
+            tool_name,
+            sorted(tool_args.keys()),
+        )
+        result = await executor.execute(
+            tool,
+            tool_args,
+            tool_call_id=tc.get("id", "") or None,
+        )
+        if result.ok:
             logger.info(
-                "tool_call_start request_id=%s tool=%s arg_keys=%s",
+                "tool_call_finish request_id=%s tool=%s elapsed=%.3fs truncated=%s",
                 context.request_id,
                 tool_name,
-                sorted(tool_args.keys()),
+                result.elapsed_seconds,
+                result.truncated,
             )
-            result = await executor.execute(
-                tool,
-                tool_args,
-                tool_call_id=tc.get("id", "") or None,
-            )
-            elapsed = result.elapsed_seconds
-            ok = result.ok
-            if result.ok:
-                logger.info(
-                    "tool_call_finish request_id=%s tool=%s elapsed=%.3fs truncated=%s",
-                    context.request_id,
-                    tool_name,
-                    elapsed,
-                    result.truncated,
-                )
-            else:
-                error_type = "ToolError"
-                logger.warning(
-                    "tool_call_failed request_id=%s tool=%s error=%s elapsed=%.3fs",
-                    context.request_id,
-                    tool_name,
-                    result.error,
-                    elapsed,
-                )
-            rendered = result.content
-
-        agent.memory.add_tool_message(rendered, tool_call_id=tc.get("id", ""))
-
-        if context.printer:
-            await context.printer.tool_result(
+        else:
+            logger.warning(
+                "tool_call_failed request_id=%s tool=%s error=%s elapsed=%.3fs",
+                context.request_id,
                 tool_name,
-                rendered,
-                ok=ok,
-                elapsed_seconds=elapsed,
-                tool_call_id=tc.get("id", ""),
-                error_type=error_type,
+                result.error,
+                result.elapsed_seconds,
             )
+
+        agent.memory.add_tool_message(result.content, tool_call_id=tc.get("id", ""))

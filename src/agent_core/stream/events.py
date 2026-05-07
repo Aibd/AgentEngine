@@ -4,8 +4,7 @@ from enum import Enum
 class EventType(str, Enum):
     """Stream event types emitted via Printer.
 
-    Stable string values matter: the existing SSE contract uses these as
-    `responseType` keys consumed by the front end.
+    Stable string values matter: SSE v2 uses these as `event:` names.
 
     Runtime lifecycle events are defined in `agent_core.runtime.events`.
     Keep this module focused on the external stream protocol.
@@ -30,14 +29,13 @@ class EventType(str, Enum):
     # Telemetry
     USAGE = "usage"          # token / duration totals at run end
 
-    # Legacy / compatibility (kept so older front ends keep working)
+    # Compatibility events from streaming tools.
     TASK = "task"
     TOOL_THOUGHT = "tool_thought"
     SEARCH_RESULT = "search_result"
     FINAL_RESULT = "final_result"
 
     # Terminal
-    RESULT = "result"
     ERROR = "error"
 
 

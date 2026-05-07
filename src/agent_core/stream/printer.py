@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Any
 
-from agent_core.errors import AgentCoreError, error_to_dict
+from agent_core.errors import error_to_dict
 from agent_core.runtime.events import (
     ReasoningDelta,
     RunCancelled,
@@ -13,133 +13,168 @@ from agent_core.runtime.events import (
     ToolCallCompleted,
     ToolCallFailed,
     ToolCallStarted,
+    ToolStreamEventEmitted,
     TurnEnded,
     TurnStarted,
     UsageReport,
 )
-from agent_core.stream.event_stream import EventStream
 from agent_core.stream.events import EventType
-
-
-_TERMINAL_TYPES = {EventType.ERROR, EventType.DONE, EventType.FINAL_RESULT}
+from agent_core.stream.sse_queue import SseEventQueue
 
 
 @dataclass(slots=True)
 class Printer:
-    """Type-safe event emitter that pushes business-shaped events into an EventStream.
+    """Render runtime events into SSE v2 frames.
 
-    The dict shape (responseType / response / responseAll / resultMap / useTimes /
-    reqId / errorMsg / conversation_id / finished) matches the existing SSE
-    contract so frontends do not need to change.
+    Queue entries use this shape:
+    `{"event": "<name>", "data": {...}}`.
+    The HTTP layer turns them into `event:` / `data:` lines.
     """
 
     request_id: str
-    event_stream: EventStream
+    event_stream: SseEventQueue
     conversation_id: str = ""
 
-    async def send(
-        self,
-        event_type: str | EventType,
-        data: Any,
-        *,
-        finished: bool | None = None,
-    ) -> None:
+    async def send(self, event_type: str | EventType, data: Any) -> None:
         type_str = event_type.value if isinstance(event_type, EventType) else str(event_type)
-        if finished is None:
-            try:
-                finished = EventType(type_str) in _TERMINAL_TYPES
-            except ValueError:
-                finished = False
-
-        # Build response / resultMap per event type to match the legacy
-        # GptProcessResult contract consumed by the frontend.
-        response, result_map = _build_response(type_str, data)
-
-        error_msg = _error_message(data) if type_str == EventType.ERROR.value else None
-
-        event = {
-            "responseType": type_str,
-            "response": response,
-            "responseAll": "",
-            "useTimes": 0,
-            "reqId": self.request_id,
-            "errorMsg": error_msg,
-            "resultMap": result_map,
-            "conversation_id": self.conversation_id,
-            "finished": bool(finished),
-        }
-        await self.event_stream.put(event)
+        await self.event_stream.put_event(type_str, self._with_base_meta(data))
 
     async def from_runtime_event(self, event: RuntimeEvent) -> None:
-        """Translate a runtime event into the existing SSE envelope."""
+        """Translate a RuntimeEvent into a v2 SSE frame."""
         if isinstance(event, RunStarted):
-            await self.start(event.input_summary)
+            await self.event_stream.put_comment(
+                " ".join(
+                    [
+                        f"run_id={event.run_id}",
+                        f"turn_id={event.turn_id}",
+                        f"request_id={self.request_id}",
+                        f"conversation_id={self.conversation_id}",
+                    ]
+                )
+            )
+            await self._runtime_frame(
+                EventType.START,
+                event,
+                {
+                    "query": event.input_summary,
+                    "agent": event.agent_name,
+                },
+            )
         elif isinstance(event, TurnStarted):
-            await self.step(event.turn)
+            await self._runtime_frame(EventType.STEP, event, {"turn": event.turn})
         elif isinstance(event, TurnEnded):
-            await self.step_end(event.turn, event.has_tool_calls, event.elapsed_seconds)
+            await self._runtime_frame(
+                EventType.STEP_END,
+                event,
+                {
+                    "turn": event.turn,
+                    "has_tool_calls": event.has_tool_calls,
+                    "elapsed_ms": _seconds_to_ms(event.elapsed_seconds),
+                },
+            )
         elif isinstance(event, ReasoningDelta):
-            await self.thinking(event.content)
+            await self._runtime_frame(EventType.THINKING, event, {"delta": event.content})
         elif isinstance(event, TextDelta):
-            await self.text(event.content)
+            await self._runtime_frame(EventType.TEXT, event, {"delta": event.content})
         elif isinstance(event, ToolCallStarted):
-            await self.tool_call_start(event.tool_name, event.arguments, tool_call_id=event.tool_call_id)
+            await self._runtime_frame(
+                EventType.TOOL_CALL_START,
+                event,
+                {
+                    "tool": event.tool_name,
+                    "arguments": event.arguments,
+                    "tool_call_id": event.tool_call_id,
+                },
+            )
+        elif isinstance(event, ToolStreamEventEmitted):
+            await self._runtime_frame(
+                event.stream_event_type,
+                event,
+                event.data,
+            )
         elif isinstance(event, ToolCallCompleted):
-            await self.tool_result(
-                event.tool_name,
-                event.result_summary,
-                ok=True,
-                elapsed_seconds=event.elapsed_seconds,
-                tool_call_id=event.tool_call_id,
+            await self._runtime_frame(
+                EventType.TOOL_RESULT,
+                event,
+                {
+                    "tool": event.tool_name,
+                    "ok": True,
+                    "result": event.result_summary,
+                    "elapsed_ms": _seconds_to_ms(event.elapsed_seconds),
+                    "tool_call_id": event.tool_call_id,
+                },
             )
         elif isinstance(event, ToolCallFailed):
-            await self.tool_result(
-                event.tool_name,
-                f"Tool error: {event.error_message}",
-                ok=False,
-                elapsed_seconds=event.elapsed_seconds,
-                tool_call_id=event.tool_call_id,
-                error_type=event.error_type,
+            await self._runtime_frame(
+                EventType.TOOL_RESULT,
+                event,
+                {
+                    "tool": event.tool_name,
+                    "ok": False,
+                    "result": f"Tool error: {event.error_message}",
+                    "elapsed_ms": _seconds_to_ms(event.elapsed_seconds),
+                    "tool_call_id": event.tool_call_id,
+                    "error_type": event.error_type,
+                    "error_message": event.error_message,
+                },
             )
         elif isinstance(event, UsageReport):
-            await self.usage(
-                prompt_tokens=event.prompt_tokens,
-                completion_tokens=event.completion_tokens,
-                total_tokens=event.total_tokens,
-                total_seconds=event.total_seconds,
+            await self._runtime_frame(
+                EventType.USAGE,
+                event,
+                {
+                    "prompt_tokens": event.prompt_tokens,
+                    "completion_tokens": event.completion_tokens,
+                    "total_tokens": event.total_tokens,
+                    "total_seconds": event.total_seconds,
+                    "elapsed_ms": _seconds_to_ms(event.total_seconds),
+                },
             )
         elif isinstance(event, RunCompleted):
-            await self.result({"result": event.result_summary})
-        elif isinstance(event, RunFailed):
-            await self.error(
+            await self._runtime_frame(
+                EventType.DONE,
+                event,
                 {
+                    "reason": "completed",
+                    "result": event.result_summary,
+                    "elapsed_ms": _seconds_to_ms(event.elapsed_seconds),
+                },
+            )
+        elif isinstance(event, RunFailed):
+            await self._runtime_frame(
+                EventType.ERROR,
+                event,
+                event.error_payload
+                if event.error_payload is not None
+                else {
                     "code": event.terminal_reason,
                     "message": event.error_message,
                     "category": "runtime",
                     "retryable": False,
                     "details": {"type": event.error_type},
-                }
+                },
             )
         elif isinstance(event, RunCancelled):
-            await self.error(
+            await self._runtime_frame(
+                EventType.ERROR,
+                event,
                 {
                     "code": "cancelled",
                     "message": event.reason,
                     "category": "runtime",
                     "retryable": False,
-                }
+                    "elapsed_ms": _seconds_to_ms(event.elapsed_seconds),
+                },
             )
-
-    # -- Convenience shortcuts -----------------------------------------
 
     async def start(self, query: str) -> None:
         await self.send(EventType.START, {"query": query})
 
     async def text(self, content: str) -> None:
-        await self.send(EventType.TEXT, content)
+        await self.send(EventType.TEXT, {"delta": content})
 
     async def task(self, description: str) -> None:
-        await self.send(EventType.TASK, description)
+        await self.send(EventType.TASK, {"description": description})
 
     async def tool_thought(self, content: str) -> None:
         await self.send(EventType.TOOL_THOUGHT, {"content": content})
@@ -156,9 +191,9 @@ class Printer:
     ) -> None:
         payload: dict[str, Any] = {
             "tool": tool,
-            "toolResult": result,
             "ok": ok,
-            "elapsed_seconds": elapsed_seconds,
+            "result": result,
+            "elapsed_ms": _seconds_to_ms(elapsed_seconds),
             "tool_call_id": tool_call_id,
         }
         if error_type:
@@ -166,9 +201,15 @@ class Printer:
         await self.send(EventType.TOOL_RESULT, payload)
 
     async def thinking(self, content: str) -> None:
-        await self.send(EventType.THINKING, content)
+        await self.send(EventType.THINKING, {"delta": content})
 
-    async def tool_call_start(self, tool: str, arguments: dict[str, Any] | None = None, *, tool_call_id: str = "") -> None:
+    async def tool_call_start(
+        self,
+        tool: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        tool_call_id: str = "",
+    ) -> None:
         await self.send(
             EventType.TOOL_CALL_START,
             {"tool": tool, "arguments": arguments or {}, "tool_call_id": tool_call_id},
@@ -178,14 +219,17 @@ class Printer:
         await self.send(EventType.STEP, {"turn": turn})
 
     async def step_end(
-        self, turn: int, has_tool_calls: bool, elapsed_seconds: float = 0.0
+        self,
+        turn: int,
+        has_tool_calls: bool,
+        elapsed_seconds: float = 0.0,
     ) -> None:
         await self.send(
             EventType.STEP_END,
             {
                 "turn": turn,
                 "has_tool_calls": bool(has_tool_calls),
-                "elapsed_seconds": elapsed_seconds,
+                "elapsed_ms": _seconds_to_ms(elapsed_seconds),
             },
         )
 
@@ -204,89 +248,69 @@ class Printer:
                 "completion_tokens": completion_tokens,
                 "total_tokens": total_tokens,
                 "total_seconds": total_seconds,
+                "elapsed_ms": _seconds_to_ms(total_seconds),
             },
         )
 
     async def result(self, data: Any) -> None:
-        if isinstance(data, dict) and "taskSummary" not in data:
-            data = {"taskSummary": data.get("result", str(data)), **data}
-        await self.send(EventType.RESULT, data, finished=True)
+        result = data.get("result", str(data)) if isinstance(data, dict) else str(data)
+        await self.send(EventType.DONE, {"reason": "completed", "result": result})
 
     async def error(self, error: str | BaseException | dict[str, Any]) -> None:
         data = error_to_dict(error) if isinstance(error, BaseException) else error
-        await self.send(EventType.ERROR, data, finished=True)
+        if isinstance(data, str):
+            data = {"code": "runtime_execution_error", "message": data}
+        await self.send(EventType.ERROR, data)
 
     async def done(self) -> None:
-        await self.send(EventType.DONE, "done", finished=True)
+        await self.send(EventType.DONE, {"reason": "completed"})
 
     async def stream_chunk(self, content: str, finished: bool = False) -> None:
-        await self.send(EventType.TEXT, content, finished=finished)
+        await self.text(content)
+        if finished:
+            await self.done()
+
+    async def _runtime_frame(
+        self,
+        event_type: str | EventType,
+        event: RuntimeEvent,
+        data: Any,
+    ) -> None:
+        type_str = event_type.value if isinstance(event_type, EventType) else str(event_type)
+        await self.event_stream.put_event(
+            type_str,
+            self._with_base_meta(
+                _ensure_mapping(data),
+                run_id=event.run_id,
+                turn_id=event.turn_id,
+            ),
+        )
+
+    def _with_base_meta(
+        self,
+        data: Any,
+        *,
+        run_id: str = "",
+        turn_id: str = "",
+    ) -> Any:
+        if isinstance(data, dict):
+            payload = dict(data)
+        else:
+            payload = {"value": data}
+        payload.setdefault("request_id", self.request_id)
+        payload.setdefault("conversation_id", self.conversation_id)
+        if run_id:
+            payload.setdefault("run_id", run_id)
+        if turn_id:
+            payload.setdefault("turn_id", turn_id)
+        return payload
 
 
-def _error_message(data: Any) -> str:
-    if isinstance(data, AgentCoreError):
-        return data.message
+def _ensure_mapping(data: Any) -> dict[str, Any]:
     if isinstance(data, dict):
-        message = data.get("message")
-        return message if isinstance(message, str) else str(data)
-    return str(data)
+        return data
+    return {"value": data}
 
 
-def _build_response(type_str: str, data: Any) -> tuple[Any, Any]:
-    """Return ``(response, resultMap)`` matching the legacy GptProcessResult contract.
-
-    Legacy mapping rules:
-    - ``start``      → response = ``"开始处理: {query}"``
-    - ``done``       → response = ``"任务完成"``
-    - ``task``       → response = data + ``"\\n"``
-    - ``result``     → response = data["taskSummary"], resultMap = data
-    - ``tool_result``→ response = data["toolResult"], resultMap = data
-    - ``search_result`` / ``final_result`` → response = data, resultMap = None
-    - others         → response = data, resultMap = None
-    """
-    if type_str == EventType.START.value:
-        if isinstance(data, dict):
-            return f"开始处理: {data.get('query', '')}", None
-        return f"开始处理: {data}", None
-
-    if type_str == EventType.DONE.value:
-        return "任务完成", None
-
-    if type_str == EventType.TASK.value:
-        return str(data) + "\n", None
-
-    if type_str == EventType.RESULT.value:
-        if isinstance(data, dict):
-            return data.get("taskSummary", data.get("result", "")), data
-        return str(data), None
-
-    if type_str == EventType.TOOL_RESULT.value:
-        if isinstance(data, dict):
-            return data.get("toolResult", ""), data
-        return str(data), None
-
-    if type_str == EventType.THINKING.value:
-        return str(data), None
-
-    if type_str == EventType.TOOL_CALL_START.value:
-        if isinstance(data, dict):
-            return data.get("tool", ""), data
-        return str(data), None
-
-    if type_str == EventType.STEP.value:
-        if isinstance(data, dict):
-            return f"Step {data.get('turn', '')}", data
-        return str(data), None
-
-    if type_str == EventType.STEP_END.value:
-        if isinstance(data, dict):
-            return f"Step {data.get('turn', '')} done", data
-        return str(data), None
-
-    if type_str == EventType.USAGE.value:
-        if isinstance(data, dict):
-            return f"Usage: {data.get('total_tokens', 0)} tokens", data
-        return str(data), None
-
-    # thinking, tool_thought, search_result, final_result, error, text, …
-    return data, None
+def _seconds_to_ms(value: float) -> int:
+    return max(0, int(round(value * 1000)))

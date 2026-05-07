@@ -111,6 +111,23 @@ class ToolCallStarted(RuntimeEvent):
 
 
 @dataclass(frozen=True, slots=True)
+class ToolStreamEventEmitted(RuntimeEvent):
+    """Intermediate event from a StreamingTool.
+
+    `stream_event_type` names the downstream stream protocol event, while this
+    object remains the semantic runtime event that sinks consume.
+    """
+
+    tool_call_id: str = ""
+    tool_name: str = ""
+    stream_event_type: str = ""
+    data: Any = None
+    is_final: bool = False
+
+    event_type: ClassVar[str] = "tool_stream_event"
+
+
+@dataclass(frozen=True, slots=True)
 class ToolCallCompleted(RuntimeEvent):
     tool_call_id: str = ""
     tool_name: str = ""
@@ -145,6 +162,9 @@ class RunFailed(RuntimeEvent):
     error_message: str = ""
     terminal_reason: str = "runtime_failed"
     elapsed_seconds: float = 0.0
+    # Structured error payload from `error_to_dict()` if available - carries
+    # code / category / retryable / details for richer SSE rendering.
+    error_payload: dict[str, Any] | None = None
 
     event_type: ClassVar[str] = "run_failed"
 

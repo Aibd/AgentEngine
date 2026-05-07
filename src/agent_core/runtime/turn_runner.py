@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -9,8 +8,9 @@ from pathlib import Path
 
 from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
-from agent_core.errors import LLMContextWindowError, LLMError, ToolExecutionError
+from agent_core.errors import LLMContextWindowError, LLMError, ToolExecutionError, error_to_dict
 from agent_core.observability.event_log import RunEventLog
+from agent_core.observability.jsonl_sink import JsonlSink
 from agent_core.runtime.events import (
     RunCancelled,
     RunCompleted,
@@ -19,6 +19,7 @@ from agent_core.runtime.events import (
     RuntimeEvent,
 )
 from agent_core.runtime.run_state import RunState, TerminalReason
+from agent_core.runtime.sinks import RuntimeEventFanout
 from agent_core.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS, run_turn
 
 EventCallback = Callable[[RuntimeEvent], Awaitable[None] | None]
@@ -64,17 +65,17 @@ class TurnRunner:
             if self.enable_event_log
             else None
         )
+        fanout = RuntimeEventFanout(
+            [
+                *([JsonlSink(event_log)] if event_log is not None else []),
+                *([on_event] if on_event is not None else []),
+            ]
+        )
         started_at = time.perf_counter()
 
         async def emit(event: RuntimeEvent) -> None:
             events.append(event)
-            if event_log is not None:
-                event_log.append(event)
-            if on_event is None:
-                return
-            result = on_event(event)
-            if inspect.isawaitable(result):
-                await result
+            await fanout.consume(event)
 
         context.extras["run_id"] = run_id
         context.extras["turn_id"] = turn_id
@@ -100,6 +101,7 @@ class TurnRunner:
                     context,
                     query,
                     tool_timeout_seconds=tool_timeout_seconds,
+                    emit=emit,
                 )
             else:
                 result = await turn_fn(agent, context, query)
@@ -124,6 +126,7 @@ class TurnRunner:
                     error_message=str(exc),
                     terminal_reason=reason.value,
                     elapsed_seconds=time.perf_counter() - started_at,
+                    error_payload=error_to_dict(exc),
                 )
             )
             raise

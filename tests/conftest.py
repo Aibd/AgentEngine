@@ -5,8 +5,8 @@ import pytest
 from agent_core.base.context import AgentContext
 from agent_core.llm.client import LLMResponse
 from mock_llm import MockLLMClient
-from agent_core.stream.event_stream import EventStream
 from agent_core.stream.printer import Printer
+from agent_core.stream.sse_queue import SseEventQueue
 from agent_core.tools.base import Tool
 from agent_core.tools.collection import ToolCollection
 
@@ -21,12 +21,12 @@ class _EchoTool(Tool):
 
 
 @pytest.fixture
-def event_stream() -> EventStream:
-    return EventStream()
+def event_stream() -> SseEventQueue:
+    return SseEventQueue()
 
 
 @pytest.fixture
-def printer(event_stream: EventStream) -> Printer:
+def printer(event_stream: SseEventQueue) -> Printer:
     return Printer(request_id="test-001", event_stream=event_stream)
 
 
