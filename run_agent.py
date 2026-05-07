@@ -11,6 +11,24 @@ from pathlib import Path
 # 确保项目路径在Python路径中
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
+
+def _load_dotenv(path: Path) -> None:
+    if not path.exists():
+        return
+    for raw_line in path.read_text("utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv(Path(__file__).parent / ".env")
+
+
 async def run_quick_test():
     """快速测试真实LLM调用"""
     print("🚀 Agent Core Refactor - 真实LLM测试")

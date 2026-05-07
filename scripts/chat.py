@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,23 @@ from agent_core.llm.factory import create_llm_from_env  # noqa: E402
 from agent_core.stream.event_stream import EventStream  # noqa: E402
 from agent_core.stream.printer import Printer  # noqa: E402
 from services import AgentOrchestrationService  # noqa: E402
+
+
+def _load_dotenv(path: Path) -> None:
+    if not path.exists():
+        return
+    for raw_line in path.read_text("utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv(ROOT / ".env")
 
 
 def parse_args() -> argparse.Namespace:
