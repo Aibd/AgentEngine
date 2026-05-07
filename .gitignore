@@ -7,7 +7,11 @@
 !.env.example
 .DS_Store
 .continue/
+.claude
 logs/
+web/node_modules/
+web/dist/
 
 # Coverage
 .coverage
+
