@@ -175,3 +175,14 @@ class RunCancelled(RuntimeEvent):
     elapsed_seconds: float = 0.0
 
     event_type: ClassVar[str] = "run_cancelled"
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalRequired(RuntimeEvent):
+    """Emitted when a destructive tool needs human approval."""
+    approval_id: str = ""
+    tool_name: str = ""
+    arguments: dict[str, Any] = field(default_factory=dict)
+    status: str = "pending"  # pending | approved | denied
+    reason: str = ""
+    event_type: ClassVar[str] = "approval_required"

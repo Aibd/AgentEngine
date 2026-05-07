@@ -38,6 +38,8 @@ from agent_core.runtime.events import (
     UsageReport,
 )
 from agent_core.tools.executor import ToolExecutor
+from agent_core.enterprise.approval import ApprovalDeniedError, ApprovalGate
+from agent_core.runtime.events import ApprovalRequired
 
 
 DEFAULT_TOOL_TIMEOUT_SECONDS = 30.0
@@ -424,6 +426,53 @@ async def _execute_tool_calls(
             if context.tool_collection
             else None
         )
+
+        # Check approval gate for destructive tools
+        approval_gate: ApprovalGate | None = context.extras.get("approval_gate")
+        if approval_gate is not None and tool is not None and tool.is_destructive:
+            tenant_id = ""
+            tenant = context.extras.get("tenant")
+            if hasattr(tenant, "tenant_id"):
+                tenant_id = tenant.tenant_id
+
+            approval_id = f"apr_{tc.get('id', '') or 'unknown'}"
+            await emit(
+                ApprovalRequired(
+                    run_id=run_id, turn_id=turn_id,
+                    approval_id=approval_id, tool_name=tool_name,
+                    arguments=tool_args, status="pending",
+                )
+            )
+
+            try:
+                await approval_gate.request_approval(
+                    tool_name, tool_args,
+                    run_id=run_id, tenant_id=tenant_id,
+                )
+            except ApprovalDeniedError as denied:
+                await emit(
+                    ApprovalRequired(
+                        run_id=run_id, turn_id=turn_id,
+                        approval_id=approval_id, tool_name=tool_name,
+                        arguments=tool_args, status="denied",
+                        reason=str(denied),
+                    )
+                )
+                await emit(
+                    ToolCallFailed(
+                        run_id=run_id, turn_id=turn_id,
+                        tool_call_id=tc.get("id", ""),
+                        tool_name=tool_name,
+                        error_type="ApprovalDenied",
+                        error_message=str(denied),
+                        elapsed_seconds=0.0,
+                    )
+                )
+                agent.memory.add_tool_message(
+                    f"Tool '{tool_name}' denied by approval gate: {denied}",
+                    tool_call_id=tc.get("id", ""),
+                )
+                continue
 
         if tool is None:
             tool_call_id = tc.get("id", "") or ""

@@ -9,6 +9,9 @@ from pathlib import Path
 from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
 from agent_core.errors import LLMContextWindowError, LLMError, ToolExecutionError, error_to_dict
+from agent_core.enterprise.approval import ApprovalDeniedError
+from agent_core.enterprise.middleware import MiddlewareChain
+from agent_core.enterprise.quota import QuotaExceededError
 from agent_core.observability.event_log import RunEventLog
 from agent_core.observability.jsonl_sink import JsonlSink
 from agent_core.runtime.events import (
@@ -40,10 +43,12 @@ class TurnRunner:
         *,
         log_dir: str | Path | None = None,
         enable_event_log: bool = True,
+        middleware: MiddlewareChain | None = None,
     ) -> None:
         self.session_id = session_id
         self.log_dir = log_dir
         self.enable_event_log = enable_event_log
+        self.middleware = middleware
 
     async def run(
         self,
@@ -95,7 +100,21 @@ class TurnRunner:
         )
 
         try:
-            if turn_fn is None:
+            if self.middleware is not None:
+                async def _inner(spec, ctx, q):
+                    if turn_fn is None:
+                        return await run_turn(
+                            agent, ctx, q,
+                            tool_timeout_seconds=tool_timeout_seconds,
+                            emit=emit,
+                        )
+                    else:
+                        return await turn_fn(agent, ctx, q)
+
+                result = await self.middleware.run(
+                    agent.spec, context, query, inner=_inner,
+                )
+            elif turn_fn is None:
                 result = await run_turn(
                     agent,
                     context,
@@ -150,4 +169,8 @@ class TurnRunner:
             return TerminalReason.TOOL_FAILED
         if isinstance(error, LLMError):
             return TerminalReason.MODEL_FAILED
+        if isinstance(error, ApprovalDeniedError):
+            return TerminalReason.TOOL_FAILED
+        if isinstance(error, QuotaExceededError):
+            return TerminalReason.QUOTA_EXCEEDED
         return TerminalReason.RUNTIME_FAILED
