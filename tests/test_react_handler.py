@@ -12,8 +12,16 @@ from agent_core.memory.message import Role
 from agent_core.stream.event_stream import EventStream
 from agent_core.stream.printer import Printer
 from agent_core.tools.base import Tool
-from agent_core.tools.builtin.planning_tool import PlanningTool
 from agent_core.tools.collection import ToolCollection
+
+
+class _EchoTool(Tool):
+    name = "echo"
+    description = "Echoes input back"
+    schema = {"type": "object", "properties": {"text": {"type": "string"}}}
+
+    async def run(self, **kwargs):
+        return kwargs.get("text", "echo")
 
 
 class _SimpleAgent(BaseAgent):
@@ -27,8 +35,8 @@ class _ResearchLikeAgent(BaseAgent):
     name = "researchy"
 
     def setup(self) -> None:
-        if self.context.tool_collection.get("planning_tool") is None:
-            self.context.tool_collection.add(PlanningTool())
+        if self.context.tool_collection.get("echo") is None:
+            self.context.tool_collection.add(_EchoTool())
 
     def system_prompt(self) -> str:
         return "Plan first, then execute."
@@ -49,7 +57,7 @@ def _make_context(llm: MockLLMClient, *, with_tools: bool = False) -> tuple[Agen
     printer = Printer("req-1", stream, conversation_id="conv-1")
     tools = ToolCollection()
     if with_tools:
-        tools.add(PlanningTool())
+        tools.add(_EchoTool())
     context = AgentContext(
         request_id="req-1",
         query="test",
@@ -115,8 +123,8 @@ class TestReActHandler:
                         "id": "c1",
                         "type": "function",
                         "function": {
-                            "name": "planning_tool",
-                            "arguments": '{"action": "create", "steps": ["research", "write"]}',
+                            "name": "echo",
+                            "arguments": '{"text": "research"}',
                         },
                     }
                 ],
@@ -145,7 +153,7 @@ class TestReActHandler:
         # Memory should record assistant message with tool_calls preserved
         assistant_msgs = [m for m in agent.memory.messages if m.role == Role.ASSISTANT]
         assert assistant_msgs[0].tool_calls is not None
-        assert assistant_msgs[0].tool_calls[0]["function"]["name"] == "planning_tool"
+        assert assistant_msgs[0].tool_calls[0]["function"]["name"] == "echo"
 
         events = await _drain(stream)
         types = [e["responseType"] for e in events]
@@ -214,7 +222,7 @@ class TestReActHandler:
                 {
                     "id": "c1",
                     "type": "function",
-                    "function": {"name": "planning_tool", "arguments": '{"action": "inspect"}'},
+                    "function": {"name": "echo", "arguments": '{"text": "loop"}'},
                 }
             ],
         )
@@ -230,16 +238,16 @@ class TestReActHandler:
 
     async def test_setup_hook_runs_before_loop(self):
         llm = MockLLMClient([LLMResponse(content="ok", finish_reason="stop")])
-        context, _ = _make_context(llm)  # no planning tool initially
+        context, _ = _make_context(llm)  # no echo tool initially
         agent = _ResearchLikeAgent(context, max_steps=3)
 
-        assert context.tool_collection.get("planning_tool") is None
+        assert context.tool_collection.get("echo") is None
 
         handler = ReActHandler()
         await handler.handle(agent, context, "hi")
 
-        # setup() should have registered planning_tool
-        assert context.tool_collection.get("planning_tool") is not None
+        # setup() should have registered echo tool
+        assert context.tool_collection.get("echo") is not None
 
     async def test_invalid_max_steps_raises(self):
         llm = MockLLMClient([LLMResponse(content="ok", finish_reason="stop")])

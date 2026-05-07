@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from agent_core.tools.base import Tool
-from agent_core.tools.builtin.planning_tool import PlanningTool
 from agent_core.tools.collection import ToolCollection
 from agent_core.tools.registry import create_tool, register_tool, registered_tools
 
@@ -72,40 +71,3 @@ class TestRegistry:
         tools = registered_tools()
         tools.clear()
         assert registered_tools()
-
-
-class TestPlanningTool:
-    async def test_create_plan(self):
-        tool = PlanningTool()
-        result = await tool.run(action="create", steps=["a", "b"])
-        plan = result["plan"]
-        assert plan["steps"] == ["a", "b"]
-        assert plan["currentStep"] == "a"
-        assert not plan["isFinished"]
-
-    async def test_advance_and_inspect(self):
-        tool = PlanningTool()
-        await tool.run(action="create", steps=["a", "b"])
-        await tool.run(action="advance")
-        result = await tool.run(action="inspect")
-        plan = result["plan"]
-        assert plan["status"] == ["completed", "pending"]
-        assert plan["currentStep"] == "b"
-
-    async def test_finish_all(self):
-        tool = PlanningTool()
-        await tool.run(action="create", steps=["a", "b"])
-        await tool.run(action="advance")
-        await tool.run(action="advance")
-        result = await tool.run(action="inspect")
-        assert result["plan"]["isFinished"]
-
-    async def test_inspect_no_plan(self):
-        tool = PlanningTool()
-        result = await tool.run(action="inspect")
-        assert result["plan"] is None
-
-    async def test_advance_without_plan(self):
-        tool = PlanningTool()
-        result = await tool.run(action="advance")
-        assert "error" in result

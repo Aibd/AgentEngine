@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from agent_core.base.agent import BaseAgent
 from agent_core.registry.agent_registry import register_agent
-from agent_core.skills.loader import SkillLoader
 
 
 @register_agent("deep_research", handler="react")
@@ -16,12 +15,6 @@ class DeepResearchAgent(BaseAgent):
     """
 
     description = "Deep research agent with model-native planning."
-
-    def setup(self) -> None:
-        # Load any skills that match the agent name.
-        loader = SkillLoader()
-        for skill in loader.load_for_agent(self.name):
-            self.context.tool_collection.add(skill)
 
     def system_prompt(self) -> str:
         return (

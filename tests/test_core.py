@@ -19,14 +19,13 @@ async def test_general_chat_runs():
     assert result == "hello there"
 
 
-async def test_deep_research_registers_planning_tool():
+async def test_deep_research_agent_runs():
     service = AgentOrchestrationService()
     llm = MockLLMClient([LLMResponse(content="report draft", finish_reason="stop")])
     context = AgentContext(request_id="t2", query="research", llm=llm)
 
     result = await service.run(agent_name="deep_research", query="research", context=context)
     assert result == "report draft"
-    assert context.tool_collection.get("planning_tool") is not None
 
 
 async def test_file_clerk_adapter_runs_legacy_factory():

@@ -7,8 +7,17 @@ from agent_core.llm.client import LLMResponse
 from mock_llm import MockLLMClient
 from agent_core.stream.event_stream import EventStream
 from agent_core.stream.printer import Printer
-from agent_core.tools.builtin.planning_tool import PlanningTool
+from agent_core.tools.base import Tool
 from agent_core.tools.collection import ToolCollection
+
+
+class _EchoTool(Tool):
+    name = "echo"
+    description = "Echoes input back"
+    schema = {"type": "object", "properties": {"text": {"type": "string"}}}
+
+    async def run(self, **kwargs):
+        return kwargs.get("text", "echo")
 
 
 @pytest.fixture
@@ -24,7 +33,7 @@ def printer(event_stream: EventStream) -> Printer:
 @pytest.fixture
 def tool_collection() -> ToolCollection:
     coll = ToolCollection()
-    coll.add(PlanningTool())
+    coll.add(_EchoTool())
     return coll
 
 
@@ -59,8 +68,8 @@ def tool_call_response() -> LLMResponse:
                 "id": "call_1",
                 "type": "function",
                 "function": {
-                    "name": "planning_tool",
-                    "arguments": '{"action": "create", "steps": ["step 1", "step 2"]}',
+                    "name": "read_file",
+                    "arguments": '{"path": "README.md"}',
                 },
             }
         ],
