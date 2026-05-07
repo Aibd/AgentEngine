@@ -86,7 +86,15 @@ class TestPrinter:
         await printer.tool_result("echo", "hi")
         event = await stream._queue.get()
         assert event["responseType"] == "tool_result"
-        assert event["resultMap"] == {"tool": "echo", "toolResult": "hi"}
+        assert event["resultMap"] == {
+            "tool": "echo",
+            "toolResult": "hi",
+            "ok": True,
+            "elapsed_seconds": 0.0,
+            "tool_call_id": "",
+        }
+        # response is still the simple string for legacy front ends
+        assert event["response"] == "hi"
 
     async def test_send_with_explicit_finished(self):
         stream = EventStream()

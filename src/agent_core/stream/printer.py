@@ -3,6 +3,7 @@ from typing import Any
 
 from agent_core.errors import AgentCoreError, error_to_dict
 from agent_core.runtime.events import (
+    ReasoningDelta,
     RunCancelled,
     RunCompleted,
     RunFailed,
@@ -12,6 +13,9 @@ from agent_core.runtime.events import (
     ToolCallCompleted,
     ToolCallFailed,
     ToolCallStarted,
+    TurnEnded,
+    TurnStarted,
+    UsageReport,
 )
 from agent_core.stream.event_stream import EventStream
 from agent_core.stream.events import EventType
@@ -70,16 +74,39 @@ class Printer:
         """Translate a runtime event into the existing SSE envelope."""
         if isinstance(event, RunStarted):
             await self.start(event.input_summary)
+        elif isinstance(event, TurnStarted):
+            await self.step(event.turn)
+        elif isinstance(event, TurnEnded):
+            await self.step_end(event.turn, event.has_tool_calls, event.elapsed_seconds)
+        elif isinstance(event, ReasoningDelta):
+            await self.thinking(event.content)
         elif isinstance(event, TextDelta):
             await self.text(event.content)
         elif isinstance(event, ToolCallStarted):
-            await self.task(f"Tool started: {event.tool_name}")
+            await self.tool_call_start(event.tool_name, event.arguments, tool_call_id=event.tool_call_id)
         elif isinstance(event, ToolCallCompleted):
-            await self.tool_result(event.tool_name, event.result_summary)
+            await self.tool_result(
+                event.tool_name,
+                event.result_summary,
+                ok=True,
+                elapsed_seconds=event.elapsed_seconds,
+                tool_call_id=event.tool_call_id,
+            )
         elif isinstance(event, ToolCallFailed):
             await self.tool_result(
                 event.tool_name,
                 f"Tool error: {event.error_message}",
+                ok=False,
+                elapsed_seconds=event.elapsed_seconds,
+                tool_call_id=event.tool_call_id,
+                error_type=event.error_type,
+            )
+        elif isinstance(event, UsageReport):
+            await self.usage(
+                prompt_tokens=event.prompt_tokens,
+                completion_tokens=event.completion_tokens,
+                total_tokens=event.total_tokens,
+                total_seconds=event.total_seconds,
             )
         elif isinstance(event, RunCompleted):
             await self.result({"result": event.result_summary})
@@ -117,8 +144,68 @@ class Printer:
     async def tool_thought(self, content: str) -> None:
         await self.send(EventType.TOOL_THOUGHT, {"content": content})
 
-    async def tool_result(self, tool: str, result: Any) -> None:
-        await self.send(EventType.TOOL_RESULT, {"tool": tool, "toolResult": result})
+    async def tool_result(
+        self,
+        tool: str,
+        result: Any,
+        *,
+        ok: bool = True,
+        elapsed_seconds: float = 0.0,
+        tool_call_id: str = "",
+        error_type: str = "",
+    ) -> None:
+        payload: dict[str, Any] = {
+            "tool": tool,
+            "toolResult": result,
+            "ok": ok,
+            "elapsed_seconds": elapsed_seconds,
+            "tool_call_id": tool_call_id,
+        }
+        if error_type:
+            payload["error_type"] = error_type
+        await self.send(EventType.TOOL_RESULT, payload)
+
+    async def thinking(self, content: str) -> None:
+        await self.send(EventType.THINKING, content)
+
+    async def tool_call_start(self, tool: str, arguments: dict[str, Any] | None = None, *, tool_call_id: str = "") -> None:
+        await self.send(
+            EventType.TOOL_CALL_START,
+            {"tool": tool, "arguments": arguments or {}, "tool_call_id": tool_call_id},
+        )
+
+    async def step(self, turn: int) -> None:
+        await self.send(EventType.STEP, {"turn": turn})
+
+    async def step_end(
+        self, turn: int, has_tool_calls: bool, elapsed_seconds: float = 0.0
+    ) -> None:
+        await self.send(
+            EventType.STEP_END,
+            {
+                "turn": turn,
+                "has_tool_calls": bool(has_tool_calls),
+                "elapsed_seconds": elapsed_seconds,
+            },
+        )
+
+    async def usage(
+        self,
+        *,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+        total_seconds: float = 0.0,
+    ) -> None:
+        await self.send(
+            EventType.USAGE,
+            {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "total_seconds": total_seconds,
+            },
+        )
 
     async def result(self, data: Any) -> None:
         if isinstance(data, dict) and "taskSummary" not in data:
@@ -178,5 +265,28 @@ def _build_response(type_str: str, data: Any) -> tuple[Any, Any]:
             return data.get("toolResult", ""), data
         return str(data), None
 
-    # tool_thought, search_result, final_result, error, text, …
+    if type_str == EventType.THINKING.value:
+        return str(data), None
+
+    if type_str == EventType.TOOL_CALL_START.value:
+        if isinstance(data, dict):
+            return data.get("tool", ""), data
+        return str(data), None
+
+    if type_str == EventType.STEP.value:
+        if isinstance(data, dict):
+            return f"Step {data.get('turn', '')}", data
+        return str(data), None
+
+    if type_str == EventType.STEP_END.value:
+        if isinstance(data, dict):
+            return f"Step {data.get('turn', '')} done", data
+        return str(data), None
+
+    if type_str == EventType.USAGE.value:
+        if isinstance(data, dict):
+            return f"Usage: {data.get('total_tokens', 0)} tokens", data
+        return str(data), None
+
+    # thinking, tool_thought, search_result, final_result, error, text, …
     return data, None

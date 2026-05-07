@@ -11,16 +11,34 @@ class EventType(str, Enum):
     Keep this module focused on the external stream protocol.
     """
 
+    # Lifecycle
     START = "start"
-    TEXT = "text"
+    DONE = "done"
+
+    # Per-turn boundaries
+    STEP = "step"            # turn N started
+    STEP_END = "step_end"    # turn N ended (with has_tool_calls flag)
+
+    # Model output
+    THINKING = "thinking"    # chain-of-thought / reasoning_content delta
+    TEXT = "text"            # final answer delta
+
+    # Tool lifecycle
+    TOOL_CALL_START = "tool_call_start"  # tool invoked with arguments
+    TOOL_RESULT = "tool_result"          # tool finished with result + ok flag
+
+    # Telemetry
+    USAGE = "usage"          # token / duration totals at run end
+
+    # Legacy / compatibility (kept so older front ends keep working)
     TASK = "task"
     TOOL_THOUGHT = "tool_thought"
-    TOOL_RESULT = "tool_result"
     SEARCH_RESULT = "search_result"
-    RESULT = "result"
     FINAL_RESULT = "final_result"
+
+    # Terminal
+    RESULT = "result"
     ERROR = "error"
-    DONE = "done"
 
 
 # Backwards-compatible alias for callers still importing the old name.

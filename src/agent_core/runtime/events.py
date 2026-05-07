@@ -61,6 +61,47 @@ class TextDelta(RuntimeEvent):
 
 
 @dataclass(frozen=True, slots=True)
+class ReasoningDelta(RuntimeEvent):
+    """Streaming chunk of model chain-of-thought / reasoning_content."""
+
+    content: str = ""
+
+    event_type: ClassVar[str] = "reasoning_delta"
+
+
+@dataclass(frozen=True, slots=True)
+class TurnStarted(RuntimeEvent):
+    """Boundary marker emitted at the start of each ReAct iteration."""
+
+    turn: int = 0
+
+    event_type: ClassVar[str] = "turn_started"
+
+
+@dataclass(frozen=True, slots=True)
+class TurnEnded(RuntimeEvent):
+    """Boundary marker emitted when a ReAct iteration completes."""
+
+    turn: int = 0
+    has_tool_calls: bool = False
+    elapsed_seconds: float = 0.0
+
+    event_type: ClassVar[str] = "turn_ended"
+
+
+@dataclass(frozen=True, slots=True)
+class UsageReport(RuntimeEvent):
+    """Token usage and duration summary, typically emitted before run end."""
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    total_seconds: float = 0.0
+
+    event_type: ClassVar[str] = "usage_report"
+
+
+@dataclass(frozen=True, slots=True)
 class ToolCallStarted(RuntimeEvent):
     tool_call_id: str = ""
     tool_name: str = ""

@@ -151,8 +151,16 @@ class ReActHandler(AgentHandler):
         next_step = agent.next_step_prompt()
         final_answer = ""
 
+        prompt_tokens_total = 0
+        completion_tokens_total = 0
+        loop_started_at = time.perf_counter()
+
         for _ in range(agent.max_steps):
             agent.current_step += 1
+            turn_started_at = time.perf_counter()
+
+            if context.printer:
+                await context.printer.step(agent.current_step)
 
             messages = self._build_messages(agent, next_step)
             tools = (
@@ -163,6 +171,10 @@ class ReActHandler(AgentHandler):
 
             response = await self._chat_streaming(context, messages, tools=tools)
 
+            if response.usage:
+                prompt_tokens_total += int(response.usage.get("prompt_tokens", 0) or 0)
+                completion_tokens_total += int(response.usage.get("completion_tokens", 0) or 0)
+
             agent.memory.add_assistant_message(
                 response.content or "",
                 reasoning_content=response.reasoning_content or "",
@@ -172,10 +184,27 @@ class ReActHandler(AgentHandler):
             if response.content:
                 final_answer = response.content
 
-            if not response.tool_calls:
+            has_tool_calls = bool(response.tool_calls)
+            turn_elapsed = time.perf_counter() - turn_started_at
+
+            if has_tool_calls:
+                await self._execute_tool_calls(agent, context, response.tool_calls)
+
+            if context.printer:
+                await context.printer.step_end(
+                    agent.current_step, has_tool_calls, turn_elapsed
+                )
+
+            if not has_tool_calls:
                 break
 
-            await self._execute_tool_calls(agent, context, response.tool_calls)
+        if context.printer:
+            await context.printer.usage(
+                prompt_tokens=prompt_tokens_total,
+                completion_tokens=completion_tokens_total,
+                total_tokens=prompt_tokens_total + completion_tokens_total,
+                total_seconds=time.perf_counter() - loop_started_at,
+            )
 
         return final_answer
 
@@ -216,6 +245,8 @@ class ReActHandler(AgentHandler):
                         await context.printer.send(EventType.TEXT, chunk.content)
                 if chunk.reasoning_content:
                     reasoning_parts.append(chunk.reasoning_content)
+                    if context.printer:
+                        await context.printer.thinking(chunk.reasoning_content)
                 if chunk.usage:
                     usage = chunk.usage
                 if chunk.finish_reason:
@@ -323,13 +354,25 @@ class ReActHandler(AgentHandler):
             except json.JSONDecodeError:
                 tool_args = {}
 
+            if context.printer:
+                await context.printer.tool_call_start(
+                    tool_name,
+                    tool_args,
+                    tool_call_id=tc.get("id", ""),
+                )
+
             tool = (
                 context.tool_collection.get(tool_name)
                 if context.tool_collection
                 else None
             )
+            ok = True
+            elapsed = 0.0
+            error_type = ""
             if tool is None:
                 rendered = f"Unknown tool: {tool_name}"
+                ok = False
+                error_type = "ToolNotFound"
                 logger.warning(
                     "tool_call_missing request_id=%s tool=%s",
                     context.request_id,
@@ -348,28 +391,35 @@ class ReActHandler(AgentHandler):
                     tool_args,
                     tool_call_id=tc.get("id", "") or None,
                 )
+                elapsed = result.elapsed_seconds
+                ok = result.ok
                 if result.ok:
                     logger.info(
                         "tool_call_finish request_id=%s tool=%s elapsed=%.3fs truncated=%s",
                         context.request_id,
                         tool_name,
-                        time.perf_counter() - started_at,
+                        elapsed,
                         result.truncated,
                     )
                 else:
+                    error_type = "ToolError"
                     logger.warning(
                         "tool_call_failed request_id=%s tool=%s error=%s elapsed=%.3fs",
                         context.request_id,
                         tool_name,
                         result.error,
-                        time.perf_counter() - started_at,
+                        elapsed,
                     )
                 rendered = result.content
 
             agent.memory.add_tool_message(rendered, tool_call_id=tc.get("id", ""))
 
             if context.printer:
-                await context.printer.send(
-                    EventType.TOOL_RESULT,
-                    {"tool": tool_name, "toolResult": rendered},
+                await context.printer.tool_result(
+                    tool_name,
+                    rendered,
+                    ok=ok,
+                    elapsed_seconds=elapsed,
+                    tool_call_id=tc.get("id", ""),
+                    error_type=error_type,
                 )

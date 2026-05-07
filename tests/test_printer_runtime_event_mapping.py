@@ -27,7 +27,7 @@ from agent_core.stream.printer import Printer
                 tool_call_id="tc_1",
                 tool_name="echo",
             ),
-            "task",
+            "tool_call_start",
         ),
         (
             ToolCallCompleted(

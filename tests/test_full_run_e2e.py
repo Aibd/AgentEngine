@@ -35,7 +35,17 @@ async def test_full_run_records_runtime_events_and_sse(tmp_path, monkeypatch) ->
         event = await stream._queue.get()
         if event is not None:
             sse_events.append(event)
-    assert [event["responseType"] for event in sse_events] == ["start", "text", "result"]
+    # Updated for the streaming-protocol upgrade: turn boundaries (step / step_end)
+    # and a usage report now bracket model output, matching what the React/CLI
+    # renderers expect.
+    assert [event["responseType"] for event in sse_events] == [
+        "start",
+        "step",
+        "text",
+        "step_end",
+        "usage",
+        "result",
+    ]
 
     log_path = tmp_path / "runs"
     files = list(log_path.glob("*/*.jsonl"))

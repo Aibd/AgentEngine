@@ -1,0 +1,1 @@
+{"responseType":"tool_call_start","response":"echo","responseAll":"","useTimes":0,"reqId":"golden-req","errorMsg":null,"resultMap":{"tool":"echo","arguments":{"arg":"val"},"tool_call_id":""},"conversation_id":"golden-conv","finished":false}
