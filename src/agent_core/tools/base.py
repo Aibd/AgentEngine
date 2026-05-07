@@ -32,9 +32,10 @@ class Tool(ABC):
 class ToolStreamEvent:
     """A single intermediate event emitted by a ``StreamingTool``.
 
-    ``event_type`` maps to a ``Printer`` event name (e.g. ``"tool_thought"``,
-    ``"search_result"``, ``"final_result"``).  ``data`` is the payload
-    forwarded to the SSE stream.  When ``is_final`` is True the executor
+    ``event_type`` maps to a downstream stream protocol event name (e.g.
+    ``"tool_thought"``, ``"search_result"``, ``"final_result"``). ``data`` is
+    wrapped in a runtime event before any sink renders it. When ``is_final`` is
+    True the executor
     treats ``data`` as the tool's final result.
     """
 
@@ -47,9 +48,9 @@ class StreamingTool(Tool):
     """Base class for tools that emit intermediate events (e.g. deep search).
 
     Subclasses implement ``run_stream()`` as an async generator that yields
-    ``ToolStreamEvent`` objects.  The executor consumes these events,
-    forwards them to the SSE stream via ``Printer``, and uses the final
-    event's ``data`` as the tool result.
+    ``ToolStreamEvent`` objects. The executor consumes these events, emits
+    intermediate runtime events, and uses the final event's ``data`` as the
+    tool result.
 
     The default ``run()`` implementation collects all non-final events into
     a single string so that callers who treat the tool as a plain ``Tool``

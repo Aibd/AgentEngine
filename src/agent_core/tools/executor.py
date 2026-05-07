@@ -15,13 +15,13 @@ from agent_core.runtime.events import (
     ToolCallCompleted,
     ToolCallFailed,
     ToolCallStarted,
+    ToolStreamEventEmitted,
 )
 from agent_core.tools.base import StreamingTool, Tool, ToolStreamEvent
 
 logger = logging.getLogger(__name__)
 
 EventCallback = Callable[[RuntimeEvent], Awaitable[None] | None]
-StreamCallback = Callable[[str, Any], Awaitable[None] | None]
 
 
 @dataclass(slots=True)
@@ -45,13 +45,11 @@ class ToolExecutor:
         run_id: str,
         turn_id: str,
         on_event: EventCallback | None = None,
-        on_stream_event: StreamCallback | None = None,
         timeout_seconds: float | None = None,
     ) -> None:
         self.run_id = run_id
         self.turn_id = turn_id
         self.on_event = on_event
-        self.on_stream_event = on_stream_event
         self.timeout_seconds = timeout_seconds
 
     async def execute(
@@ -139,11 +137,8 @@ class ToolExecutor:
         async def _consume() -> None:
             nonlocal final_data
             async for event in tool.run_stream(**arguments):
-                # Forward intermediate events to the stream callback (Printer).
-                if self.on_stream_event and not event.is_final:
-                    result = self.on_stream_event(event.event_type, event.data)
-                    if inspect.isawaitable(result):
-                        await result
+                if not event.is_final:
+                    await self._emit_stream_event(call_id, tool.name, event)
 
                 if event.is_final:
                     final_data = event.data
@@ -187,11 +182,34 @@ class ToolExecutor:
 
     # -- Event emission helpers -------------------------------------------
 
-    async def _emit_started(self, call_id: str, tool_name: str, arguments: dict) -> None:
+    async def _emit_started(
+        self,
+        call_id: str,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> None:
         await self._emit(
             ToolCallStarted(
                 run_id=self.run_id, turn_id=self.turn_id,
                 tool_call_id=call_id, tool_name=tool_name, arguments=arguments,
+            )
+        )
+
+    async def _emit_stream_event(
+        self,
+        call_id: str,
+        tool_name: str,
+        event: ToolStreamEvent,
+    ) -> None:
+        await self._emit(
+            ToolStreamEventEmitted(
+                run_id=self.run_id,
+                turn_id=self.turn_id,
+                tool_call_id=call_id,
+                tool_name=tool_name,
+                stream_event_type=event.event_type,
+                data=event.data,
+                is_final=event.is_final,
             )
         )
 
@@ -200,7 +218,7 @@ class ToolExecutor:
             ToolCallCompleted(
                 run_id=self.run_id, turn_id=self.turn_id,
                 tool_call_id=call_id, tool_name=tool_name,
-                result_summary=content[:200], elapsed_seconds=elapsed,
+                result_summary=content, elapsed_seconds=elapsed,
             )
         )
 
