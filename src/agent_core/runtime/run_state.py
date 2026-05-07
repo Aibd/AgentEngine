@@ -23,6 +23,7 @@ class TerminalReason(str, Enum):
     MODEL_FAILED = "model_failed"
     CONTEXT_EXCEEDED = "context_exceeded"
     RUNTIME_FAILED = "runtime_failed"
+    QUOTA_EXCEEDED = "quota_exceeded"
     CANCELLED = "cancelled"
 
 
