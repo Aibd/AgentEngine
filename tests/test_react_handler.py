@@ -6,12 +6,14 @@ from dataclasses import replace
 from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
 from agent_core.base.state import AgentState
-from agent_core.runtime.turn import run_turn
+from agent_core.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS, run_turn
 from agent_core.llm.client import LLMResponse
 from agent_core.memory.message import Role
+from agent_core.runtime.turn_runner import TurnRunner
 from agent_core.spec import AgentSpec
-from agent_core.stream.event_stream import EventStream
 from agent_core.stream.printer import Printer
+from agent_core.stream.sse_queue import SseEventQueue
+from agent_core.stream.sse_sink import SseSink
 from agent_core.tools.base import Tool
 from agent_core.tools.collection import ToolCollection
 from mock_llm import MockLLMClient
@@ -60,8 +62,8 @@ class _SlowTool(Tool):
         return "too late"
 
 
-def _make_context(llm: MockLLMClient, *, with_tools: bool = False) -> tuple[AgentContext, EventStream]:
-    stream = EventStream()
+def _make_context(llm: MockLLMClient, *, with_tools: bool = False) -> tuple[AgentContext, SseEventQueue]:
+    stream = SseEventQueue()
     printer = Printer("req-1", stream, conversation_id="conv-1")
     tools = ToolCollection()
     if with_tools:
@@ -77,14 +79,32 @@ def _make_context(llm: MockLLMClient, *, with_tools: bool = False) -> tuple[Agen
     return context, stream
 
 
-async def _drain(stream: EventStream) -> list[dict]:
+async def _drain(stream: SseEventQueue) -> list[dict]:
     events: list[dict] = []
     while not stream._queue.empty():
         e = await stream._queue.get()
         if e is None:
             break
+        if "comment" in e:
+            continue
         events.append(e)
     return events
+
+
+async def _run_with_sse(
+    agent: AgentRun,
+    context: AgentContext,
+    query: str,
+    *,
+    tool_timeout_seconds: float | None = DEFAULT_TOOL_TIMEOUT_SECONDS,
+) -> str:
+    return await TurnRunner("test-session", enable_event_log=False).run(
+        agent=agent,
+        context=context,
+        query=query,
+        on_event=SseSink(context.printer).consume,
+        tool_timeout_seconds=tool_timeout_seconds,
+    )
 
 
 class TestRunTurn:
@@ -93,17 +113,16 @@ class TestRunTurn:
         context, stream = _make_context(llm)
         agent = _agent(SIMPLE_SPEC, context, max_steps=5)
 
-        result = await run_turn(agent, context, "What is 2+2?")
+        result = await _run_with_sse(agent, context, "What is 2+2?")
 
         assert result == "The answer is 4."
         assert agent.state == AgentState.FINISHED
 
         events = await _drain(stream)
-        types = [e["responseType"] for e in events]
+        types = [e["event"] for e in events]
         assert "start" in types
         assert "text" in types
-        assert "result" in types
-        assert events[-1]["finished"] is True
+        assert "done" in types
         assert llm.calls[0]["stream"] is True
 
     async def test_system_prompt_injected(self):
@@ -140,7 +159,7 @@ class TestRunTurn:
         context, stream = _make_context(llm, with_tools=True)
         agent = _agent(RESEARCHY_SPEC, context, max_steps=5)
 
-        result = await run_turn(agent, context, "make a plan")
+        result = await _run_with_sse(agent, context, "make a plan")
 
         assert "plan" in result.lower()
         assert agent.state == AgentState.FINISHED
@@ -161,7 +180,7 @@ class TestRunTurn:
         assert assistant_msgs[0].tool_calls[0]["function"]["name"] == "echo"
 
         events = await _drain(stream)
-        types = [e["responseType"] for e in events]
+        types = [e["event"] for e in events]
         assert "tool_result" in types
         assert llm.calls[0]["stream"] is True
         assert llm.calls[1]["stream"] is True

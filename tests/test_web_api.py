@@ -20,21 +20,26 @@ pytestmark = pytest.mark.asyncio
 
 
 async def _consume_sse(response: httpx.Response) -> AsyncIterator[dict]:
-    """Yield SSE event payloads parsed from a streaming response."""
+    """Yield v2 SSE frames parsed from a streaming response."""
     buffer = ""
     async for chunk in response.aiter_text():
         buffer += chunk
         while "\n\n" in buffer:
             raw, buffer = buffer.split("\n\n", 1)
-            data_lines = [
-                line[len("data: "):]
-                for line in raw.splitlines()
-                if line.startswith("data: ")
-            ]
+            lines = raw.splitlines()
+            event_name = "message"
+            data_lines = []
+            for line in lines:
+                if line.startswith(":"):
+                    continue
+                if line.startswith("event:"):
+                    event_name = line[len("event:"):].strip()
+                elif line.startswith("data:"):
+                    data_lines.append(line[len("data:"):].strip())
             if not data_lines:
                 continue
             payload = "\n".join(data_lines)
-            yield json.loads(payload)
+            yield {"event": event_name, "data": json.loads(payload)}
 
 
 @pytest.fixture(autouse=True)
@@ -81,25 +86,26 @@ async def test_run_stream_emits_full_event_sequence() -> None:
         ) as response:
             assert response.status_code == 200
             assert response.headers["content-type"].startswith("text/event-stream")
+            assert response.headers["x-streaming-protocol"] == "agent-core.sse.v2"
+            assert response.headers["x-conversation-id"] == "test-conv"
             events: list[dict] = []
             async for evt in _consume_sse(response):
                 events.append(evt)
 
-    types = [e["responseType"] for e in events]
+    types = [e["event"] for e in events]
     assert types[0] == "start"
     assert "step" in types
     assert "step_end" in types
     assert "usage" in types
-    assert types[-1] == "result"
+    assert types[-1] == "done"
 
     # Schema invariants the frontend relies on
     for evt in events:
-        assert "responseType" in evt
-        assert "response" in evt
-        assert "resultMap" in evt
-        assert "finished" in evt
-        assert evt["reqId"].startswith("web-")
-        assert evt["conversation_id"] == "test-conv"
+        assert "event" in evt
+        assert "data" in evt
+        assert evt["data"]["request_id"].startswith("web-")
+        assert evt["data"]["conversation_id"] == "test-conv"
+        assert "responseType" not in evt["data"]
 
 
 async def test_run_stream_rejects_empty_query() -> None:

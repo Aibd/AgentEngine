@@ -1,1 +1,1 @@
-{"responseType":"done","response":"任务完成","responseAll":"","useTimes":0,"reqId":"golden-req","errorMsg":null,"resultMap":null,"conversation_id":"golden-conv","finished":true}
+{"event":"done","data":{"reason":"completed","request_id":"golden-req","conversation_id":"golden-conv"}}

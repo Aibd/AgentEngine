@@ -9,6 +9,7 @@ from agent_core.runtime.events import (
     RuntimeEvent,
     TextDelta,
     ToolCallStarted,
+    ToolStreamEventEmitted,
 )
 from agent_core.stream.events import EventType
 
@@ -50,3 +51,18 @@ def test_runtime_event_layer_is_distinct_from_sse_event_type() -> None:
     assert event.event_type == "tool_call_started"
     assert EventType.TOOL_RESULT.value == "tool_result"
     assert event.event_type != EventType.TOOL_RESULT.value
+
+
+def test_streaming_tool_event_stays_runtime_semantic() -> None:
+    event = ToolStreamEventEmitted(
+        run_id="run_1",
+        turn_id="turn_1",
+        tool_call_id="tc_1",
+        tool_name="search",
+        stream_event_type=EventType.SEARCH_RESULT.value,
+        data={"title": "match"},
+    )
+
+    assert event.event_type == "tool_stream_event"
+    assert event.stream_event_type == "search_result"
+    assert event.to_dict()["data"] == {"title": "match"}

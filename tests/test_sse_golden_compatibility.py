@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_core.stream.event_stream import EventStream
 from agent_core.stream.printer import Printer
+from agent_core.stream.sse_queue import SseEventQueue
 
 
 EmitCase = Callable[[Printer], Awaitable[None]]
@@ -80,7 +80,7 @@ CASES: dict[str, EmitCase] = {
 
 @pytest.mark.parametrize("case_name", sorted(CASES))
 async def test_sse_golden_case(case_name: str) -> None:
-    stream = EventStream()
+    stream = SseEventQueue()
     printer = Printer(
         "golden-req",
         stream,

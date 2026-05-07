@@ -32,22 +32,30 @@ async def test_full_run_records_runtime_events_and_sse(tmp_path, monkeypatch) ->
     sse_events = []
     while not stream._queue.empty():
         event = await stream._queue.get()
-        if event is not None:
+        if event is not None and "comment" not in event:
             sse_events.append(event)
     # Updated for the streaming-protocol upgrade: turn boundaries (step / step_end)
     # and a usage report now bracket model output, matching what the React/CLI
     # renderers expect.
-    assert [event["responseType"] for event in sse_events] == [
+    assert [event["event"] for event in sse_events] == [
         "start",
         "step",
         "text",
         "step_end",
         "usage",
-        "result",
+        "done",
     ]
+    assert sse_events[2]["data"]["delta"] == "ok"
 
     log_path = tmp_path / "runs"
     files = list(log_path.glob("*/*.jsonl"))
     assert len(files) == 1
     records = [json.loads(line) for line in files[0].read_text("utf-8").splitlines()]
-    assert [record["event_type"] for record in records] == ["run_started", "run_completed"]
+    assert [record["event_type"] for record in records] == [
+        "run_started",
+        "turn_started",
+        "text_delta",
+        "turn_ended",
+        "usage_report",
+        "run_completed",
+    ]

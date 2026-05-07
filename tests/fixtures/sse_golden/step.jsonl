@@ -1,1 +1,1 @@
-{"responseType":"step","response":"Step 1","responseAll":"","useTimes":0,"reqId":"golden-req","errorMsg":null,"resultMap":{"turn":1},"conversation_id":"golden-conv","finished":false}
+{"event":"step","data":{"turn":1,"request_id":"golden-req","conversation_id":"golden-conv"}}

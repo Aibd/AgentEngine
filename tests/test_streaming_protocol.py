@@ -1,10 +1,10 @@
-"""Tests for the streaming protocol upgrade (Phase 1).
+"""Tests for the streaming protocol upgrade (Phase 5).
 
-These verify run_turn() emits the expected SSE event sequence for the
-shapes the renderers depend on:
+These verify TurnRunner fans RuntimeEvent objects into the SSE sink sequence
+that renderers depend on:
 
   start -> step -> [thinking ...] -> [text ...] -> [tool_call_start ->
-  tool_result] (loop) -> step_end -> usage -> result
+  tool_result] (loop) -> step_end -> usage -> done
 
 The point of these tests is that the renderers (terminal + React) can rely
 on this ordering — regressions here will break the user-facing UI.
@@ -16,9 +16,7 @@ from dataclasses import replace
 
 from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
-from agent_core.runtime.turn import run_turn
 from agent_core.llm.client import LLMResponse
-from agent_core.memory.memory import Memory
 from agent_core.runtime.events import (
     ReasoningDelta,
     ToolCallCompleted,
@@ -27,8 +25,10 @@ from agent_core.runtime.events import (
     TurnStarted,
     UsageReport,
 )
-from agent_core.stream.event_stream import EventStream
+from agent_core.runtime.turn_runner import TurnRunner
 from agent_core.stream.printer import Printer
+from agent_core.stream.sse_queue import SseEventQueue
+from agent_core.stream.sse_sink import SseSink
 from agent_core.tools.base import Tool
 from agent_core.tools.collection import ToolCollection
 from agents.general_chat.spec import SPEC as GENERAL_CHAT_SPEC
@@ -51,17 +51,17 @@ class _StaticTool(Tool):
         return f"echoed: {kwargs.get('text', '')}"
 
 
-async def _drain(stream: EventStream) -> list[dict]:
+async def _drain(stream: SseEventQueue) -> list[dict]:
     out: list[dict] = []
     while not stream._queue.empty():
         evt = await stream._queue.get()
-        if evt is not None:
+        if evt is not None and "comment" not in evt:
             out.append(evt)
     return out
 
 
-async def _build_context(*, llm) -> tuple[AgentContext, EventStream]:
-    stream = EventStream()
+async def _build_context(*, llm) -> tuple[AgentContext, SseEventQueue]:
+    stream = SseEventQueue()
     printer = Printer(request_id="req-streaming", event_stream=stream)
     coll = ToolCollection([_StaticTool()])
     ctx = AgentContext(
@@ -74,6 +74,15 @@ async def _build_context(*, llm) -> tuple[AgentContext, EventStream]:
     return ctx, stream
 
 
+async def _run_with_sse(agent: AgentRun, ctx: AgentContext, query: str) -> str:
+    return await TurnRunner("test-session", enable_event_log=False).run(
+        agent=agent,
+        context=ctx,
+        query=query,
+        on_event=SseSink(ctx.printer).consume,
+    )
+
+
 class TestNoToolPath:
     """A turn without tool calls: start → step → text → step_end → usage → result."""
 
@@ -84,10 +93,10 @@ class TestNoToolPath:
         ctx, stream = await _build_context(llm=llm)
         agent = _make_agent(ctx)
 
-        await run_turn(agent, ctx, "hello")
+        await _run_with_sse(agent, ctx, "hello")
 
-        types = [e["responseType"] for e in await _drain(stream)]
-        assert types == ["start", "step", "text", "step_end", "usage", "result"]
+        types = [e["event"] for e in await _drain(stream)]
+        assert types == ["start", "step", "text", "step_end", "usage", "done"]
 
     async def test_usage_aggregates_tokens(self) -> None:
         llm = MockLLMClient([
@@ -96,13 +105,13 @@ class TestNoToolPath:
         ctx, stream = await _build_context(llm=llm)
         agent = _make_agent(ctx)
 
-        await run_turn(agent, ctx, "hi")
+        await _run_with_sse(agent, ctx, "hi")
 
-        usage = next(e for e in await _drain(stream) if e["responseType"] == "usage")
-        assert usage["resultMap"]["prompt_tokens"] == 12
-        assert usage["resultMap"]["completion_tokens"] == 3
-        assert usage["resultMap"]["total_tokens"] == 15
-        assert usage["resultMap"]["total_seconds"] >= 0.0
+        usage = next(e for e in await _drain(stream) if e["event"] == "usage")
+        assert usage["data"]["prompt_tokens"] == 12
+        assert usage["data"]["completion_tokens"] == 3
+        assert usage["data"]["total_tokens"] == 15
+        assert usage["data"]["total_seconds"] >= 0.0
 
 
 class TestThinkingPath:
@@ -119,9 +128,9 @@ class TestThinkingPath:
         ctx, stream = await _build_context(llm=llm)
         agent = _make_agent(ctx)
 
-        await run_turn(agent, ctx, "hi")
+        await _run_with_sse(agent, ctx, "hi")
 
-        types = [e["responseType"] for e in await _drain(stream)]
+        types = [e["event"] for e in await _drain(stream)]
         # Order matters: step → text events → step_end (thinking is interleaved
         # depending on chunk order from the LLM client; just assert it appears
         # in the right window).
@@ -151,10 +160,10 @@ class TestToolCallPath:
         ctx, stream = await _build_context(llm=llm)
         agent = _make_agent(ctx, max_steps=3)
 
-        await run_turn(agent, ctx, "use echo")
+        await _run_with_sse(agent, ctx, "use echo")
 
         events = await _drain(stream)
-        types = [e["responseType"] for e in events]
+        types = [e["event"] for e in events]
 
         # Lifecycle markers in order
         assert types[0] == "start"
@@ -162,24 +171,24 @@ class TestToolCallPath:
         assert types.count("step_end") == 2
         assert "tool_call_start" in types
         assert "tool_result" in types
-        assert types[-1] == "result"
+        assert types[-1] == "done"
 
         # tool_call_start carries arguments + id
-        call_start = next(e for e in events if e["responseType"] == "tool_call_start")
-        assert call_start["resultMap"]["tool"] == "echo"
-        assert call_start["resultMap"]["arguments"] == {"text": "hi"}
-        assert call_start["resultMap"]["tool_call_id"] == "call_1"
+        call_start = next(e for e in events if e["event"] == "tool_call_start")
+        assert call_start["data"]["tool"] == "echo"
+        assert call_start["data"]["arguments"] == {"text": "hi"}
+        assert call_start["data"]["tool_call_id"] == "call_1"
 
         # tool_result carries ok + elapsed + tool_call_id
-        tool_result = next(e for e in events if e["responseType"] == "tool_result")
-        assert tool_result["resultMap"]["ok"] is True
-        assert tool_result["resultMap"]["tool_call_id"] == "call_1"
-        assert tool_result["resultMap"]["elapsed_seconds"] >= 0.0
+        tool_result = next(e for e in events if e["event"] == "tool_result")
+        assert tool_result["data"]["ok"] is True
+        assert tool_result["data"]["tool_call_id"] == "call_1"
+        assert tool_result["data"]["elapsed_ms"] >= 0
 
         # First step_end has has_tool_calls=True, second one is False
-        step_ends = [e for e in events if e["responseType"] == "step_end"]
-        assert step_ends[0]["resultMap"]["has_tool_calls"] is True
-        assert step_ends[1]["resultMap"]["has_tool_calls"] is False
+        step_ends = [e for e in events if e["event"] == "step_end"]
+        assert step_ends[0]["data"]["has_tool_calls"] is True
+        assert step_ends[1]["data"]["has_tool_calls"] is False
 
     async def test_unknown_tool_marks_result_as_failed(self) -> None:
         llm = MockLLMClient([
@@ -197,12 +206,12 @@ class TestToolCallPath:
         ctx, stream = await _build_context(llm=llm)
         agent = _make_agent(ctx, max_steps=3)
 
-        await run_turn(agent, ctx, "use missing")
+        await _run_with_sse(agent, ctx, "use missing")
 
         events = await _drain(stream)
-        tool_result = next(e for e in events if e["responseType"] == "tool_result")
-        assert tool_result["resultMap"]["ok"] is False
-        assert tool_result["resultMap"]["error_type"] == "ToolNotFound"
+        tool_result = next(e for e in events if e["event"] == "tool_result")
+        assert tool_result["data"]["ok"] is False
+        assert tool_result["data"]["error_type"] == "ToolNotFound"
 
     async def test_multi_turn_tool_calls_emit_ordered_lifecycle_and_feedback(self) -> None:
         llm = MockLLMClient([
@@ -237,13 +246,13 @@ class TestToolCallPath:
         ctx, stream = await _build_context(llm=llm)
         agent = _make_agent(ctx, max_steps=5)
 
-        result = await run_turn(agent, ctx, "research with tools")
+        result = await _run_with_sse(agent, ctx, "research with tools")
 
         assert result == "final answer"
         assert len(llm.calls) == 3
 
         events = await _drain(stream)
-        types = [e["responseType"] for e in events]
+        types = [e["event"] for e in events]
         assert types == [
             "start",
             "step",
@@ -260,26 +269,26 @@ class TestToolCallPath:
             "text",
             "step_end",
             "usage",
-            "result",
+            "done",
         ]
 
-        step_ends = [e["resultMap"] for e in events if e["responseType"] == "step_end"]
+        step_ends = [e["data"] for e in events if e["event"] == "step_end"]
         assert [e["turn"] for e in step_ends] == [1, 2, 3]
         assert [e["has_tool_calls"] for e in step_ends] == [True, True, False]
 
-        tool_starts = [e["resultMap"] for e in events if e["responseType"] == "tool_call_start"]
+        tool_starts = [e["data"] for e in events if e["event"] == "tool_call_start"]
         assert [(e["tool_call_id"], e["arguments"]) for e in tool_starts] == [
             ("call_lookup", {"text": "lookup"}),
             ("call_refine", {"text": "refine"}),
         ]
 
-        tool_results = [e["resultMap"] for e in events if e["responseType"] == "tool_result"]
-        assert [(e["tool_call_id"], e["toolResult"], e["ok"]) for e in tool_results] == [
+        tool_results = [e["data"] for e in events if e["event"] == "tool_result"]
+        assert [(e["tool_call_id"], e["result"], e["ok"]) for e in tool_results] == [
             ("call_lookup", "echoed: lookup", True),
             ("call_refine", "echoed: refine", True),
         ]
 
-        usage = next(e["resultMap"] for e in events if e["responseType"] == "usage")
+        usage = next(e["data"] for e in events if e["event"] == "usage")
         assert usage["prompt_tokens"] == 60
         assert usage["completion_tokens"] == 6
         assert usage["total_tokens"] == 66
@@ -309,17 +318,14 @@ class TestToolCallPath:
             "call_refine",
         ]
 
-        runtime_events = ctx.extras["runtime_events"]
-        assert [event.event_type for event in runtime_events] == [
-            "tool_call_started",
-            "tool_call_completed",
-            "tool_call_started",
-            "tool_call_completed",
+        runtime_events = [
+            event
+            for event in ctx.extras["runtime_events"]
+            if isinstance(event, (ToolCallStarted, ToolCallCompleted))
         ]
         assert [
             event.tool_call_id
             for event in runtime_events
-            if isinstance(event, (ToolCallStarted, ToolCallCompleted))
         ] == [
             "call_lookup",
             "call_lookup",
@@ -332,7 +338,7 @@ class TestRuntimeEventBridge:
     """RuntimeEvent → SSE bridge via Printer.from_runtime_event."""
 
     async def test_bridges_all_new_runtime_events(self) -> None:
-        stream = EventStream()
+        stream = SseEventQueue()
         printer = Printer(request_id="req-bridge", event_stream=stream)
 
         await printer.from_runtime_event(
@@ -351,5 +357,5 @@ class TestRuntimeEventBridge:
             )
         )
 
-        types = [e["responseType"] for e in await _drain(stream)]
+        types = [e["event"] for e in await _drain(stream)]
         assert types == ["step", "thinking", "step_end", "usage"]
