@@ -172,7 +172,7 @@ class OpenAICompatibleClient:
             )
             try:
                 resp = await self.client.post(self.chat_path, json=payload)
-                self._raise_for_status(resp)
+                await self._raise_for_status(resp)
                 logger.debug(
                     "llm_post_finish attempt=%d model=%s status=%d elapsed=%.3fs",
                     attempt_no,
@@ -278,7 +278,7 @@ class OpenAICompatibleClient:
             )
             try:
                 async with self.client.stream("POST", self.chat_path, json=payload) as resp:
-                    self._raise_for_status(resp)
+                    await self._raise_for_status(resp, streaming=True)
                     async for line in resp.aiter_lines():
                         if not line or not line.startswith("data: "):
                             continue
@@ -350,11 +350,23 @@ class OpenAICompatibleClient:
         assert last_exc is not None
         raise last_exc
 
-    def _raise_for_status(self, resp: httpx.Response) -> None:
+    async def _raise_for_status(self, resp: httpx.Response, *, streaming: bool = False) -> None:
         try:
             resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            body = resp.text[:2000]
+            # Streaming responses haven't been read yet; pull the body explicitly
+            # so we can include it in the error. Without this the access to
+            # `resp.text` raises httpx.ResponseNotRead and the caller sees a
+            # cryptic stack trace instead of a structured 4xx/5xx error.
+            if streaming:
+                try:
+                    await resp.aread()
+                except Exception:  # pragma: no cover — best-effort body read
+                    pass
+            try:
+                body = resp.text[:2000]
+            except Exception:  # pragma: no cover
+                body = ""
             message = f"{exc}; response body: {body}"
             retryable = self._is_retryable_status(resp.status_code)
             details = {"url": str(exc.request.url)}
