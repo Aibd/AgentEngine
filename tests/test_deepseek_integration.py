@@ -162,6 +162,71 @@ async def test_deep_research_invokes_read_file_tool(tmp_path: Path) -> None:
 
 
 @skip_unless_integration
+async def test_conversation_history_persists_across_runs(tmp_path: Path) -> None:
+    """Two separate service instances sharing one SQLite DB must share history.
+
+    Mirrors the real chatbot flow: user sends msg, server saves it, refreshes,
+    user sends a follow-up referring to the prior turn — the model must see
+    both turns in its prompt without the caller passing them explicitly.
+    """
+    from agent_core.base.context import AgentContext
+    from agent_core.persistence import SqlitePersistence
+
+    store = SqlitePersistence(tmp_path / "chat.db")
+
+    llm_one = create_llm_from_env()
+    assert llm_one is not None
+    service_one = AgentOrchestrationService(
+        config_path="config/agents.yaml",
+        llm_factory=lambda: llm_one,
+        persistence=store,
+    )
+    ctx_one = AgentContext(
+        request_id="e2e-persist-1",
+        query="My name is Aibd. Reply with just: Hi Aibd.",
+        conversation_id="e2e-conv-persist",
+    )
+    try:
+        await service_one.run(
+            agent_name="general_chat",
+            query="My name is Aibd. Reply with just: Hi Aibd.",
+            context=ctx_one,
+        )
+    finally:
+        await llm_one.close()
+
+    # Verify the first turn is in the DB
+    stored = await store.load_messages("e2e-conv-persist")
+    assert any("Aibd" in (m.get("content") or "") for m in stored)
+
+    # Second service: fresh process, only the DB is shared.
+    llm_two = create_llm_from_env()
+    assert llm_two is not None
+    service_two = AgentOrchestrationService(
+        config_path="config/agents.yaml",
+        llm_factory=lambda: llm_two,
+        persistence=store,
+    )
+    ctx_two = AgentContext(
+        request_id="e2e-persist-2",
+        query="What's my name?",
+        conversation_id="e2e-conv-persist",
+    )
+    try:
+        result = await service_two.run(
+            agent_name="general_chat",
+            query="What's my name?",
+            context=ctx_two,
+        )
+    finally:
+        await llm_two.close()
+
+    # The reply should reference the name from the first turn — proving the
+    # second LLM saw the prior conversation.
+    assert "Aibd" in result, f"history not replayed; got: {result!r}"
+
+
+@skip_unless_integration
 async def test_jsonl_run_log_is_written(tmp_path: Path, monkeypatch) -> None:
     """The observability JSONL sink must persist run events to disk.
 

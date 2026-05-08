@@ -11,6 +11,7 @@ from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
 from agent_core.llm.client import LLMClient
 from agent_core.llm.factory import create_llm_from_env
+from agent_core.persistence.port import PersistencePort
 from agent_core.runtime.events import RuntimeEvent
 from agent_core.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS
 from agent_core.runtime.turn_runner import TurnRunner
@@ -49,6 +50,7 @@ class AgentOrchestrationService:
         *,
         llm_factory: Callable[[], LLMClient | None] | None = None,
         max_query_chars: int = DEFAULT_MAX_QUERY_CHARS,
+        persistence: PersistencePort | None = None,
     ) -> None:
         if max_query_chars < 1:
             raise ValueError("max_query_chars must be at least 1")
@@ -56,6 +58,7 @@ class AgentOrchestrationService:
         self._llm_factory = llm_factory or _default_llm_factory
         self._max_query_chars = max_query_chars
         self._managed_llms: dict[int, LLMClient] = {}
+        self._persistence = persistence
 
     def _load_config(self, config_path: str | Path | None) -> dict[str, Any]:
         if config_path is None or yaml is None:
@@ -93,6 +96,8 @@ class AgentOrchestrationService:
         if context.llm is None:
             context.llm = self._llm_factory()
             self._track_managed_llm(context.llm)
+        if context.persistence is None and self._persistence is not None:
+            context.persistence = self._persistence
 
         started_at = time.perf_counter()
         agent = AgentRun(spec=spec, context=context)
@@ -219,5 +224,6 @@ class AgentOrchestrationService:
             query=query,
             printer=printer,
             conversation_id=conversation_id,
+            persistence=self._persistence,
         )
         return context, event_stream
