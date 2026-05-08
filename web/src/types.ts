@@ -12,7 +12,24 @@ export type ResponseType =
   | "task"
   | "tool_thought"
   | "search_result"
-  | "final_result";
+  | "final_result"
+  | "todos_updated"
+  | "user_question_asked";
+
+export type TodoStatus = "pending" | "in_progress" | "completed";
+
+export type TodoItem = {
+  content: string;
+  activeForm: string;
+  status: TodoStatus;
+};
+
+export type UserQuestion = {
+  questionId: string;
+  question: string;
+  options: string[];
+  multiple: boolean;
+};
 
 export type SseEvent = {
   event: ResponseType;
@@ -65,4 +82,17 @@ export type RunTrace = {
   finalText?: string;
   error?: string;
   errorPayload?: ErrorPayload;
+  todos: TodoItem[];
+  pendingQuestions: UserQuestion[];
+};
+
+export type CapabilityItem = {
+  name: string;
+  description: string;
+};
+
+export type CapabilitySummary = {
+  agents: CapabilityItem[];
+  tools: CapabilityItem[];
+  skills: CapabilityItem[];
 };

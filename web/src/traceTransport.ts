@@ -1,4 +1,4 @@
-import type { ResponseType, SseEvent } from "./types";
+import type { CapabilitySummary, ResponseType, SseEvent } from "./types";
 
 type TraceHandler = (event: SseEvent) => void;
 type DoneHandler = () => void;
@@ -18,6 +18,8 @@ const EVENT_TYPES: ResponseType[] = [
   "tool_thought",
   "search_result",
   "final_result",
+  "todos_updated",
+  "user_question_asked",
 ];
 
 export function runAgentTrace(
@@ -25,12 +27,13 @@ export function runAgentTrace(
   onEvent: TraceHandler,
   onDone: DoneHandler,
   agentName = "deep_research",
+  conversationId = "web-conversation",
 ): () => void {
   const controller = new AbortController();
   const params = new URLSearchParams({
     query,
     agent_name: agentName,
-    conversation_id: "web-conversation",
+    conversation_id: conversationId,
   });
 
   void consumeSse(`/api/runs/stream?${params.toString()}`, controller.signal, onEvent)
@@ -43,6 +46,14 @@ export function runAgentTrace(
     .finally(onDone);
 
   return () => controller.abort();
+}
+
+export async function fetchCapabilities(): Promise<CapabilitySummary> {
+  const response = await fetch("/api/capabilities");
+  if (!response.ok) {
+    throw new Error(`capabilities request failed: ${response.status}`);
+  }
+  return (await response.json()) as CapabilitySummary;
 }
 
 export function connectEventSource(url: string, onEvent: TraceHandler): () => void {

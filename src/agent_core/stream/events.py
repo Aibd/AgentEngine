@@ -35,6 +35,10 @@ class EventType(str, Enum):
     SEARCH_RESULT = "search_result"
     FINAL_RESULT = "final_result"
 
+    # Session-side-channel events emitted by builtin tools.
+    TODOS_UPDATED = "todos_updated"            # TodoWriteTool
+    USER_QUESTION_ASKED = "user_question_asked"  # AskUserQuestionTool
+
     # Terminal
     ERROR = "error"
 

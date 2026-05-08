@@ -15,29 +15,44 @@ import {
   Wrench,
 } from "lucide-react";
 import { createEmptyTrace, reduceTraceEvent } from "./traceReducer";
-import { runAgentTrace } from "./traceTransport";
+import { fetchCapabilities, runAgentTrace } from "./traceTransport";
 import { translateError } from "./friendlyErrors";
-import type { ErrorPayload, RunTrace, StepTrace, ToolTrace, UsageSummary } from "./types";
+import type {
+  CapabilitySummary,
+  ErrorPayload,
+  RunTrace,
+  StepTrace,
+  TodoItem,
+  ToolTrace,
+  UsageSummary,
+  UserQuestion,
+} from "./types";
 
 const samplePrompts = [
-  "读取 README.md 和 docs/API.md，解释现在的事件协议",
-  "用 read_file 工具检查项目结构并总结",
-  "检查 Web 端展示需要哪些字段",
+  "阅读 README.md 和 docs/API.md，给我一份项目概览",
+  "用 read_file 看一下前端入口在哪里",
+  "解释 Web 流式事件协议",
 ];
+
+type ChatTurn = {
+  id: string;
+  submittedQuery: string;
+  trace: RunTrace;
+};
 
 type ChatSession = {
   id: string;
   title: string;
   query: string;
-  submittedQuery: string;
-  trace: RunTrace;
+  turns: ChatTurn[];
 };
 
 export function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [capabilities, setCapabilities] = useState<CapabilitySummary | null>(null);
   const [sessions, setSessions] = useState<ChatSession[]>([
-    createChatSession("welcome", "当前会话", samplePrompts[0]),
+    createChatSession("welcome", "新会话", samplePrompts[0]),
   ]);
   const [activeSessionId, setActiveSessionId] = useState("welcome");
   const stopRef = useRef<null | (() => void)>(null);
@@ -45,12 +60,16 @@ export function App() {
     () => sessions.find((session) => session.id === activeSessionId) ?? sessions[0],
     [activeSessionId, sessions],
   );
-  const trace = activeSession.trace;
   const query = activeSession.query;
-  const submittedQuery = activeSession.submittedQuery;
 
   useEffect(() => {
     return () => stopRef.current?.();
+  }, []);
+
+  useEffect(() => {
+    fetchCapabilities()
+      .then(setCapabilities)
+      .catch(() => setCapabilities(null));
   }, []);
 
   function startRun(nextQuery = query) {
@@ -59,14 +78,21 @@ export function App() {
       return;
     }
     const runSessionId = activeSessionId;
+    const turnId = crypto.randomUUID();
     stopRef.current?.();
     setSessions((current) =>
       updateSession(current, runSessionId, (session) => ({
         ...session,
         title: titleFromQuery(cleaned),
-        query: cleaned,
-        submittedQuery: cleaned,
-        trace: createEmptyTrace(),
+        query: "",
+        turns: [
+          ...session.turns,
+          {
+            id: turnId,
+            submittedQuery: cleaned,
+            trace: createEmptyTrace(),
+          },
+        ],
       })),
     );
     setIsRunning(true);
@@ -76,7 +102,9 @@ export function App() {
         setSessions((current) =>
           updateSession(current, runSessionId, (session) => ({
             ...session,
-            trace: reduceTraceEvent(session.trace, event),
+            turns: session.turns.map((turn) =>
+              turn.id === turnId ? { ...turn, trace: reduceTraceEvent(turn.trace, event) } : turn,
+            ),
           })),
         );
         if (event.event === "done" || event.event === "error") {
@@ -84,6 +112,8 @@ export function App() {
         }
       },
       () => setIsRunning(false),
+      "deep_research",
+      runSessionId,
     );
   }
 
@@ -127,12 +157,12 @@ export function App() {
     <main className={sidebarOpen ? "app-layout" : "app-layout sidebar-collapsed"}>
       <aside className="sidebar" aria-label="会话历史">
         <div className="sidebar-top">
-          <button className="sidebar-icon" type="button" onClick={() => setSidebarOpen(false)} title="折叠侧边栏">
+          <button className="sidebar-icon" type="button" onClick={() => setSidebarOpen(false)} title="收起侧栏">
             <PanelLeftClose size={18} />
           </button>
           <button className="new-chat-button" type="button" onClick={newSession}>
             <Plus size={17} />
-            <span>新建会话</span>
+            <span>新会话</span>
           </button>
         </div>
         <div className="history-list">
@@ -147,25 +177,27 @@ export function App() {
             </button>
           ))}
         </div>
+        <CapabilityPanel capabilities={capabilities} />
       </aside>
 
       <section className="chat-shell">
         {!sidebarOpen ? (
-          <button className="floating-sidebar-toggle" type="button" onClick={() => setSidebarOpen(true)} title="展开侧边栏">
+          <button className="floating-sidebar-toggle" type="button" onClick={() => setSidebarOpen(true)} title="展开侧栏">
             <Menu size={19} />
           </button>
         ) : null}
 
         <section className="message-lane" aria-label="Chat">
-          {trace.status === "idle" ? (
+          {activeSession.turns.length === 0 ? (
             <EmptyChat
+              capabilities={capabilities}
               onPick={(prompt) => {
                 updateActiveQuery(prompt);
                 startRun(prompt);
               }}
             />
           ) : (
-            <Conversation trace={trace} submittedQuery={submittedQuery} isRunning={isRunning} />
+            <Conversation turns={activeSession.turns} isRunning={isRunning} />
           )}
         </section>
 
@@ -173,7 +205,7 @@ export function App() {
           <input
             value={query}
             onChange={(event) => updateActiveQuery(event.target.value)}
-            placeholder="输入一个请求"
+            placeholder="输入请求，按 Enter 发送"
             disabled={isRunning}
           />
           <button
@@ -191,7 +223,23 @@ export function App() {
   );
 }
 
-function Conversation({
+function Conversation({ turns, isRunning }: { turns: ChatTurn[]; isRunning: boolean }) {
+  const lastTurnId = turns.at(-1)?.id;
+  return (
+    <div className="conversation">
+      {turns.map((turn) => (
+        <ConversationTurn
+          key={turn.id}
+          trace={turn.trace}
+          submittedQuery={turn.submittedQuery}
+          isRunning={isRunning && turn.id === lastTurnId}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ConversationTurn({
   trace,
   submittedQuery,
   isRunning,
@@ -203,7 +251,7 @@ function Conversation({
   const hasStreamedText = trace.steps.some((step) => step.text.join("").trim().length > 0);
 
   return (
-    <div className="conversation">
+    <section className="conversation-turn">
       <article className="message-row user-row">
         <div className="user-bubble">{submittedQuery || trace.query}</div>
       </article>
@@ -217,10 +265,15 @@ function Conversation({
             <StepGroup key={step.turn} step={step} />
           ))}
 
+          {trace.todos.length ? <TodoChecklist todos={trace.todos} /> : null}
+          {trace.pendingQuestions.map((question) => (
+            <QuestionPrompt key={question.questionId} question={question} />
+          ))}
+
           {isRunning ? (
             <div className="live-row">
               <Loader2 className="spin" size={16} />
-              <span>正在执行</span>
+              <span>正在思考</span>
             </div>
           ) : null}
 
@@ -231,7 +284,7 @@ function Conversation({
           ) : null}
         </div>
       </article>
-    </div>
+    </section>
   );
 }
 
@@ -361,12 +414,12 @@ function ErrorCard({ message, payload }: { message: string; payload?: ErrorPaylo
       <div className="error-body">
         <strong>{friendly.headline}</strong>
         <p>{friendly.detail}</p>
-        {friendly.hint ? <p className="error-hint">💡 {friendly.hint}</p> : null}
+        {friendly.hint ? <p className="error-hint">提示：{friendly.hint}</p> : null}
         {payload?.code ? (
           <p className="error-meta">
             code: {payload.code}
-            {payload.category ? `   ·   category: ${payload.category}` : ""}
-            {friendly.retryable ? "   ·   可重试" : ""}
+            {payload.category ? ` / category: ${payload.category}` : ""}
+            {friendly.retryable ? " / 可重试" : ""}
           </p>
         ) : null}
       </div>
@@ -374,13 +427,65 @@ function ErrorCard({ message, payload }: { message: string; payload?: ErrorPaylo
   );
 }
 
-function EmptyChat({ onPick }: { onPick: (prompt: string) => void }) {
+function TodoChecklist({ todos }: { todos: TodoItem[] }) {
+  const completed = todos.filter((todo) => todo.status === "completed").length;
+  return (
+    <article className="todo-checklist" aria-label="Agent todo list">
+      <header className="todo-checklist-head">
+        <span>任务清单</span>
+        <span className="todo-progress">
+          {completed}/{todos.length}
+        </span>
+      </header>
+      <ul>
+        {todos.map((todo, index) => (
+          <li key={`${todo.content}-${index}`} className={`todo-item ${todo.status}`}>
+            <span className={`todo-mark ${todo.status}`} aria-hidden="true" />
+            <span className="todo-text">
+              {todo.status === "in_progress" ? todo.activeForm : todo.content}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </article>
+  );
+}
+
+function QuestionPrompt({ question }: { question: UserQuestion }) {
+  return (
+    <article className="question-prompt" aria-label="Agent question">
+      <header className="question-prompt-head">
+        <span>需要你的输入</span>
+      </header>
+      <p className="question-text">{question.question}</p>
+      {question.options.length ? (
+        <ul className="question-options">
+          {question.options.map((option) => (
+            <li key={option}>{option}</li>
+          ))}
+        </ul>
+      ) : null}
+      <p className="question-hint">
+        在下一条消息里回答即可，agent 会从下一轮接着处理。
+      </p>
+    </article>
+  );
+}
+
+function EmptyChat({
+  capabilities,
+  onPick,
+}: {
+  capabilities: CapabilitySummary | null;
+  onPick: (prompt: string) => void;
+}) {
   return (
     <div className="empty-chat">
       <div className="empty-mark">
         <Sparkles size={22} />
       </div>
       <h1>Agent Core</h1>
+      <CapabilityStats capabilities={capabilities} />
       <div className="prompt-grid">
         {samplePrompts.map((prompt) => (
           <button key={prompt} type="button" onClick={() => onPick(prompt)}>
@@ -388,6 +493,63 @@ function EmptyChat({ onPick }: { onPick: (prompt: string) => void }) {
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+function CapabilityPanel({ capabilities }: { capabilities: CapabilitySummary | null }) {
+  const toolCount = capabilities?.tools.length ?? 0;
+  const skillCount = capabilities?.skills.length ?? 0;
+  return (
+    <section className="capability-panel">
+      <div className="capability-panel-head">
+        <Wrench size={15} />
+        <span>能力</span>
+      </div>
+      <p>
+        {toolCount} tools / {skillCount} skills
+      </p>
+      <CapabilityMiniList title="Tools" items={capabilities?.tools} />
+      <CapabilityMiniList title="Skills" items={capabilities?.skills} emptyText="未发现本地 skill" />
+    </section>
+  );
+}
+
+function CapabilityStats({ capabilities }: { capabilities: CapabilitySummary | null }) {
+  if (!capabilities) {
+    return null;
+  }
+  return (
+    <div className="capability-stats">
+      <span>{capabilities.agents.length} agents</span>
+      <span>{capabilities.tools.length} tools</span>
+      <span>{capabilities.skills.length} skills</span>
+    </div>
+  );
+}
+
+function CapabilityMiniList({
+  title,
+  items,
+  emptyText = "暂无",
+}: {
+  title: string;
+  items?: { name: string; description: string }[];
+  emptyText?: string;
+}) {
+  const visible = items?.slice(0, 4) ?? [];
+  return (
+    <div className="capability-mini-list">
+      <strong>{title}</strong>
+      {visible.length ? (
+        visible.map((item) => (
+          <span key={item.name} title={item.description}>
+            {item.name}
+          </span>
+        ))
+      ) : (
+        <em>{emptyText}</em>
+      )}
     </div>
   );
 }
@@ -412,8 +574,7 @@ function createChatSession(id: string, title: string, query = ""): ChatSession {
     id,
     title,
     query,
-    submittedQuery: "",
-    trace: createEmptyTrace(),
+    turns: [],
   };
 }
 

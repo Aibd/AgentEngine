@@ -1,4 +1,13 @@
-import type { RunTrace, SseEvent, StepTrace, ToolTrace, UsageSummary } from "./types";
+import type {
+  RunTrace,
+  SseEvent,
+  StepTrace,
+  TodoItem,
+  TodoStatus,
+  ToolTrace,
+  UsageSummary,
+  UserQuestion,
+} from "./types";
 
 export function createEmptyTrace(): RunTrace {
   return {
@@ -7,6 +16,8 @@ export function createEmptyTrace(): RunTrace {
     query: "",
     status: "idle",
     steps: [],
+    todos: [],
+    pendingQuestions: [],
   };
 }
 
@@ -26,6 +37,8 @@ export function reduceTraceEvent(trace: RunTrace, event: SseEvent): RunTrace {
         finalText: undefined,
         error: undefined,
         errorPayload: undefined,
+        todos: [],
+        pendingQuestions: [],
       };
     case "step":
       return {
@@ -80,6 +93,16 @@ export function reduceTraceEvent(trace: RunTrace, event: SseEvent): RunTrace {
         errorPayload: payload,
       };
     }
+    case "todos_updated":
+      return {
+        ...trace,
+        todos: parseTodos(data.todos),
+      };
+    case "user_question_asked":
+      return {
+        ...trace,
+        pendingQuestions: [...trace.pendingQuestions, parseQuestion(data)],
+      };
     default:
       return trace;
   }
@@ -186,4 +209,43 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function parseTodos(value: unknown): TodoItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const out: TodoItem[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") {
+      continue;
+    }
+    const candidate = raw as Record<string, unknown>;
+    const status = candidate.status;
+    if (status !== "pending" && status !== "in_progress" && status !== "completed") {
+      continue;
+    }
+    out.push({
+      content: stringValue(candidate.content),
+      activeForm: stringValue(candidate.activeForm),
+      status: status as TodoStatus,
+    });
+  }
+  return out;
+}
+
+function parseQuestion(data: Record<string, unknown>): UserQuestion {
+  const optionsRaw = Array.isArray(data.options) ? data.options : [];
+  const options: string[] = [];
+  for (const opt of optionsRaw) {
+    if (typeof opt === "string") {
+      options.push(opt);
+    }
+  }
+  return {
+    questionId: stringValue(data.question_id),
+    question: stringValue(data.question),
+    options,
+    multiple: Boolean(data.multiple),
+  };
 }

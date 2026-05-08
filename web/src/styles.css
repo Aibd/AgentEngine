@@ -121,6 +121,54 @@ button:disabled {
   color: #1f2b26;
 }
 
+.capability-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: auto;
+  border-top: 1px solid #dce2dc;
+  padding-top: 14px;
+}
+
+.capability-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #26332d;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.capability-panel p {
+  margin: 0;
+  color: #68736b;
+  font-size: 11px;
+}
+
+.capability-mini-list {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.capability-mini-list strong {
+  color: #46504a;
+  font-size: 11px;
+}
+
+.capability-mini-list span,
+.capability-mini-list em {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #344039;
+  padding: 5px 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-style: normal;
+}
+
 .chat-shell {
   position: relative;
   display: grid;
@@ -148,6 +196,12 @@ button:disabled {
   gap: 24px;
   width: min(100%, 860px);
   margin: 0 auto;
+}
+
+.conversation-turn {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
 }
 
 .message-row {
@@ -388,6 +442,124 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+.todo-checklist {
+  width: min(100%, 680px);
+  border: 1px solid #d9dcd0;
+  border-radius: 8px;
+  background: #fbfbf6;
+  padding: 12px 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.todo-checklist-head {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 600;
+  color: #4d544c;
+}
+
+.todo-progress {
+  font-variant-numeric: tabular-nums;
+  color: #8a948d;
+  font-weight: 500;
+}
+
+.todo-checklist ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #28332d;
+}
+
+.todo-item.completed .todo-text {
+  color: #8a948d;
+  text-decoration: line-through;
+}
+
+.todo-item.in_progress .todo-text {
+  color: #5a6c45;
+  font-weight: 500;
+}
+
+.todo-mark {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid #b7c0a2;
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.todo-mark.in_progress {
+  border-color: #5a6c45;
+  background: radial-gradient(circle, #5a6c45 0 4px, transparent 4px 100%);
+  animation: todo-pulse 1.6s ease-in-out infinite;
+}
+
+.todo-mark.completed {
+  border-color: #8a948d;
+  background: #8a948d;
+}
+
+@keyframes todo-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.question-prompt {
+  width: min(100%, 680px);
+  border: 1px solid #c7b78b;
+  border-radius: 8px;
+  background: #fdf8e9;
+  padding: 12px 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.question-prompt-head {
+  font-weight: 600;
+  color: #6d5a1f;
+}
+
+.question-text {
+  margin: 0;
+  color: #28332d;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.question-options {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.question-options li {
+  background: #f0e7c4;
+  color: #4d3f0c;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+
+.question-hint {
+  margin: 0;
+  color: #8a8053;
+  font-size: 13px;
+}
+
 .markdown {
   color: #1f2b26;
   line-height: 1.72;
@@ -499,6 +671,23 @@ button:disabled {
   color: #202822;
   font-size: 28px;
   letter-spacing: 0;
+}
+
+.capability-stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.capability-stats span {
+  border: 1px solid #d8dfd9;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #46504a;
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .prompt-grid {

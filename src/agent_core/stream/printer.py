@@ -10,6 +10,7 @@ from agent_core.runtime.events import (
     RunStarted,
     RuntimeEvent,
     TextDelta,
+    TodosUpdated,
     ToolCallCompleted,
     ToolCallFailed,
     ToolCallStarted,
@@ -17,6 +18,7 @@ from agent_core.runtime.events import (
     TurnEnded,
     TurnStarted,
     UsageReport,
+    UserQuestionAsked,
 )
 from agent_core.stream.events import EventType
 from agent_core.stream.sse_queue import SseEventQueue
@@ -152,6 +154,23 @@ class Printer:
                     "category": "runtime",
                     "retryable": False,
                     "details": {"type": event.error_type},
+                },
+            )
+        elif isinstance(event, TodosUpdated):
+            await self._runtime_frame(
+                EventType.TODOS_UPDATED,
+                event,
+                {"todos": event.todos},
+            )
+        elif isinstance(event, UserQuestionAsked):
+            await self._runtime_frame(
+                EventType.USER_QUESTION_ASKED,
+                event,
+                {
+                    "question_id": event.question_id,
+                    "question": event.question,
+                    "options": event.options,
+                    "multiple": event.multiple,
                 },
             )
         elif isinstance(event, RunCancelled):
