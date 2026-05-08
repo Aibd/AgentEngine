@@ -186,3 +186,32 @@ class ApprovalRequired(RuntimeEvent):
     status: str = "pending"  # pending | approved | denied
     reason: str = ""
     event_type: ClassVar[str] = "approval_required"
+
+
+@dataclass(frozen=True, slots=True)
+class TodosUpdated(RuntimeEvent):
+    """Emitted whenever ``TodoWriteTool`` rewrites the session task list.
+
+    The frontend can subscribe to this to render a live checklist; runs that
+    don't use TodoWriteTool will simply never see this event.
+    """
+
+    todos: list[dict[str, Any]] = field(default_factory=list)
+    event_type: ClassVar[str] = "todos_updated"
+
+
+@dataclass(frozen=True, slots=True)
+class UserQuestionAsked(RuntimeEvent):
+    """Emitted when the agent asks the user a clarifying question mid-run.
+
+    The tool returns immediately with a placeholder marker; the actual
+    answer arrives as the next user message in a subsequent turn (the
+    conversation_id keeps state consistent). The frontend renders this as
+    a prompt block so the user knows to respond.
+    """
+
+    question_id: str = ""
+    question: str = ""
+    options: list[str] = field(default_factory=list)
+    multiple: bool = False
+    event_type: ClassVar[str] = "user_question_asked"

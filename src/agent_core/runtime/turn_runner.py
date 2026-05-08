@@ -21,6 +21,7 @@ from agent_core.runtime.events import (
     RunStarted,
     RuntimeEvent,
 )
+from agent_core.runtime.file_access_tracker import TurnFileAccessTracker
 from agent_core.runtime.run_state import RunState, TerminalReason
 from agent_core.runtime.sinks import RuntimeEventFanout
 from agent_core.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS, run_turn
@@ -76,9 +77,19 @@ class TurnRunner:
                 *([on_event] if on_event is not None else []),
             ]
         )
+        # File-access tracker watches read/write tool calls in this run so
+        # write/edit tools can refuse to overwrite unseen content.
+        # Pre-existing tracker (e.g. supplied by a test) takes precedence.
+        tracker: TurnFileAccessTracker = (
+            context.extras.get("file_access_tracker")
+            or TurnFileAccessTracker(workspace_root=context.extras.get("workspace_root"))
+        )
+        context.extras["file_access_tracker"] = tracker
+
         started_at = time.perf_counter()
 
         async def emit(event: RuntimeEvent) -> None:
+            tracker.observe(event)
             events.append(event)
             await fanout.consume(event)
 
@@ -86,6 +97,10 @@ class TurnRunner:
         context.extras["turn_id"] = turn_id
         context.extras["runtime_events"] = events
         context.extras["run_state"] = state
+        # Expose the emit function so tools that need to surface side-channel
+        # events (TodoWriteTool's TodosUpdated, AskUserQuestionTool's
+        # UserQuestionAsked) can publish them without re-wrapping the fanout.
+        context.extras["emit"] = emit
         if event_log is not None:
             context.extras["run_event_log_path"] = str(event_log.path)
 
