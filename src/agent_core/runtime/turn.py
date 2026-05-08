@@ -25,6 +25,14 @@ from typing import Any
 from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
 from agent_core.base.state import AgentState
+from agent_core.hooks import (
+    HookAbortError,
+    HookEvent,
+    HookManager,
+    PostToolUsePayload,
+    PreToolUsePayload,
+    UserPromptSubmitPayload,
+)
 from agent_core.llm.client import LLMResponse
 from agent_core.memory.message import Message
 from agent_core.runtime.events import (
@@ -189,9 +197,34 @@ async def _loop(
         agent.memory.add_user_message(query)
         return ""
 
+    hook_manager: HookManager | None = context.extras.get("hooks")
+    cwd = str(context.extras.get("workspace_root") or "")
+    session_id = (
+        context.session_id
+        or context.conversation_id
+        or context.request_id
+    )
+
     sys_prompt = agent.system_prompt()
     if sys_prompt:
         agent.memory.add_system_message(sys_prompt)
+
+    # UserPromptSubmit fires right before the user's query enters memory,
+    # giving handlers a chance to vet/sanitize the prompt or abort the run
+    # before any model invocation.
+    if hook_manager is not None:
+        await hook_manager.dispatch(
+            HookEvent.USER_PROMPT_SUBMIT,
+            UserPromptSubmitPayload(
+                session_id=session_id,
+                run_id=run_id,
+                turn_id=turn_id,
+                cwd=cwd,
+                agent_name=agent.name,
+                query=query,
+            ),
+        )
+
     agent.memory.add_user_message(query)
 
     next_step = agent.next_step_prompt()
@@ -408,6 +441,13 @@ async def _execute_tool_calls(
         on_event=emit,
         timeout_seconds=tool_timeout_seconds,
     )
+    hook_manager: HookManager | None = context.extras.get("hooks")
+    cwd = str(context.extras.get("workspace_root") or "")
+    session_id = (
+        context.session_id
+        or context.conversation_id
+        or context.request_id
+    )
 
     for tc in tool_calls:
         tool_name = tc.get("function", {}).get("name", "")
@@ -511,6 +551,51 @@ async def _execute_tool_calls(
             tool_name,
             sorted(tool_args.keys()),
         )
+
+        # PreToolUse fires after the approval gate has accepted the call but
+        # before the tool actually runs. Aborting here skips the tool and
+        # threads the abort reason back as a ToolCallFailed event so the
+        # model sees the rejection in memory.
+        tool_call_id = tc.get("id", "") or ""
+        if hook_manager is not None:
+            try:
+                await hook_manager.dispatch(
+                    HookEvent.PRE_TOOL_USE,
+                    PreToolUsePayload(
+                        session_id=session_id,
+                        run_id=run_id,
+                        turn_id=turn_id,
+                        cwd=cwd,
+                        tool_name=tool_name,
+                        tool_call_id=tool_call_id,
+                        arguments=tool_args,
+                    ),
+                )
+            except HookAbortError as abort:
+                rendered = f"Tool '{tool_name}' blocked by hook: {abort.reason or 'no reason given'}"
+                await emit(
+                    ToolCallStarted(
+                        run_id=run_id,
+                        turn_id=turn_id,
+                        tool_call_id=tool_call_id,
+                        tool_name=tool_name,
+                        arguments=tool_args,
+                    )
+                )
+                await emit(
+                    ToolCallFailed(
+                        run_id=run_id,
+                        turn_id=turn_id,
+                        tool_call_id=tool_call_id,
+                        tool_name=tool_name,
+                        error_type="HookAbortError",
+                        error_message=rendered,
+                        elapsed_seconds=0.0,
+                    )
+                )
+                agent.memory.add_tool_message(rendered, tool_call_id=tool_call_id)
+                continue
+
         result = await executor.execute(
             tool,
             tool_args,
@@ -532,5 +617,31 @@ async def _execute_tool_calls(
                 result.error,
                 result.elapsed_seconds,
             )
+
+        # PostToolUse fires regardless of outcome. Aborting here can't undo
+        # the tool side effects, so abort errors are swallowed by the
+        # dispatcher boundary in the same spirit as Stop.
+        if hook_manager is not None:
+            try:
+                await hook_manager.dispatch(
+                    HookEvent.POST_TOOL_USE,
+                    PostToolUsePayload(
+                        session_id=session_id,
+                        run_id=run_id,
+                        turn_id=turn_id,
+                        cwd=cwd,
+                        tool_name=tool_name,
+                        tool_call_id=tool_call_id,
+                        arguments=tool_args,
+                        ok=result.ok,
+                        result_summary=result.content,
+                        error_type="" if result.ok else (result.error or "")[:64],
+                        error_message="" if result.ok else (result.error or ""),
+                        elapsed_seconds=result.elapsed_seconds,
+                    ),
+                )
+            except HookAbortError:
+                # Tool already executed; abort here just stops the chain.
+                pass
 
         agent.memory.add_tool_message(result.content, tool_call_id=tc.get("id", ""))
