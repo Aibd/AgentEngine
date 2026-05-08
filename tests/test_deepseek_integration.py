@@ -227,6 +227,59 @@ async def test_conversation_history_persists_across_runs(tmp_path: Path) -> None
 
 
 @skip_unless_integration
+async def test_invalid_api_key_surfaces_as_error_event() -> None:
+    """Real LLM call with a bad key must reach the client as an `error` SSE frame.
+
+    This catches a class of bug where an exception escapes the runtime event
+    bridge and the client sees a closed connection instead of a structured
+    error payload.
+    """
+    from agent_core.llm.openai_compat import OpenAICompatibleClient
+    from agent_core.errors import LLMHTTPError
+
+    bad_llm = OpenAICompatibleClient(
+        base_url=os.getenv("LLM_BASE_URL", "https://api.deepseek.com"),
+        api_key="sk-deliberately-invalid-key-for-test",
+        model=os.getenv("LLM_MODEL", "deepseek-chat"),
+    )
+    service = AgentOrchestrationService(
+        config_path="config/agents.yaml",
+        llm_factory=lambda: bad_llm,
+    )
+    context, stream = service.create_streaming_context(
+        request_id="e2e-bad-key",
+        query="hi",
+        conversation_id="e2e-bad-key",
+    )
+    context.llm = bad_llm
+
+    try:
+        with pytest.raises(LLMHTTPError):
+            await service.run(
+                agent_name="general_chat",
+                query="hi",
+                context=context,
+            )
+    finally:
+        await bad_llm.close()
+
+    events = []
+    while not stream._queue.empty():
+        evt = await stream._queue.get()
+        if evt is None:
+            break
+        if "comment" not in evt:
+            events.append(evt)
+
+    types = [e["event"] for e in events]
+    assert "error" in types, f"no error event in {types}"
+    error_evt = next(e for e in events if e["event"] == "error")
+    # DeepSeek returns 401; the runtime preserves the structured payload
+    assert error_evt["data"]["category"] == "llm"
+    assert error_evt["data"].get("status_code") in (401, 403)
+
+
+@skip_unless_integration
 async def test_jsonl_run_log_is_written(tmp_path: Path, monkeypatch) -> None:
     """The observability JSONL sink must persist run events to disk.
 
