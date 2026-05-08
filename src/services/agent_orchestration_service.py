@@ -9,6 +9,10 @@ from typing import Any, cast
 
 from agent_core.base.agent import AgentRun
 from agent_core.base.context import AgentContext
+from agent_core.concurrency import (
+    ConversationLockManager,
+    InMemoryConversationLockManager,
+)
 from agent_core.llm.client import LLMClient
 from agent_core.llm.factory import create_llm_from_env
 from agent_core.persistence.port import PersistencePort
@@ -51,6 +55,7 @@ class AgentOrchestrationService:
         llm_factory: Callable[[], LLMClient | None] | None = None,
         max_query_chars: int = DEFAULT_MAX_QUERY_CHARS,
         persistence: PersistencePort | None = None,
+        lock_manager: ConversationLockManager | None = None,
     ) -> None:
         if max_query_chars < 1:
             raise ValueError("max_query_chars must be at least 1")
@@ -59,6 +64,7 @@ class AgentOrchestrationService:
         self._max_query_chars = max_query_chars
         self._managed_llms: dict[int, LLMClient] = {}
         self._persistence = persistence
+        self._lock_manager = lock_manager or InMemoryConversationLockManager()
 
     def _load_config(self, config_path: str | Path | None) -> dict[str, Any]:
         if config_path is None or yaml is None:
@@ -119,13 +125,16 @@ class AgentOrchestrationService:
             session_id=context.session_id or context.conversation_id or context.request_id
         )
         try:
-            return await runner.run(
-                agent=agent,
-                context=context,
-                query=query,
-                on_event=on_runtime_event,
-                tool_timeout_seconds=tool_timeout_seconds,
-            )
+            # Serialize concurrent runs that share a conversation_id so their
+            # memory load → run → save cycles cannot interleave and lose turns.
+            async with self._lock_manager.acquire(context.conversation_id):
+                return await runner.run(
+                    agent=agent,
+                    context=context,
+                    query=query,
+                    on_event=on_runtime_event,
+                    tool_timeout_seconds=tool_timeout_seconds,
+                )
         finally:
             self._record_agent_finish(
                 agent=agent,
