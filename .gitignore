@@ -7,8 +7,10 @@
 !.env.example
 .DS_Store
 .continue/
-.claude
+.claude/*
+!.claude/launch.json
 logs/
+data/
 web/node_modules/
 web/dist/
 

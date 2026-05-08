@@ -12,12 +12,15 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from agent_core.concurrency import InMemoryConversationLockManager
 from agent_core.errors import error_to_dict
+from agent_core.persistence import SqlitePersistence
 from agent_core.tools.builtin import ReadFileTool
 from services.agent_orchestration_service import AgentOrchestrationService
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_DB_PATH = REPO_ROOT / "data" / "chatbot.db"
 
 
 def _load_dotenv(path: Path) -> None:
@@ -36,6 +39,13 @@ def _load_dotenv(path: Path) -> None:
 
 _load_dotenv(REPO_ROOT / ".env")
 
+# Process-wide singletons: persistence + lock manager. The Service constructed
+# per request must share the same instances so all conversations land in one
+# database and concurrent runs hit the same locks.
+DEFAULT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+PERSISTENCE = SqlitePersistence(DEFAULT_DB_PATH)
+LOCK_MANAGER = InMemoryConversationLockManager()
+
 app = FastAPI(title="Agent Core Web API")
 app.add_middleware(
     CORSMiddleware,
@@ -52,6 +62,20 @@ async def health() -> dict[str, Any]:
         "llm_configured": bool(os.getenv("LLM_API_KEY") and os.getenv("LLM_MODEL")),
         "model": os.getenv("LLM_MODEL", ""),
     }
+
+
+@app.get("/api/conversations/{conversation_id}/messages")
+async def conversation_messages(conversation_id: str) -> dict[str, Any]:
+    """Return persisted messages for a conversation so the UI can rehydrate.
+
+    Filters out system messages (prompts injected by the agent itself) and
+    only returns user/assistant/tool turns the front end actually displays.
+    """
+    if not conversation_id.strip():
+        raise HTTPException(status_code=400, detail="conversation_id is required")
+    messages = await PERSISTENCE.load_messages(conversation_id)
+    visible = [m for m in messages if m.get("role") != "system"]
+    return {"conversation_id": conversation_id, "messages": visible}
 
 
 @app.get("/api/runs/stream")
@@ -94,7 +118,11 @@ async def _run_agent_events(
     conversation_id: str,
     request_id: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
-    service = AgentOrchestrationService(config_path=REPO_ROOT / "config" / "agents.yaml")
+    service = AgentOrchestrationService(
+        config_path=REPO_ROOT / "config" / "agents.yaml",
+        persistence=PERSISTENCE,
+        lock_manager=LOCK_MANAGER,
+    )
     request_id = request_id or f"web-{uuid.uuid4().hex[:12]}"
     context, event_stream = service.create_streaming_context(
         request_id=request_id,
