@@ -1,8 +1,8 @@
-from agent_core.base.context import AgentContext
-from agent_core.skills.loader import SkillLoader
-from agent_core.spec import AgentSpec
-from agent_core.tools.builtin.read_file_tool import ReadFileTool
-from agent_core.tools.builtin.skill_tool import SkillTool
+from agentkit.base.context import AgentContext
+from agentkit.skills.loader import SkillLoader
+from agentkit.spec import AgentSpec
+from agentkit.tools.builtin.read_file_tool import ReadFileTool
+from agentkit.tools.builtin.skill_tool import SkillTool
 
 _SYSTEM_PROMPT = (
     "你是一个深度研究助手。面对用户的请求，按以下方式工作：\n"

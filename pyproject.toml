@@ -1,7 +1,7 @@
 [project]
-name = "agent-core-refactor"
+name = "agentkit"
 version = "0.1.0"
-description = "Standalone agent core scaffold for WiseAgent refactor"
+description = "Standalone AgentKit scaffold for WiseAgent refactor"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115.0",

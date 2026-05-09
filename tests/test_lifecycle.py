@@ -5,12 +5,12 @@ from typing import AsyncIterator
 
 import pytest
 
-from agent_core.base.agent import AgentRun
-from agent_core.base.context import AgentContext
-from agent_core.base.state import AgentState
-from agent_core.runtime.turn import run_turn
-from agent_core.llm.client import LLMChunk, LLMResponse
-from agent_core.spec import AgentSpec
+from agentkit.base.agent import AgentRun
+from agentkit.base.context import AgentContext
+from agentkit.base.state import AgentState
+from agentkit.runtime.turn import run_turn
+from agentkit.llm.client import LLMChunk, LLMResponse
+from agentkit.spec import AgentSpec
 from mock_llm import MockLLMClient
 from services.agent_orchestration_service import AgentOrchestrationService
 

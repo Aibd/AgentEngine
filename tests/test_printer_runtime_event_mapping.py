@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_core.runtime.events import (
+from agentkit.runtime.events import (
     RunCompleted,
     RunFailed,
     RunStarted,
@@ -14,8 +14,8 @@ from agent_core.runtime.events import (
     ToolStreamEventEmitted,
     UserQuestionAsked,
 )
-from agent_core.stream.printer import Printer
-from agent_core.stream.sse_queue import SseEventQueue
+from agentkit.stream.printer import Printer
+from agentkit.stream.sse_queue import SseEventQueue
 
 
 @pytest.mark.parametrize(

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 
-from agent_core.runtime.events import ToolCallFailed, ToolCallStarted, RuntimeEvent
-from agent_core.tools.base import Tool
-from agent_core.tools.executor import ToolExecutor
+from agentkit.runtime.events import ToolCallFailed, ToolCallStarted, RuntimeEvent
+from agentkit.tools.base import Tool
+from agentkit.tools.executor import ToolExecutor
 
 
 class _SlowTool(Tool):

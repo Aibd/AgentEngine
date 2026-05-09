@@ -6,23 +6,23 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, cast
 
-from agent_core.base.agent import AgentRun
-from agent_core.base.context import AgentContext
-from agent_core.concurrency import (
+from agentkit.base.agent import AgentRun
+from agentkit.base.context import AgentContext
+from agentkit.concurrency import (
     ConversationLockManager,
     InMemoryConversationLockManager,
 )
-from agent_core.llm.client import LLMClient
-from agent_core.llm.factory import create_llm_from_env
-from agent_core.persistence.port import PersistencePort
-from agent_core.enterprise.middleware import MiddlewareChain
-from agent_core.runtime.events import RuntimeEvent
-from agent_core.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS
-from agent_core.runtime.turn_runner import TurnRunner
-from agent_core.spec import AgentSpec
-from agent_core.stream.printer import Printer
-from agent_core.stream.sse_queue import SseEventQueue
-from agent_core.stream.sse_sink import SseSink
+from agentkit.llm.client import LLMClient
+from agentkit.llm.factory import create_llm_from_env
+from agentkit.persistence.port import PersistencePort
+from agentkit.enterprise.middleware import MiddlewareChain
+from agentkit.runtime.events import RuntimeEvent
+from agentkit.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS
+from agentkit.runtime.turn_runner import TurnRunner
+from agentkit.spec import AgentSpec
+from agentkit.stream.printer import Printer
+from agentkit.stream.sse_queue import SseEventQueue
+from agentkit.stream.sse_sink import SseSink
 from agents import REGISTRY as AGENT_REGISTRY
 
 

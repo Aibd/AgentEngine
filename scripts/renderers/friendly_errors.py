@@ -1,4 +1,4 @@
-"""User-facing translations for AgentCoreError.code values."""
+"""User-facing translations for AgentKitError.code values."""
 
 from __future__ import annotations
 

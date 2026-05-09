@@ -13,8 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from agents import REGISTRY as AGENT_REGISTRY
-from agent_core.concurrency import InMemoryConversationLockManager
-from agent_core.enterprise import (
+from agentkit.concurrency import InMemoryConversationLockManager
+from agentkit.enterprise import (
     ApprovalGate,
     ApprovalResult,
     EnvSecrets,
@@ -27,10 +27,10 @@ from agent_core.enterprise import (
     quota_middleware,
     retry_middleware,
 )
-from agent_core.errors import error_to_dict
-from agent_core.persistence import SqlitePersistence
-from agent_core.skills.loader import SkillLoader
-from agent_core.tools.builtin import ReadFileTool, SkillTool
+from agentkit.errors import error_to_dict
+from agentkit.persistence import SqlitePersistence
+from agentkit.skills.loader import SkillLoader
+from agentkit.tools.builtin import ReadFileTool, SkillTool
 from services.agent_orchestration_service import AgentOrchestrationService
 
 
@@ -63,7 +63,7 @@ LOCK_MANAGER = InMemoryConversationLockManager()
 QUOTA_STORE = QuotaStore()
 APPROVAL_GATE = ApprovalGate(timeout_seconds=float(os.getenv("APPROVAL_TIMEOUT_SECONDS", "300")))
 
-app = FastAPI(title="Agent Core Web API")
+app = FastAPI(title="AgentKit Web API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],

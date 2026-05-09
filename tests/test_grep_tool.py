@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_core.tools.builtin.grep_tool import GrepTool
+from agentkit.tools.builtin.grep_tool import GrepTool
 
 
 @pytest.fixture

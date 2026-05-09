@@ -16,10 +16,10 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from agent_core.base.context import AgentContext  # noqa: E402
-from agent_core.llm.factory import create_llm_from_env  # noqa: E402
-from agent_core.stream.printer import Printer  # noqa: E402
-from agent_core.stream.sse_queue import SseEventQueue  # noqa: E402
+from agentkit.base.context import AgentContext  # noqa: E402
+from agentkit.llm.factory import create_llm_from_env  # noqa: E402
+from agentkit.stream.printer import Printer  # noqa: E402
+from agentkit.stream.sse_queue import SseEventQueue  # noqa: E402
 from services import AgentOrchestrationService  # noqa: E402
 
 

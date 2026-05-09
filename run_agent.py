@@ -31,7 +31,7 @@ _load_dotenv(Path(__file__).parent / ".env")
 
 async def run_quick_test():
     """快速测试真实LLM调用"""
-    print("🚀 Agent Core Refactor - 真实LLM测试")
+    print("🚀 AgentKit Refactor - 真实LLM测试")
     print("=" * 60)
     
     # 检查环境变量
@@ -51,8 +51,8 @@ async def run_quick_test():
     
     # 导入项目模块
     try:
-        from agent_core.base.context import AgentContext
-        from agent_core.llm.factory import create_llm_from_env
+        from agentkit.base.context import AgentContext
+        from agentkit.llm.factory import create_llm_from_env
         from services.agent_orchestration_service import AgentOrchestrationService
     except ImportError as e:
         print(f"❌ 导入错误: {e}")

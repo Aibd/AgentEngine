@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_core.tools.builtin.read_file_tool import ReadFileTool
+from agentkit.tools.builtin.read_file_tool import ReadFileTool
 
 
 @pytest.fixture

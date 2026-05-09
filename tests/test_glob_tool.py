@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_core.tools.builtin.glob_tool import GlobTool
+from agentkit.tools.builtin.glob_tool import GlobTool
 
 
 @pytest.fixture

@@ -6,8 +6,8 @@ import asyncio
 
 import pytest
 
-from agent_core.base.context import AgentContext
-from agent_core.enterprise import (
+from agentkit.base.context import AgentContext
+from agentkit.enterprise import (
     ApprovalDeniedError,
     ApprovalGate,
     ApprovalResult,
@@ -23,13 +23,13 @@ from agent_core.enterprise import (
     quota_middleware,
     retry_middleware,
 )
-from agent_core.errors import (
+from agentkit.errors import (
     LLMRateLimitError,
     LLMTimeoutError,
     LLMContextWindowError,
     ToolExecutionError,
 )
-from agent_core.spec import AgentSpec
+from agentkit.spec import AgentSpec
 
 
 # ---------------------------------------------------------------------------

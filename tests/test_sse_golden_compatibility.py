@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_core.stream.printer import Printer
-from agent_core.stream.sse_queue import SseEventQueue
+from agentkit.stream.printer import Printer
+from agentkit.stream.sse_queue import SseEventQueue
 
 
 EmitCase = Callable[[Printer], Awaitable[None]]

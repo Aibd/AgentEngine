@@ -4,14 +4,14 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from agent_core.runtime.events import (
+from agentkit.runtime.events import (
     RunStarted,
     RuntimeEvent,
     TextDelta,
     ToolCallStarted,
     ToolStreamEventEmitted,
 )
-from agent_core.stream.events import EventType
+from agentkit.stream.events import EventType
 
 
 def test_runtime_event_serializes_common_fields() -> None:

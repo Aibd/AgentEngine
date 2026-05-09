@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-echo 🚀 Agent Core Refactor 快速启动
+echo 🚀 AgentKit Refactor 快速启动
 echo ================================================
 
 :: 检查Python环境
@@ -19,7 +19,7 @@ if not exist ".env" (
     echo LLM_BASE_URL=https://api.deepseek.com>> .env
     echo LLM_TIMEOUT=120>> .env
     echo LLM_MAX_RETRIES=2>> .env
-    echo AGENT_CORE_LOG_DIR=logs>> .env
+    echo AGENTKIT_LOG_DIR=logs>> .env
     echo ✅ 已创建.env示例文件
     echo 请编辑.env文件设置正确的LLM_API_KEY
     echo.
@@ -48,7 +48,7 @@ if "%1"=="" (
     if "!choice!"=="1" (
         python run_agent.py
     ) else if "!choice!"=="2" (
-        python scripts/chat.py general_chat "请介绍一下Agent Core Refactor项目"
+        python scripts/chat.py general_chat "请介绍一下AgentKit Refactor项目"
     ) else if "!choice!"=="3" (
         python scripts/chat.py deep_research "人工智能的发展趋势"
     ) else (

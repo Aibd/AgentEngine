@@ -4,13 +4,13 @@ import asyncio
 
 import pytest
 
-from agent_core.base.agent import AgentRun
-from agent_core.base.context import AgentContext
-from agent_core.errors import LLMTimeoutError, ToolExecutionError
-from agent_core.runtime.events import RunCancelled, RunCompleted, RunFailed, RunStarted, RuntimeEvent
-from agent_core.runtime.run_state import RunStatus, TerminalReason
-from agent_core.runtime.turn_runner import TurnRunner
-from agent_core.spec import AgentSpec
+from agentkit.base.agent import AgentRun
+from agentkit.base.context import AgentContext
+from agentkit.errors import LLMTimeoutError, ToolExecutionError
+from agentkit.runtime.events import RunCancelled, RunCompleted, RunFailed, RunStarted, RuntimeEvent
+from agentkit.runtime.run_state import RunStatus, TerminalReason
+from agentkit.runtime.turn_runner import TurnRunner
+from agentkit.spec import AgentSpec
 
 
 async def _ok_turn(agent: AgentRun, context: AgentContext, query: str) -> str:

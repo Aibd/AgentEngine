@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from typing import AsyncGenerator
 
-from agent_core.runtime.events import (
+from agentkit.runtime.events import (
     RuntimeEvent,
     ToolCallCompleted,
     ToolCallStarted,
     ToolStreamEventEmitted,
 )
-from agent_core.tools.base import StreamingTool, ToolStreamEvent
-from agent_core.tools.executor import ToolExecutor
+from agentkit.tools.base import StreamingTool, ToolStreamEvent
+from agentkit.tools.executor import ToolExecutor
 
 
 class _StreamingSearchTool(StreamingTool):

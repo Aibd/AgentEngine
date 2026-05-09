@@ -1,6 +1,6 @@
 # Streaming Protocol v2（流式协议 v2）
 
-Agent Core 将运行时输出暴露为标准的 Server-Sent Events（SSE）。运行时代码会发出语义化的 `RuntimeEvent` 对象；`SseSink` 将这些对象渲染为 SSE v2 帧。
+AgentKit 将运行时输出暴露为标准的 Server-Sent Events（SSE）。运行时代码会发出语义化的 `RuntimeEvent` 对象；`SseSink` 将这些对象渲染为 SSE v2 帧。
 
 ## 传输格式
 
@@ -147,7 +147,7 @@ done
 
 ### `error`（错误）
 
-当可用时，payload 为 `AgentCoreError.to_dict()`：
+当可用时，payload 为 `AgentKitError.to_dict()`：
 
 ```json
 {

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from agent_core.tools.base import Tool
-from agent_core.tools.collection import ToolCollection
-from agent_core.tools.registry import create_tool, register_tool, registered_tools
+from agentkit.tools.base import Tool
+from agentkit.tools.collection import ToolCollection
+from agentkit.tools.registry import create_tool, register_tool, registered_tools
 
 
 class _EchoTool(Tool):

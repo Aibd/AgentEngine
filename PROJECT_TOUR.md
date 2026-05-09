@@ -1,4 +1,4 @@
-# Agent Core Refactor — 一篇看懂
+# AgentKit Refactor — 一篇看懂
 
 > 一份图文并茂的项目拆解。看完这一篇,你应该能回答:**这个项目在做什么、由哪些零件组成、一条用户请求如何穿过它、我该从哪里下手扩展。**
 
@@ -63,7 +63,7 @@
   prompts/       PromptLoader  (读 YAML 提示词,带缓存)
   skills/        SkillLoader   (扫 .agent/skills/SKILL.md)
   observability/ RunEventLog   (logs/runs/<日期>/<run_id>.jsonl)
-  errors.py      AgentCoreError 家族 (LLMError / ToolExecutionError …)
+  errors.py      AgentKitError 家族 (LLMError / ToolExecutionError …)
 ```
 
 **记忆口诀:** `services → runtime → handlers → (base · llm · memory · tools) → stream`,左到右就是一条请求的旅行路线。
@@ -174,7 +174,7 @@ REGISTRY["my_agent"] = SPEC
 
 ## 5. ReAct 循环细节(代码视角)
 
-`run_turn()._loop` 在 [src/agent_core/runtime/turn.py](src/agent_core/runtime/turn.py) 里:
+`run_turn()._loop` 在 [src/agentkit/runtime/turn.py](src/agentkit/runtime/turn.py) 里:
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
@@ -430,7 +430,7 @@ result = await service.run(
 
 ```
 src/
-├─ agent_core/                     ← 框架代码,不依赖任何业务
+├─ agentkit/                     ← 框架代码,不依赖任何业务
 │  ├─ spec.py      AgentSpec(frozen dataclass) ← NEW
 │  ├─ base/        AgentRun · AgentContext · AgentState
 │  ├─ runtime/     turn.py(run_turn 唯一循环) · turn_runner · run_state · events
@@ -441,7 +441,7 @@ src/
 │  ├─ prompts/     YAML 提示词加载器(带缓存)
 │  ├─ skills/      Claude Code 风格 SKILL.md 扫描
 │  ├─ observability/ JSONL 运行日志
-│  └─ errors.py    AgentCoreError 家族(可序列化、可重试标记)
+│  └─ errors.py    AgentKitError 家族(可序列化、可重试标记)
 │
 ├─ agents/                         ← Agent 规格声明
 │  ├─ __init__.py  REGISTRY: dict[str, AgentSpec] ← NEW
@@ -511,7 +511,7 @@ run_agent.py            ← 五分钟体验脚本
 **终端 — Claude Code 风格静态卡片:**
 
 ```
-─── 🤖 deep_research  调研 src/agent_core 的整体结构 ───
+─── 🤖 deep_research  调研 src/agentkit 的整体结构 ───
 
   ▸ Turn 1
     💭 Thinking (21 chars hidden — pass --show-reasoning expanded to view)
@@ -519,12 +519,12 @@ run_agent.py            ← 五分钟体验脚本
 │ { "path": "README.md" }           │
 └────────────────────────────────────┘
 ┌─ ✓ read_file · Result  (0.04s) ───┐
-│ # Agent Core Refactor             │
+│ # AgentKit Refactor             │
 └────────────────────────────────────┘
 
   ▸ Turn 2
 ┌─ 📝 Answer ────────────────────────┐
-│ 这个项目是一个 Agent Core 框架...   │
+│ 这个项目是一个 AgentKit 框架...   │
 └────────────────────────────────────┘
 ┌──────── ✓ Done ────────────────────┐
 │         Total tokens  351          │
@@ -565,4 +565,4 @@ PYTHONIOENCODING=utf-8 uv run python scripts/chat_pretty.py deep_research "..." 
 
 ---
 
-> 本文是从源码反推出来的,以 `src/agent_core/` 当前实现为准。如果代码有改动,这份文档也应该跟着更新。
+> 本文是从源码反推出来的,以 `src/agentkit/` 当前实现为准。如果代码有改动,这份文档也应该跟着更新。

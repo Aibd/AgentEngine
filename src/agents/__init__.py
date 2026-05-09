@@ -5,7 +5,7 @@ explicitly here. No decorators, no import side effects beyond the imports
 on this line — `agents.REGISTRY[name]` is the single source of truth.
 """
 
-from agent_core.spec import AgentSpec
+from agentkit.spec import AgentSpec
 from agents.deep_research.spec import SPEC as DEEP_RESEARCH
 from agents.general_chat.spec import SPEC as GENERAL_CHAT
 

@@ -1,4 +1,4 @@
-# Agent Core 真实LLM运行指南
+# AgentKit 真实LLM运行指南
 
 ## 🚀 快速开始
 
@@ -15,7 +15,7 @@ LLM_MODEL=deepseek-chat  # 或 gpt-4、qwen-turbo 等
 LLM_BASE_URL=https://api.deepseek.com  # 默认为DeepSeek
 LLM_TIMEOUT=120
 LLM_MAX_RETRIES=2
-AGENT_CORE_LOG_DIR=logs
+AGENTKIT_LOG_DIR=logs
 USE_LEGACY_RUNNER=false
 ```
 
@@ -57,8 +57,8 @@ python run_agent.py
 
 ```python
 import asyncio
-from agent_core.base.context import AgentContext
-from agent_core.llm.factory import create_llm_from_env
+from agentkit.base.context import AgentContext
+from agentkit.llm.factory import create_llm_from_env
 from services.agent_orchestration_service import AgentOrchestrationService
 
 async def main():
@@ -107,7 +107,7 @@ if __name__ == "__main__":
 | `LLM_BASE_URL` | ❌ | `https://api.deepseek.com` | API端点 |
 | `LLM_TIMEOUT` | ❌ | `120` | 超时时间(秒) |
 | `LLM_MAX_RETRIES` | ❌ | `2` | 最大重试次数 |
-| `AGENT_CORE_LOG_DIR` | ❌ | `logs` | 日志目录 |
+| `AGENTKIT_LOG_DIR` | ❌ | `logs` | 日志目录 |
 | `USE_LEGACY_RUNNER` | ❌ | `false` | 使用传统运行器 |
 
 ### 代理配置
@@ -198,7 +198,7 @@ USE_LEGACY_RUNNER=true python scripts/chat.py general_chat "问题"
 
 ### 3. 自定义工具
 
-查看 `src/agent_core/tools/builtin/` 了解内置工具，或创建自定义工具。
+查看 `src/agentkit/tools/builtin/` 了解内置工具，或创建自定义工具。
 
 ## 🔌 集成到应用
 
@@ -208,7 +208,7 @@ USE_LEGACY_RUNNER=true python scripts/chat.py general_chat "问题"
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from services.agent_orchestration_service import AgentOrchestrationService
-from agent_core.base.context import AgentContext
+from agentkit.base.context import AgentContext
 
 app = FastAPI()
 service = AgentOrchestrationService()
@@ -300,7 +300,7 @@ async def websocket_chat(websocket: WebSocket):
 
 ## 🎉 开始使用
 
-现在你已经了解了如何运行Agent Core，尝试以下命令开始体验：
+现在你已经了解了如何运行AgentKit，尝试以下命令开始体验：
 
 ```bash
 # 1. 设置环境变量

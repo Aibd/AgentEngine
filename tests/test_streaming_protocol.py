@@ -14,10 +14,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from agent_core.base.agent import AgentRun
-from agent_core.base.context import AgentContext
-from agent_core.llm.client import LLMResponse
-from agent_core.runtime.events import (
+from agentkit.base.agent import AgentRun
+from agentkit.base.context import AgentContext
+from agentkit.llm.client import LLMResponse
+from agentkit.runtime.events import (
     ReasoningDelta,
     ToolCallCompleted,
     ToolCallStarted,
@@ -25,12 +25,12 @@ from agent_core.runtime.events import (
     TurnStarted,
     UsageReport,
 )
-from agent_core.runtime.turn_runner import TurnRunner
-from agent_core.stream.printer import Printer
-from agent_core.stream.sse_queue import SseEventQueue
-from agent_core.stream.sse_sink import SseSink
-from agent_core.tools.base import Tool
-from agent_core.tools.collection import ToolCollection
+from agentkit.runtime.turn_runner import TurnRunner
+from agentkit.stream.printer import Printer
+from agentkit.stream.sse_queue import SseEventQueue
+from agentkit.stream.sse_sink import SseSink
+from agentkit.tools.base import Tool
+from agentkit.tools.collection import ToolCollection
 from agents.general_chat.spec import SPEC as GENERAL_CHAT_SPEC
 from mock_llm import MockLLMClient
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from agent_core.prompts.loader import PromptLoader
+from agentkit.prompts.loader import PromptLoader
 
 
 class TestPromptLoader:

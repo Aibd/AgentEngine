@@ -14,9 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from agent_core.memory.memory import Memory
-from agent_core.memory.message import Message, Role
-from agent_core.persistence import PersistencePort, SqlitePersistence
+from agentkit.memory.memory import Memory
+from agentkit.memory.message import Message, Role
+from agentkit.persistence import PersistencePort, SqlitePersistence
 
 
 @pytest.fixture
@@ -241,7 +241,7 @@ class TestServiceIntegration:
     """End-to-end: two successive service.run() calls share conversation history."""
 
     async def test_second_call_sees_first_conversation_history(self, db_path: str) -> None:
-        from agent_core.llm.client import LLMResponse
+        from agentkit.llm.client import LLMResponse
         from mock_llm import MockLLMClient
         from services.agent_orchestration_service import AgentOrchestrationService
 
@@ -264,7 +264,7 @@ class TestServiceIntegration:
         # `service.run` defaults to request_id="local" and conversation_id="";
         # without conversation_id, no save happens. Force a real conversation id
         # by passing a context.
-        from agent_core.base.context import AgentContext
+        from agentkit.base.context import AgentContext
         ctx = AgentContext(
             request_id="r1",
             query="first",
@@ -307,7 +307,7 @@ class TestServiceIntegration:
         assert len(assistant_messages) >= 1, f"expected prior assistant turns, got roles={roles}"
 
     async def test_service_without_persistence_still_works(self) -> None:
-        from agent_core.llm.client import LLMResponse
+        from agentkit.llm.client import LLMResponse
         from mock_llm import MockLLMClient
         from services.agent_orchestration_service import AgentOrchestrationService
 

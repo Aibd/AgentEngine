@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 
-from agent_core.tools.base import Tool
-from agent_core.tools.executor import ToolExecutor
+from agentkit.tools.base import Tool
+from agentkit.tools.executor import ToolExecutor
 
 
 class _DestructiveTool(Tool):

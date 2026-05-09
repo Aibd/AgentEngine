@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from agent_core.runtime.events import RuntimeEvent, ToolCallCompleted
-from agent_core.tools.base import Tool
-from agent_core.tools.executor import ToolExecutor
+from agentkit.runtime.events import RuntimeEvent, ToolCallCompleted
+from agentkit.tools.base import Tool
+from agentkit.tools.executor import ToolExecutor
 
 
 class _LargeTool(Tool):

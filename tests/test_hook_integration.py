@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
-from agent_core.base.agent import AgentRun
-from agent_core.base.context import AgentContext
-from agent_core.hooks import (
+from agentkit.base.agent import AgentRun
+from agentkit.base.context import AgentContext
+from agentkit.hooks import (
     HookEvent,
     HookManager,
     HookResult,
@@ -17,16 +17,16 @@ from agent_core.hooks import (
     StopPayload,
     UserPromptSubmitPayload,
 )
-from agent_core.llm.client import LLMResponse
-from agent_core.runtime.events import (
+from agentkit.llm.client import LLMResponse
+from agentkit.runtime.events import (
     RunCompleted,
     RunFailed,
     RuntimeEvent,
     ToolCallFailed,
 )
-from agent_core.runtime.turn_runner import TurnRunner
-from agent_core.spec import AgentSpec
-from agent_core.tools.base import Tool
+from agentkit.runtime.turn_runner import TurnRunner
+from agentkit.spec import AgentSpec
+from agentkit.tools.base import Tool
 
 
 class _RecordingHook:
@@ -138,7 +138,7 @@ class TestUserPromptSubmit:
         capture = _RecordingHook()
         manager.register(HookEvent.USER_PROMPT_SUBMIT, capture)
 
-        from tests.mock_llm import MockLLMClient  # type: ignore[import-not-found]
+        from mock_llm import MockLLMClient
 
         llm = MockLLMClient()
         llm.enqueue(LLMResponse(content="done", finish_reason="stop"))
@@ -168,7 +168,7 @@ class TestUserPromptSubmit:
         stop = _RecordingHook()
         manager.register(HookEvent.STOP, stop)
 
-        from tests.mock_llm import MockLLMClient  # type: ignore[import-not-found]
+        from mock_llm import MockLLMClient
 
         llm = MockLLMClient()
         llm.enqueue(LLMResponse(content="done", finish_reason="stop"))
@@ -200,8 +200,8 @@ class _ToyTool(Tool):
 
 class TestPreAndPostToolUse:
     async def test_pre_post_tool_use_fire_around_execution(self) -> None:
-        from tests.mock_llm import MockLLMClient  # type: ignore[import-not-found]
-        from agent_core.tools.collection import ToolCollection
+        from mock_llm import MockLLMClient
+        from agentkit.tools.collection import ToolCollection
 
         manager = HookManager()
         pre = _RecordingHook()
@@ -250,8 +250,8 @@ class TestPreAndPostToolUse:
         assert "toy ran" in post.payloads[0].result_summary
 
     async def test_pre_tool_use_abort_skips_tool(self) -> None:
-        from tests.mock_llm import MockLLMClient  # type: ignore[import-not-found]
-        from agent_core.tools.collection import ToolCollection
+        from mock_llm import MockLLMClient
+        from agentkit.tools.collection import ToolCollection
 
         manager = HookManager()
         manager.register(

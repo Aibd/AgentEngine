@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from agent_core.base.context import AgentContext
-from agent_core.skills.loader import Skill, SkillLoader
-from agent_core.tools.builtin.skill_tool import SkillTool
-from agent_core.tools.collection import ToolCollection
+from agentkit.base.context import AgentContext
+from agentkit.skills.loader import Skill, SkillLoader
+from agentkit.tools.builtin.skill_tool import SkillTool
+from agentkit.tools.collection import ToolCollection
 
 
 def _write_skill(root: Path, dirname: str, content: str) -> Path:

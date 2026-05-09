@@ -3,10 +3,10 @@ from __future__ import annotations
 import httpx
 import pytest
 
-import agent_core.llm.openai_compat as openai_compat
-from agent_core.errors import LLMHTTPError, LLMRateLimitError, LLMStreamError
-from agent_core.llm.openai_compat import OpenAICompatibleClient
-from agent_core.memory.message import Message
+import agentkit.llm.openai_compat as openai_compat
+from agentkit.errors import LLMHTTPError, LLMRateLimitError, LLMStreamError
+from agentkit.llm.openai_compat import OpenAICompatibleClient
+from agentkit.memory.message import Message
 
 
 async def _no_sleep(delay: float) -> None:

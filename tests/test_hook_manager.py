@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent_core.hooks import (
+from agentkit.hooks import (
     HookAbortError,
     HookEvent,
     HookManager,
