@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import json
 
-from agentkit.llm.client import LLMResponse
+from agentengine.llm.client import LLMResponse
 from mock_llm import MockLLMClient
 from services.agent_orchestration_service import AgentOrchestrationService
 
 
 async def test_full_run_records_runtime_events_and_sse(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("AGENTKIT_LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENTENGINE_LOG_DIR", str(tmp_path))
     service = AgentOrchestrationService()
     context, stream = service.create_streaming_context(
         request_id="req-e2e",

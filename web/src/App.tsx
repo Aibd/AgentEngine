@@ -484,7 +484,7 @@ function EmptyChat({
       <div className="empty-mark">
         <Sparkles size={22} />
       </div>
-      <h1>AgentKit</h1>
+      <h1>AgentEngine</h1>
       <CapabilityStats capabilities={capabilities} />
       <div className="prompt-grid">
         {samplePrompts.map((prompt) => (

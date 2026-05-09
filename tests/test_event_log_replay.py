@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 
-from agentkit.observability import event_log as event_log_module
-from agentkit.observability.event_log import RunEventLog
-from agentkit.runtime.events import RunCompleted, RunStarted, TextDelta
+from agentengine.observability import event_log as event_log_module
+from agentengine.observability.event_log import RunEventLog
+from agentengine.runtime.events import RunCompleted, RunStarted, TextDelta
 
 
 def test_event_log_replays_jsonl_records(tmp_path) -> None:

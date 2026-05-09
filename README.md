@@ -1,4 +1,4 @@
-# AgentKit Refactor
+# AgentEngine Refactor
 
 Agent 模块重构的独立脚手架。位于现有的 `gjsk_wiseagent_ai` 项目之外，以便新的核心可以在不破坏 FileClerk 或当前深度研究行为的情况下独立演进。
 
@@ -6,7 +6,7 @@ Agent 模块重构的独立脚手架。位于现有的 `gjsk_wiseagent_ai` 项�
 
 ```
 src/
-  agentkit/    框架代码，不依赖业务服务导入
+  AgentEngine/    框架代码，不依赖业务服务导入
     base/        AgentRun + AgentContext + AgentState
     runtime/     run_turn() + TurnRunner
     llm/         OpenAI 兼容客户端、Mock 客户端契约、环境变量工厂
@@ -47,7 +47,7 @@ tests/         覆盖每个框架模块的 pytest 测试套件
 
 ### 运行时事件是内部诊断信息
 
-`TurnRunner` 将语义运行时事件与公共 SSE 流分开记录。`RuntimeEvent` 对象位于 `agentkit.runtime.events` 下；SSE 协议名称位于 `agentkit.stream.events.EventType` 下。保持这些层分离，以便内部生命周期模型可以在不改变前端契约的情况下演进。
+`TurnRunner` 将语义运行时事件与公共 SSE 流分开记录。`RuntimeEvent` 对象位于 `agentengine.runtime.events` 下；SSE 协议名称位于 `agentengine.stream.events.EventType` 下。保持这些层分离，以便内部生命周期模型可以在不改变前端契约的情况下演进。
 
 在推出或故障恢复期间，设置 `USE_LEGACY_RUNNER=true` 以绕过 `TurnRunner` 并使用原始的服务到 Handler 路径：
 
@@ -62,7 +62,7 @@ Remove-Item Env:\USE_LEGACY_RUNNER
 运行时事件追加到以下路径的 jsonl 文件中：
 
 ```text
-${AGENTKIT_LOG_DIR:-logs}/runs/<YYYY-MM-DD>/<run_id>.jsonl
+${AgentEngine_LOG_DIR:-logs}/runs/<YYYY-MM-DD>/<run_id>.jsonl
 ```
 
 每行是一个序列化的运行时事件，包含 `event_type`、`run_id`、`turn_id` 和时间戳。对于本地调试，检查 `context.extras["run_event_log_path"]` 引用的文件。如果提供商报告上下文窗口失败，应将其表示为 `LLMContextWindowError`；`TurnRunner` 将其记录为 `terminal_reason="context_exceeded"`，以便后续规划可以在添加任何 TokenBudget 或压缩层之前使用真实数据。

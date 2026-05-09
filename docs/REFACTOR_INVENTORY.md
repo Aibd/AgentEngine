@@ -34,8 +34,8 @@
 
 | 位置 | 内容 | 处置 |
 |---|---|---|
-| `src/agentkit/handlers/legacy.py`(整文件 88 行) | LegacyHandler 类 | 🔴 删整文件 |
-| `src/agentkit/handlers/__init__.py:2, 6` | `from ... import LegacyHandler` 导出 | 🔴 删 |
+| `src/agentengine/handlers/legacy.py`(整文件 88 行) | LegacyHandler 类 | 🔴 删整文件 |
+| `src/agentengine/handlers/__init__.py:2, 6` | `from ... import LegacyHandler` 导出 | 🔴 删 |
 | `src/agents/adapters/file_clerk_adapter.py`(整文件 88 行) | FileClerkAdapter | 🔴 删整文件 |
 | `src/agents/adapters/__init__.py`(整文件) | 导出 FileClerkAdapter | 🔴 删整文件 |
 | `src/agents/adapters/`(整目录) | 适配器目录 | 🔴 删整目录 |
@@ -67,9 +67,9 @@
 
 | 位置 | 内容 | 处置 |
 |---|---|---|
-| `src/agentkit/handlers/pipeline.py`(整文件 88 行) | PipelineHandler 类 | 🔴 删整文件 |
-| `src/agentkit/handlers/__init__.py:3, 6` | 导出 | 🔴 删 |
-| `src/agentkit/base/agent.py:13, 61` | docstring + `pipeline_steps()` 方法 | 🟠 在 Phase 2 整体替换 BaseAgent 时一并删 |
+| `src/agentengine/handlers/pipeline.py`(整文件 88 行) | PipelineHandler 类 | 🔴 删整文件 |
+| `src/agentengine/handlers/__init__.py:3, 6` | 导出 | 🔴 删 |
+| `src/agentengine/base/agent.py:13, 61` | docstring + `pipeline_steps()` 方法 | 🟠 在 Phase 2 整体替换 BaseAgent 时一并删 |
 
 ### C.2 测试
 
@@ -94,10 +94,10 @@
 
 | 位置 | 内容 | 处置 |
 |---|---|---|
-| `src/agentkit/base/agent.py`(整文件) | `class BaseAgent` | 🟠 删,新建 `src/agentkit/spec.py` 定义 `AgentSpec` |
-| `src/agentkit/base/__init__.py:1, 5` | 导出 BaseAgent | 🟠 改为导出 AgentSpec(或整个 base/ 重命名) |
-| `src/agentkit/__init__.py:1, 5` | 顶层导出 | 🟠 改为 AgentSpec |
-| `src/agentkit/runtime/turn_runner.py:10, 48` | `agent: BaseAgent` 形参 | 🟠 Phase 3 整体替换为 `spec: AgentSpec` |
+| `src/agentengine/base/agent.py`(整文件) | `class BaseAgent` | 🟠 删,新建 `src/agentengine/spec.py` 定义 `AgentSpec` |
+| `src/agentengine/base/__init__.py:1, 5` | 导出 BaseAgent | 🟠 改为导出 AgentSpec(或整个 base/ 重命名) |
+| `src/agentengine/__init__.py:1, 5` | 顶层导出 | 🟠 改为 AgentSpec |
+| `src/agentengine/runtime/turn_runner.py:10, 48` | `agent: BaseAgent` 形参 | 🟠 Phase 3 整体替换为 `spec: AgentSpec` |
 
 ### D.2 业务 Agent 子类(全部改为 `SPEC: AgentSpec` 数据)
 
@@ -111,7 +111,7 @@
 
 | 位置 | 内容 | 处置 |
 |---|---|---|
-| `src/agentkit/handlers/react.py:9, 31, 46, 119, 141, 308, 324` | 7 处 `agent: BaseAgent` | 🟠 Phase 3 turn loop 函数化时全部转为 `spec: AgentSpec` |
+| `src/agentengine/handlers/react.py:9, 31, 46, 119, 141, 308, 324` | 7 处 `agent: BaseAgent` | 🟠 Phase 3 turn loop 函数化时全部转为 `spec: AgentSpec` |
 
 ### D.4 测试
 
@@ -129,13 +129,13 @@
 
 | 位置 | 内容 | 处置 |
 |---|---|---|
-| `src/agentkit/registry/`(整目录,2 文件) | agent_registry.py + handler_registry.py | 🔴 删整目录 |
+| `src/agentengine/registry/`(整目录,2 文件) | agent_registry.py + handler_registry.py | 🔴 删整目录 |
 | `src/agents/general_chat/agent.py:5` | `@register_agent("general_chat", handler="react")` | 🔴 删(随类一起重写) |
 | `src/agents/deep_research/agent.py:7` | 同上 | 🔴 删 |
 | `src/agents/adapters/file_clerk_adapter.py:26` | 同上(已在 B 中删) | — |
-| `src/agentkit/handlers/react.py:16, 26` | `@register_handler("react")` | 🔴 删(Phase 3 函数化时整体删) |
-| `src/agentkit/handlers/legacy.py:10, 16` | 同上(已在 B 中删) | — |
-| `src/agentkit/handlers/pipeline.py:11, 18` | 同上(已在 C 中删) | — |
+| `src/agentengine/handlers/react.py:16, 26` | `@register_handler("react")` | 🔴 删(Phase 3 函数化时整体删) |
+| `src/agentengine/handlers/legacy.py:10, 16` | 同上(已在 B 中删) | — |
+| `src/agentengine/handlers/pipeline.py:11, 18` | 同上(已在 C 中删) | — |
 | `tests/test_registry.py`(整文件) | 装饰器测试 | 🔴 删 |
 | `docs/API.md:122-123` | API 文档 | 📝 删 |
 | `docs/README.md:36-37, 80-95, 377-393, 527-564` | 多处教程示例 | 📝 改写 |
@@ -150,11 +150,11 @@
 
 | 位置 | 内容 | 处置 |
 |---|---|---|
-| `src/agentkit/stream/printer.py:31, 61, 63, 64` | 信封定义中的三个字段 | 🔴 删字段 |
-| `src/agentkit/stream/printer.py`(整文件) | Printer 大量基于 `EventType.value` 的分支 | 🟠 Phase 4/5 整体重写为 RuntimeEvent → SSE sink |
-| `src/agentkit/stream/events.py`(整文件) | `EventType` 枚举 | 🟠 Phase 4 并入 RuntimeEvent 体系 |
-| `src/agentkit/stream/event_stream.py`(整文件) | `EventStream` 类 | 🟠 Phase 4 改为 SSE sink consumer |
-| `src/agentkit/stream/__init__.py:1` | 导出 EventStream | 🟠 改 |
+| `src/agentengine/stream/printer.py:31, 61, 63, 64` | 信封定义中的三个字段 | 🔴 删字段 |
+| `src/agentengine/stream/printer.py`(整文件) | Printer 大量基于 `EventType.value` 的分支 | 🟠 Phase 4/5 整体重写为 RuntimeEvent → SSE sink |
+| `src/agentengine/stream/events.py`(整文件) | `EventType` 枚举 | 🟠 Phase 4 并入 RuntimeEvent 体系 |
+| `src/agentengine/stream/event_stream.py`(整文件) | `EventStream` 类 | 🟠 Phase 4 改为 SSE sink consumer |
+| `src/agentengine/stream/__init__.py:1` | 导出 EventStream | 🟠 改 |
 | `scripts/_smoke_pretty.py:41-44` | 测试脚本写死字段 | 🔴 改写为 v2 信封 |
 
 ### F.2 前端
@@ -199,8 +199,8 @@
 
 | 位置 | 内容 | 处置 |
 |---|---|---|
-| `src/agentkit/stream/event_stream.py`(整文件) | EventStream 独立类 | 🟠 改为 SSE sink |
-| `src/agentkit/runtime/events.py:32` | docstring 强调"两层分离" | 📝 改 docstring(Phase 4 后 RuntimeEvent 是唯一真相源) |
+| `src/agentengine/stream/event_stream.py`(整文件) | EventStream 独立类 | 🟠 改为 SSE sink |
+| `src/agentengine/runtime/events.py:32` | docstring 强调"两层分离" | 📝 改 docstring(Phase 4 后 RuntimeEvent 是唯一真相源) |
 | `src/services/agent_orchestration_service.py:18, 244, 245` | EventStream 创建/返回 | 🟠 Phase 4 改为返回 RuntimeEvent 流 |
 | `tests/conftest.py:8, 24, 25, 29` | EventStream fixture | 🟠 Phase 4 改 |
 
@@ -229,9 +229,9 @@
 
 | 位置 | 内容 | 处置 |
 |---|---|---|
-| `src/agentkit/handlers/base.py`(整文件,12 行) | `AgentHandler` 协议 | 🔴 Phase 3 删整文件(loop 函数化后无需协议) |
-| `src/agentkit/handlers/__init__.py`(整文件) | handlers 包导出 | 🔴 Phase 3 删整目录 |
-| `src/agentkit/handlers/`(整目录) | 整个 handlers 模块 | 🔴 Phase 3 删 |
+| `src/agentengine/handlers/base.py`(整文件,12 行) | `AgentHandler` 协议 | 🔴 Phase 3 删整文件(loop 函数化后无需协议) |
+| `src/agentengine/handlers/__init__.py`(整文件) | handlers 包导出 | 🔴 Phase 3 删整目录 |
+| `src/agentengine/handlers/`(整目录) | 整个 handlers 模块 | 🔴 Phase 3 删 |
 
 ---
 
@@ -262,11 +262,11 @@
 
 | 位置 | 为什么保留 |
 |---|---|
-| `src/agentkit/runtime/turn_runner.py` | Phase 3 改为更薄,但保留 run/turn 框架 |
-| `src/agentkit/runtime/events.py`(RuntimeEvent 子类) | Phase 4 后这是唯一真相源 |
-| `src/agentkit/runtime/run_state.py` | run 生命周期状态机,保留 |
-| `src/agentkit/handlers/react.py` 的核心 think→act 逻辑 | 内容迁移到 `runtime/turn.py`,不丢失 |
-| `src/agentkit/stream/printer.py` 的 SSE 序列化能力 | Phase 5 重写为 v2,不删整文件 |
+| `src/agentengine/runtime/turn_runner.py` | Phase 3 改为更薄,但保留 run/turn 框架 |
+| `src/agentengine/runtime/events.py`(RuntimeEvent 子类) | Phase 4 后这是唯一真相源 |
+| `src/agentengine/runtime/run_state.py` | run 生命周期状态机,保留 |
+| `src/agentengine/handlers/react.py` 的核心 think→act 逻辑 | 内容迁移到 `runtime/turn.py`,不丢失 |
+| `src/agentengine/stream/printer.py` 的 SSE 序列化能力 | Phase 5 重写为 v2,不删整文件 |
 | `tests/test_react_handler.py` 的 LLM/工具 mock 测试 | 改写到 turn loop 后保留 |
 
 ---

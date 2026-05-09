@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from agentkit.tools.builtin.bash_tool import BashTool, is_destructive_command
+from agentengine.tools.builtin.bash_tool import BashTool, is_destructive_command
 
 
 @pytest.fixture

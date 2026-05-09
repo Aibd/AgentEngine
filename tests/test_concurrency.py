@@ -26,13 +26,13 @@ from pathlib import Path
 
 import pytest
 
-from agentkit.base.context import AgentContext
-from agentkit.concurrency import (
+from agentengine.base.context import AgentContext
+from agentengine.concurrency import (
     ConversationLockManager,
     InMemoryConversationLockManager,
 )
-from agentkit.llm.client import LLMChunk, LLMResponse
-from agentkit.persistence import SqlitePersistence
+from agentengine.llm.client import LLMChunk, LLMResponse
+from agentengine.persistence import SqlitePersistence
 from mock_llm import MockLLMClient
 from services.agent_orchestration_service import AgentOrchestrationService
 

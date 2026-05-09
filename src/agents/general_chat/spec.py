@@ -1,4 +1,4 @@
-from agentkit.spec import AgentSpec
+from agentengine.spec import AgentSpec
 
 SPEC = AgentSpec(
     name="general_chat",

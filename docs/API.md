@@ -1,4 +1,4 @@
-# AgentKit API
+# AgentEngine API
 
 > ⚠️ **此文档正在重构中。** `BaseAgent` 已被 `AgentSpec + AgentRun` 取代（Phase 2 完成）。
 > `pipeline_steps()` 方法已随 `PipelineHandler` 一起删除（Phase 1 完成）。
@@ -86,7 +86,7 @@ data: {"tool":"read_file","ok":true,"result":"...","request_id":"req-1","convers
 
 ## 运行时事件
 
-运行时事件是语义诊断信息，不是公共协议。它们位于 `agentkit.runtime.events` 中，可通过 `to_dict()` 序列化。
+运行时事件是语义诊断信息，不是公共协议。它们位于 `agentengine.runtime.events` 中，可通过 `to_dict()` 序列化。
 
 - 运行生命周期：`RunStarted`、`RunCompleted`、`RunFailed`、`RunCancelled`
 - 轮次生命周期：`TurnStarted`、`TurnEnded`、`UsageReport`
@@ -115,7 +115,7 @@ data: {"tool":"read_file","ok":true,"result":"...","request_id":"req-1","convers
 ## 注册表
 
 - Agent 使用 `agents.REGISTRY` 显式注册。
-- Loop 使用 `agentkit.runtime.turn.run_turn()`，不再注册 handler。
+- Loop 使用 `agentengine.runtime.turn.run_turn()`，不再注册 handler。
 - Tool 仍通过 `ToolCollection` 注入到 `AgentContext`。
 
 注册表的读写由 `RLock` 保护；`registered_*()` 返回副本。

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Any, AsyncIterator
 
-from agentkit.llm.client import LLMChunk, LLMResponse
-from agentkit.memory.message import Message
+from agentengine.llm.client import LLMChunk, LLMResponse
+from agentengine.memory.message import Message
 
 
 class MockLLMClient:

@@ -1,5 +1,5 @@
 /**
- * User-facing translations for AgentKitError codes coming from SSE v2 error
+ * User-facing translations for AgentEngineError codes coming from SSE v2 error
  * data. Mirror of scripts/renderers/friendly_errors.py - keep the two in sync
  * when adding new codes.
  */

@@ -3,19 +3,19 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 
-from agentkit.base.agent import AgentRun
-from agentkit.base.context import AgentContext
-from agentkit.base.state import AgentState
-from agentkit.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS, run_turn
-from agentkit.llm.client import LLMResponse
-from agentkit.memory.message import Role
-from agentkit.runtime.turn_runner import TurnRunner
-from agentkit.spec import AgentSpec
-from agentkit.stream.printer import Printer
-from agentkit.stream.sse_queue import SseEventQueue
-from agentkit.stream.sse_sink import SseSink
-from agentkit.tools.base import Tool
-from agentkit.tools.collection import ToolCollection
+from agentengine.base.agent import AgentRun
+from agentengine.base.context import AgentContext
+from agentengine.base.state import AgentState
+from agentengine.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS, run_turn
+from agentengine.llm.client import LLMResponse
+from agentengine.memory.message import Role
+from agentengine.runtime.turn_runner import TurnRunner
+from agentengine.spec import AgentSpec
+from agentengine.stream.printer import Printer
+from agentengine.stream.sse_queue import SseEventQueue
+from agentengine.stream.sse_sink import SseSink
+from agentengine.tools.base import Tool
+from agentengine.tools.collection import ToolCollection
 from mock_llm import MockLLMClient
 
 

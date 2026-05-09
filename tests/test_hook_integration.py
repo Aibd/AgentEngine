@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
-from agentkit.base.agent import AgentRun
-from agentkit.base.context import AgentContext
-from agentkit.hooks import (
+from agentengine.base.agent import AgentRun
+from agentengine.base.context import AgentContext
+from agentengine.hooks import (
     HookEvent,
     HookManager,
     HookResult,
@@ -17,16 +17,16 @@ from agentkit.hooks import (
     StopPayload,
     UserPromptSubmitPayload,
 )
-from agentkit.llm.client import LLMResponse
-from agentkit.runtime.events import (
+from agentengine.llm.client import LLMResponse
+from agentengine.runtime.events import (
     RunCompleted,
     RunFailed,
     RuntimeEvent,
     ToolCallFailed,
 )
-from agentkit.runtime.turn_runner import TurnRunner
-from agentkit.spec import AgentSpec
-from agentkit.tools.base import Tool
+from agentengine.runtime.turn_runner import TurnRunner
+from agentengine.spec import AgentSpec
+from agentengine.tools.base import Tool
 
 
 class _RecordingHook:
@@ -201,7 +201,7 @@ class _ToyTool(Tool):
 class TestPreAndPostToolUse:
     async def test_pre_post_tool_use_fire_around_execution(self) -> None:
         from mock_llm import MockLLMClient
-        from agentkit.tools.collection import ToolCollection
+        from agentengine.tools.collection import ToolCollection
 
         manager = HookManager()
         pre = _RecordingHook()
@@ -251,7 +251,7 @@ class TestPreAndPostToolUse:
 
     async def test_pre_tool_use_abort_skips_tool(self) -> None:
         from mock_llm import MockLLMClient
-        from agentkit.tools.collection import ToolCollection
+        from agentengine.tools.collection import ToolCollection
 
         manager = HookManager()
         manager.register(

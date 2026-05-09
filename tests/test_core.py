@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from agentkit.base.context import AgentContext
-from agentkit.llm.client import LLMResponse
+from agentengine.base.context import AgentContext
+from agentengine.llm.client import LLMResponse
 from mock_llm import MockLLMClient
 from services.agent_orchestration_service import AgentOrchestrationService
 

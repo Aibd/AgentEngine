@@ -33,7 +33,7 @@ def frame(event: str, data: dict | None = None) -> dict:
 
 
 SCRIPT = [
-    frame("start", {"query": "inspect src/agentkit"}),
+    frame("start", {"query": "inspect src/agentengine"}),
     frame("step", {"turn": 1}),
     frame("thinking", {"delta": "Need to read the README first."}),
     frame(
@@ -48,7 +48,7 @@ SCRIPT = [
         "tool_result",
         {
             "tool": "read_file",
-            "result": "# AgentKit Refactor\n\nStandalone scaffold ...",
+            "result": "# AgentEngine Refactor\n\nStandalone scaffold ...",
             "ok": True,
             "elapsed_ms": 40,
             "tool_call_id": "call_1",
@@ -57,7 +57,7 @@ SCRIPT = [
     frame("step_end", {"turn": 1, "has_tool_calls": True, "elapsed_ms": 1200}),
     frame("step", {"turn": 2}),
     frame("thinking", {"delta": "README has enough context."}),
-    frame("text", {"delta": "AgentKit is a small runtime scaffold. "}),
+    frame("text", {"delta": "AgentEngine is a small runtime scaffold. "}),
     frame("text", {"delta": "It now emits **SSE v2** frames."}),
     frame("step_end", {"turn": 2, "has_tool_calls": False, "elapsed_ms": 800}),
     frame(
@@ -73,7 +73,7 @@ SCRIPT = [
         "done",
         {
             "reason": "completed",
-            "result": "AgentKit now emits SSE v2 frames.",
+            "result": "AgentEngine now emits SSE v2 frames.",
         },
     ),
 ]

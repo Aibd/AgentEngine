@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agentkit.runtime.run_state import RunState, RunStatus, TerminalReason
+from agentengine.runtime.run_state import RunState, RunStatus, TerminalReason
 
 
 def test_run_state_transitions_to_completed() -> None:

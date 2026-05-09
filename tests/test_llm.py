@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from agentkit.llm.client import LLMResponse
-from agentkit.llm.factory import LLMConfigError, create_llm_from_env
+from agentengine.llm.client import LLMResponse
+from agentengine.llm.factory import LLMConfigError, create_llm_from_env
 from mock_llm import MockLLMClient
-from agentkit.memory.message import Message
+from agentengine.memory.message import Message
 
 
 class TestMockLLMClient:

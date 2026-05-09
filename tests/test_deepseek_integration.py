@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from agentkit.llm.factory import create_llm_from_env
+from agentengine.llm.factory import create_llm_from_env
 from services.agent_orchestration_service import AgentOrchestrationService
 
 
@@ -166,8 +166,8 @@ async def test_conversation_history_persists_across_runs(tmp_path: Path) -> None
     user sends a follow-up referring to the prior turn — the model must see
     both turns in its prompt without the caller passing them explicitly.
     """
-    from agentkit.base.context import AgentContext
-    from agentkit.persistence import SqlitePersistence
+    from agentengine.base.context import AgentContext
+    from agentengine.persistence import SqlitePersistence
 
     store = SqlitePersistence(tmp_path / "chat.db")
 
@@ -229,8 +229,8 @@ async def test_invalid_api_key_surfaces_as_error_event() -> None:
     bridge and the client sees a closed connection instead of a structured
     error payload.
     """
-    from agentkit.llm.openai_compat import OpenAICompatibleClient
-    from agentkit.errors import LLMHTTPError
+    from agentengine.llm.openai_compat import OpenAICompatibleClient
+    from agentengine.errors import LLMHTTPError
 
     bad_llm = OpenAICompatibleClient(
         base_url=os.getenv("LLM_BASE_URL", "https://api.deepseek.com"),
@@ -279,7 +279,7 @@ async def test_jsonl_run_log_is_written(tmp_path: Path, monkeypatch) -> None:
 
     Without this, OTel / debugging tools can't replay a run.
     """
-    monkeypatch.setenv("AGENTKIT_LOG_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENTENGINE_LOG_DIR", str(tmp_path))
 
     llm = create_llm_from_env()
     assert llm is not None

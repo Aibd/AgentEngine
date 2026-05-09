@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from agentkit.tools.builtin.file_edit_tool import FileEditTool
-from agentkit.tools.builtin.file_write_tool import FileAccessTracker, FileWriteTool
+from agentengine.tools.builtin.file_edit_tool import FileEditTool
+from agentengine.tools.builtin.file_write_tool import FileAccessTracker, FileWriteTool
 
 
 class _RecordingTracker:
@@ -163,7 +163,7 @@ class TestFileEditTool:
 
 class TestBuildDefaultTools:
     def test_constructs_full_set(self, workspace: Path) -> None:
-        from agentkit.tools.builtin import build_default_tools
+        from agentengine.tools.builtin import build_default_tools
 
         tools = build_default_tools(workspace_root=workspace)
         names = sorted(t.name for t in tools)
@@ -181,25 +181,25 @@ class TestBuildDefaultTools:
         )
 
     def test_include_filter(self, workspace: Path) -> None:
-        from agentkit.tools.builtin import build_default_tools
+        from agentengine.tools.builtin import build_default_tools
 
         tools = build_default_tools(workspace_root=workspace, include=["read_file", "grep"])
         assert sorted(t.name for t in tools) == ["grep", "read_file"]
 
     def test_exclude_filter(self, workspace: Path) -> None:
-        from agentkit.tools.builtin import build_default_tools
+        from agentengine.tools.builtin import build_default_tools
 
         tools = build_default_tools(workspace_root=workspace, exclude=["bash"])
         assert "bash" not in {t.name for t in tools}
 
     def test_unknown_name_raises(self, workspace: Path) -> None:
-        from agentkit.tools.builtin import build_default_tools
+        from agentengine.tools.builtin import build_default_tools
 
         with pytest.raises(KeyError):
             build_default_tools(workspace_root=workspace, include=["nope"])
 
     def test_access_tracker_threaded_into_write_tools(self, workspace: Path) -> None:
-        from agentkit.tools.builtin import FileEditTool, FileWriteTool, build_default_tools
+        from agentengine.tools.builtin import FileEditTool, FileWriteTool, build_default_tools
 
         tracker = _RecordingTracker()
         tools = build_default_tools(workspace_root=workspace, access_tracker=tracker)

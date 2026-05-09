@@ -13,7 +13,7 @@
 
 ```
 app/agent/
-├── agentkit/                  # 核心框架（与业务无关）
+├── agentengine/                  # 核心框架（与业务无关）
 │   ├── spec.py                  # AgentSpec —— 不可变 Agent 配置（frozen dataclass）
 │   ├── base/                    # Agent 运行状态、上下文
 │   │   ├── agent.py             # AgentRun —— 单次运行状态容器
@@ -478,7 +478,7 @@ class PersistencePort(Protocol):
 ### errors —— 错误层次
 
 ```
-AgentKitError
+AgentEngineError
 ├── LLMError
 │   ├── LLMHTTPError
 │   │   └── LLMRateLimitError    (retryable, 429)
@@ -501,8 +501,8 @@ AgentKitError
 
 ```python
 # agents/my_agent/spec.py
-from agentkit.spec import AgentSpec
-from agentkit.base.context import AgentContext
+from agentengine.spec import AgentSpec
+from agentengine.base.context import AgentContext
 
 async def _setup(context: AgentContext) -> None:
     """运行前初始化：注册工具等"""
@@ -553,8 +553,8 @@ result = await service.run(agent_name="my_agent", query="用户的请求", conte
 ### 普通工具
 
 ```python
-from agentkit.tools.base import Tool
-from agentkit.tools.registry import register_tool
+from agentengine.tools.base import Tool
+from agentengine.tools.registry import register_tool
 
 @register_tool("my_tool")
 class MyTool(Tool):
@@ -577,8 +577,8 @@ class MyTool(Tool):
 ### 流式工具
 
 ```python
-from agentkit.tools.base import StreamingTool, ToolStreamEvent
-from agentkit.tools.registry import register_tool
+from agentengine.tools.base import StreamingTool, ToolStreamEvent
+from agentengine.tools.registry import register_tool
 
 @register_tool("my_streaming_tool")
 class MyStreamingTool(StreamingTool):

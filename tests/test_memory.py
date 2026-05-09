@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from agentkit.memory.memory import Memory
-from agentkit.memory.message import Message, Role
+from agentengine.memory.memory import Memory
+from agentengine.memory.message import Message, Role
 
 
 class TestMessage:

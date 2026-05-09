@@ -20,18 +20,18 @@ from typing import AsyncIterator
 
 import pytest
 
-from agentkit.base.context import AgentContext
-from agentkit.errors import (
+from agentengine.base.context import AgentContext
+from agentengine.errors import (
     LLMConnectionError,
     LLMHTTPError,
     LLMTimeoutError,
     ToolExecutionError,
 )
-from agentkit.llm.client import LLMChunk, LLMResponse
-from agentkit.runtime.events import RunCancelled, RunFailed
-from agentkit.runtime.run_state import RunStatus, TerminalReason
-from agentkit.tools.base import Tool
-from agentkit.tools.collection import ToolCollection
+from agentengine.llm.client import LLMChunk, LLMResponse
+from agentengine.runtime.events import RunCancelled, RunFailed
+from agentengine.runtime.run_state import RunStatus, TerminalReason
+from agentengine.tools.base import Tool
+from agentengine.tools.collection import ToolCollection
 from mock_llm import MockLLMClient
 from services.agent_orchestration_service import AgentOrchestrationService
 
@@ -284,7 +284,7 @@ class TestCancellation:
 
 class TestUnexpectedError:
     async def test_unknown_exception_is_classified_as_runtime_failed(self) -> None:
-        """Non-AgentKitError exceptions still emit a structured error event."""
+        """Non-AgentEngineError exceptions still emit a structured error event."""
         llm = _FailingLLM(RuntimeError("something exploded"))
         service = AgentOrchestrationService(llm_factory=lambda: llm)
         context, stream = service.create_streaming_context(

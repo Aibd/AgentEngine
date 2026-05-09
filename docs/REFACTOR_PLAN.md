@@ -1,4 +1,4 @@
-# AgentKit 重构计划 — 走向企业级
+# AgentEngine 重构计划 — 走向企业级
 
 > 状态:**已与用户对齐方向,等待开始执行 Phase 0**
 > 制定日期:2026-05-07
@@ -78,13 +78,13 @@ REGISTRY: dict[str, AgentSpec] = {
 
 | 文件 / 概念 | 行数 | 命运 |
 |---|---|---|
-| `src/agentkit/handlers/legacy.py` | 88 | 删 |
-| `src/agentkit/handlers/pipeline.py` | 88 | 删 |
-| `src/agentkit/handlers/base.py` | 12 | 删 |
-| `src/agentkit/handlers/react.py` | 425 | 重写为 `runtime/turn.py:run_turn()` 函数 |
+| `src/agentengine/handlers/legacy.py` | 88 | 删 |
+| `src/agentengine/handlers/pipeline.py` | 88 | 删 |
+| `src/agentengine/handlers/base.py` | 12 | 删 |
+| `src/agentengine/handlers/react.py` | 425 | 重写为 `runtime/turn.py:run_turn()` 函数 |
 | `src/agents/adapters/file_clerk_adapter.py` | 88 | 删 + 重写为 `agents/file_clerk/spec.py` |
-| `src/agentkit/registry/` 装饰器 | — | 改为显式 dict |
-| `BaseAgent`(`src/agentkit/base/agent.py`) | — | 替换为 `AgentSpec` dataclass |
+| `src/agentengine/registry/` 装饰器 | — | 改为显式 dict |
+| `BaseAgent`(`src/agentengine/base/agent.py`) | — | 替换为 `AgentSpec` dataclass |
 | `tests/test_pipeline_legacy_handlers.py` | — | 删 |
 | `Printer.responseAll` / `useTimes` | — | 删字段 |
 | `config/agents.yaml` | - | 已删除,配置收敛到 `AgentSpec` |
@@ -145,7 +145,7 @@ REGISTRY: dict[str, AgentSpec] = {
 ### Phase 2 — Agent 类降级为 AgentSpec(数据化)
 
 **改动:**
-1. 新建 `src/agentkit/spec.py`:
+1. 新建 `src/agentengine/spec.py`:
    ```python
    @dataclass(frozen=True)
    class AgentSpec:
@@ -160,7 +160,7 @@ REGISTRY: dict[str, AgentSpec] = {
 3. `agents/deep_research/` 同上
 4. `agents/file_clerk/spec.py`:从原 file_clerk 业务逻辑直接重写为 AgentSpec(预计 < 100 行)
 5. 新建 `src/agents/__init__.py` 显式 `REGISTRY` dict
-6. 删除 `src/agentkit/registry/` 装饰器模块,删除 `src/agentkit/base/agent.py`
+6. 删除 `src/agentengine/registry/` 装饰器模块,删除 `src/agentengine/base/agent.py`
 7. `services/agent_orchestration_service.py` 改为从 `REGISTRY` 查找 spec
 
 **验证:**
@@ -173,7 +173,7 @@ REGISTRY: dict[str, AgentSpec] = {
 ### Phase 3 — Loop 函数化(消除 Handler 概念)
 
 **改动:**
-1. 新建 `src/agentkit/runtime/turn.py`:
+1. 新建 `src/agentengine/runtime/turn.py`:
    ```python
    async def run_turn(
        spec: AgentSpec,
@@ -184,7 +184,7 @@ REGISTRY: dict[str, AgentSpec] = {
        # 只 yield RuntimeEvent,不再有 Printer/EventStream 调用
        ...
    ```
-2. 删除 `src/agentkit/handlers/` 整个目录
+2. 删除 `src/agentengine/handlers/` 整个目录
 3. `services/agent_orchestration_service.py`:`service.run()` 直接调 `run_turn(spec, ctx, query)`,把事件流分发给注册的 sink
 
 **验证:**
@@ -200,7 +200,7 @@ REGISTRY: dict[str, AgentSpec] = {
 1. 把 `EventType`(SSE 事件枚举)的所有用例并入 `RuntimeEvent` 子类体系
 2. SSE 输出改为 `RuntimeEvent` 的一个 sink:`SseSink.consume(event: RuntimeEvent)`
 3. JSONL 日志和 OTel(后续)也是 sink
-4. 删除 `src/agentkit/stream/event_stream.py`(独立的 EventStream 类)
+4. 删除 `src/agentengine/stream/event_stream.py`(独立的 EventStream 类)
 
 **验证:**
 - `RuntimeEvent` 的子类是事件的唯一真相源
@@ -211,7 +211,7 @@ REGISTRY: dict[str, AgentSpec] = {
 ### Phase 5 — SSE v2 协议(破坏式升级)
 
 **改动:**
-1. `src/agentkit/stream/sse_sink.py` 输出新格式:
+1. `src/agentengine/stream/sse_sink.py` 输出新格式:
    ```
    event: text
    data: {"delta": "..."}

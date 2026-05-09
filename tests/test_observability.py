@@ -4,15 +4,15 @@ import logging
 
 import httpx
 
-from agentkit.base.agent import AgentRun
-from agentkit.base.context import AgentContext
-from agentkit.runtime.turn import run_turn
-from agentkit.llm.client import LLMResponse
-from agentkit.llm.openai_compat import OpenAICompatibleClient
-from agentkit.memory.message import Message
-from agentkit.spec import AgentSpec
-from agentkit.tools.base import Tool
-from agentkit.tools.collection import ToolCollection
+from agentengine.base.agent import AgentRun
+from agentengine.base.context import AgentContext
+from agentengine.runtime.turn import run_turn
+from agentengine.llm.client import LLMResponse
+from agentengine.llm.openai_compat import OpenAICompatibleClient
+from agentengine.memory.message import Message
+from agentengine.spec import AgentSpec
+from agentengine.tools.base import Tool
+from agentengine.tools.collection import ToolCollection
 from mock_llm import MockLLMClient
 from services.agent_orchestration_service import AgentOrchestrationService
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-示例：在代码中直接调用AgentKit
+示例：在代码中直接调用AgentEngine
 """
 
 import asyncio
@@ -31,7 +31,7 @@ _load_dotenv(Path(__file__).parent / ".env")
 
 async def run_example():
     """运行示例"""
-    print("🚀 AgentKit 示例运行")
+    print("🚀 AgentEngine 示例运行")
     print("=" * 50)
     
     # 检查环境变量
@@ -47,8 +47,8 @@ async def run_example():
     # 导入模块
     print("\n2. 导入模块...")
     try:
-        from agentkit.base.context import AgentContext
-        from agentkit.llm.factory import create_llm_from_env
+        from agentengine.base.context import AgentContext
+        from agentengine.llm.factory import create_llm_from_env
         from services.agent_orchestration_service import AgentOrchestrationService
         print("✅ 模块导入成功")
     except Exception as e:

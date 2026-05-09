@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from agentkit.base.context import AgentContext
-from agentkit.llm.client import LLMResponse
+from agentengine.base.context import AgentContext
+from agentengine.llm.client import LLMResponse
 from mock_llm import MockLLMClient
-from agentkit.stream.printer import Printer
-from agentkit.stream.sse_queue import SseEventQueue
-from agentkit.tools.base import Tool
-from agentkit.tools.collection import ToolCollection
+from agentengine.stream.printer import Printer
+from agentengine.stream.sse_queue import SseEventQueue
+from agentengine.tools.base import Tool
+from agentengine.tools.collection import ToolCollection
 
 
 class _EchoTool(Tool):

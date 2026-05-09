@@ -105,7 +105,7 @@
 
 ### 2.2 多租户隔离 — 把 TenantContext 真用起来
 
-**现状:** `agentkit/enterprise/tenant.py` 已实现 `TenantContext`,但 `web_api` 没构造它,`AgentContext.extras["tenant"]` 始终为空。SQLite 也没按 tenant 分表/分 schema。
+**现状:** `agentengine/enterprise/tenant.py` 已实现 `TenantContext`,但 `web_api` 没构造它,`AgentContext.extras["tenant"]` 始终为空。SQLite 也没按 tenant 分表/分 schema。
 
 **改动清单:**
 

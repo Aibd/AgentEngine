@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from agentkit.runtime.events import (
+from agentengine.runtime.events import (
     ToolCallCompleted,
     ToolCallFailed,
     ToolCallStarted,
     TurnStarted,
 )
-from agentkit.runtime.file_access_tracker import TurnFileAccessTracker
+from agentengine.runtime.file_access_tracker import TurnFileAccessTracker
 
 
 @pytest.fixture
@@ -136,7 +136,7 @@ class TestTrackerEndToEnd:
     """Drive the tracker through a sequence resembling a real ReAct loop."""
 
     def test_read_then_write_allowed_after_read(self, workspace: Path) -> None:
-        from agentkit.tools.builtin.file_write_tool import FileWriteTool
+        from agentengine.tools.builtin.file_write_tool import FileWriteTool
 
         existing = workspace / "src" / "a.py"
         tracker = TurnFileAccessTracker(workspace_root=workspace)
@@ -158,7 +158,7 @@ class TestTrackerEndToEnd:
         assert existing.read_text(encoding="utf-8") == "b\n"
 
     def test_write_without_prior_read_blocked(self, workspace: Path) -> None:
-        from agentkit.tools.builtin.file_write_tool import FileWriteTool
+        from agentengine.tools.builtin.file_write_tool import FileWriteTool
 
         tracker = TurnFileAccessTracker(workspace_root=workspace)
         tool = FileWriteTool(workspace_root=workspace, access_tracker=tracker)

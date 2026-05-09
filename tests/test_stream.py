@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from agentkit.errors import LLMTimeoutError
-from agentkit.stream.events import EventType
-from agentkit.stream.printer import Printer
-from agentkit.stream.sse_queue import SseEventQueue
+from agentengine.errors import LLMTimeoutError
+from agentengine.stream.events import EventType
+from agentengine.stream.printer import Printer
+from agentengine.stream.sse_queue import SseEventQueue
 
 
 class TestSseEventQueue:

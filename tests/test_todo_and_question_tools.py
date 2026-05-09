@@ -4,13 +4,13 @@ from typing import Any
 
 import pytest
 
-from agentkit.runtime.events import (
+from agentengine.runtime.events import (
     RuntimeEvent,
     TodosUpdated,
     UserQuestionAsked,
 )
-from agentkit.tools.builtin.ask_user_question_tool import AskUserQuestionTool
-from agentkit.tools.builtin.todo_write_tool import TodoWriteTool
+from agentengine.tools.builtin.ask_user_question_tool import AskUserQuestionTool
+from agentengine.tools.builtin.todo_write_tool import TodoWriteTool
 
 
 class _EventRecorder:
@@ -184,7 +184,7 @@ class TestAskUserQuestionTool:
 
 class TestBuilderIncludesNewTools:
     def test_factories_registered(self) -> None:
-        from agentkit.tools.builtin import BUILTIN_TOOL_FACTORIES
+        from agentengine.tools.builtin import BUILTIN_TOOL_FACTORIES
 
         assert "TodoWrite" in BUILTIN_TOOL_FACTORIES
         assert "AskUserQuestion" in BUILTIN_TOOL_FACTORIES
@@ -193,7 +193,7 @@ class TestBuilderIncludesNewTools:
         # build_default_tools w/o include= should *include* TodoWrite and
         # AskUserQuestion (they're in BUILTIN_TOOL_FACTORIES). Just verify
         # the names appear in the result set.
-        from agentkit.tools.builtin import build_default_tools
+        from agentengine.tools.builtin import build_default_tools
 
         tools = build_default_tools(workspace_root=tmp_path)
         names = {t.name for t in tools}

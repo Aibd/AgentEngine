@@ -1,11 +1,11 @@
-# AgentKit 源码导览
+# AgentEngine 源码导览
 
 此目录包含独立的 Agent 框架代码。业务 Agent 位于 `src/agents` 下；应用入口点位于 `src/services` 下。
 
 ## 目录结构
 
 ```text
-agentkit/
+agentengine/
   spec.py        AgentSpec — 不可变 Agent 配置（frozen dataclass）
   base/          AgentRun（per-run 状态容器）, AgentContext, AgentState
   llm/           OpenAI 兼容客户端和 LLM 协议类型
