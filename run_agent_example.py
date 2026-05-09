@@ -120,7 +120,7 @@ async def run_example():
     
     print("\n🎉 示例运行完成！")
     print("\n💡 下一步:")
-    print("   - 查看 RUNNING_GUIDE.md 了解更多用法")
+    print("   - 查看 docs/quick-start.md 了解更多用法")
     print("   - 尝试其他代理: deep_research")
     print("   - 启用流式输出: --trace 参数")
 
