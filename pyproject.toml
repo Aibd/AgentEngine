@@ -32,6 +32,7 @@ markers = [
 python_version = "3.11"
 files = ["src"]
 mypy_path = "src"
+explicit_package_bases = true
 strict = true
 show_error_codes = true
 warn_unused_configs = true
