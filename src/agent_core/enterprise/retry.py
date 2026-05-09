@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
 
 from agent_core.enterprise.middleware import MiddlewareContext, MiddlewareFn
 from agent_core.errors import (
@@ -88,7 +88,7 @@ def _is_retryable(error: BaseException, config: RetryConfig) -> bool:
 
 def _delay(attempt: int, config: RetryConfig) -> float:
     delay_seconds = config.base_delay * (2 ** (attempt - 1))
-    return min(delay_seconds, config.max_delay)
+    return float(min(delay_seconds, config.max_delay))
 
 
 def retry_middleware(config: RetryConfig | None = None) -> MiddlewareFn:
@@ -98,7 +98,10 @@ def retry_middleware(config: RetryConfig | None = None) -> MiddlewareFn:
     """
     cfg = config or RetryConfig()
 
-    async def _retry(ctx: MiddlewareContext, next_fn):
+    async def _retry(
+        ctx: MiddlewareContext,
+        next_fn: Callable[[MiddlewareContext], Awaitable[str]],
+    ) -> str:
         last_error: BaseException | None = None
 
         for attempt in range(cfg.max_retries + 1):
@@ -122,6 +125,7 @@ def retry_middleware(config: RetryConfig | None = None) -> MiddlewareFn:
                 )
                 await asyncio.sleep(wait)
 
-        raise last_error  # type: ignore[misc]
+        assert last_error is not None
+        raise last_error
 
     return _retry

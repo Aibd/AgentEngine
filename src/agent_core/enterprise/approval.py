@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -69,8 +70,9 @@ class ApprovalGate:
         *,
         run_id: str = "",
         tenant_id: str = "",
+        approval_id: str = "",
     ) -> ApprovalResult:
-        approval_id = f"apr_{uuid.uuid4().hex[:10]}"
+        approval_id = approval_id or f"apr_{uuid.uuid4().hex[:10]}"
         future: asyncio.Future[ApprovalResult] = asyncio.get_event_loop().create_future()
         self._pending[approval_id] = future
         logger.info("approval_required id=%s tool=%s", approval_id, tool_name)
@@ -106,7 +108,10 @@ class ApprovalGate:
 def approval_middleware(gate: ApprovalGate) -> MiddlewareFn:
     """Injects the approval gate into both context.extras and run_context.extras."""
 
-    async def _approval(ctx: MiddlewareContext, next_fn):
+    async def _approval(
+        ctx: MiddlewareContext,
+        next_fn: Callable[[MiddlewareContext], Awaitable[str]],
+    ) -> str:
         ctx.extras["approval_gate"] = gate
         ctx.run_context.extras["approval_gate"] = gate
         return await next_fn(ctx)

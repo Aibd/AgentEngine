@@ -26,8 +26,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
 
 from agent_core.errors import AgentCoreError
 from agent_core.enterprise.middleware import MiddlewareContext, MiddlewareFn
@@ -198,7 +198,10 @@ def quota_middleware(store: QuotaStore) -> MiddlewareFn:
     loop (via context extras), and records token usage after completion.
     """
 
-    async def _quota(ctx: MiddlewareContext, next_fn):
+    async def _quota(
+        ctx: MiddlewareContext,
+        next_fn: Callable[[MiddlewareContext], Awaitable[str]],
+    ) -> str:
         tenant_id = _get_tenant_id(ctx)
         if tenant_id is None:
             return await next_fn(ctx)

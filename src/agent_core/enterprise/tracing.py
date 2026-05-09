@@ -22,6 +22,7 @@ from __future__ import annotations
 import importlib
 import logging
 import time
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
@@ -33,21 +34,21 @@ logger = logging.getLogger(__name__)
 _current_span: ContextVar[Any] = ContextVar("otel_current_span", default=None)
 
 
-def _get_trace_module():
+def _get_trace_module() -> Any | None:
     try:
         return importlib.import_module("opentelemetry.trace")
     except ModuleNotFoundError:
         return None
 
 
-def _get_status_module():
+def _get_status_module() -> Any | None:
     try:
         return importlib.import_module("opentelemetry.trace.status")
     except ModuleNotFoundError:
         return None
 
 
-def _get_tracer():
+def _get_tracer() -> Any | None:
     trace = _get_trace_module()
     if trace is None:
         return None
@@ -62,7 +63,10 @@ def otel_tracing_middleware() -> MiddlewareFn:
     tool exec) can create child spans.
     """
 
-    async def _trace(ctx: MiddlewareContext, next_fn):
+    async def _trace(
+        ctx: MiddlewareContext,
+        next_fn: Callable[[MiddlewareContext], Awaitable[str]],
+    ) -> str:
         tracer = _get_tracer()
         if tracer is None:
             return await next_fn(ctx)
@@ -109,7 +113,10 @@ def get_current_span() -> Any:
 
 
 @contextmanager
-def span_context(name: str, attributes: dict[str, Any] | None = None):
+def span_context(
+    name: str,
+    attributes: dict[str, Any] | None = None,
+) -> Iterator[Any | None]:
     """Create a child span within the current agent run span.
 
     Usage::
