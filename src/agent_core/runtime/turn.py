@@ -47,6 +47,8 @@ from agent_core.runtime.events import (
 )
 from agent_core.tools.executor import ToolExecutor
 from agent_core.enterprise.approval import ApprovalDeniedError, ApprovalGate
+from agent_core.enterprise.tenant import TenantContext
+from agent_core.enterprise.quota import QuotaExceededError, QuotaStore
 from agent_core.runtime.events import ApprovalRequired
 
 
@@ -303,6 +305,14 @@ async def _loop(
             total_seconds=time.perf_counter() - loop_started_at,
         )
     )
+    quota_store = context.extras.get("_quota_store")
+    quota_tenant_id = context.extras.get("_quota_tenant_id")
+    if isinstance(quota_store, QuotaStore) and isinstance(quota_tenant_id, str):
+        await quota_store.record_tokens(
+            quota_tenant_id,
+            prompt_tokens_total,
+            completion_tokens_total,
+        )
 
     return final_answer
 
@@ -472,7 +482,7 @@ async def _execute_tool_calls(
         if approval_gate is not None and tool is not None and tool.is_destructive:
             tenant_id = ""
             tenant = context.extras.get("tenant")
-            if hasattr(tenant, "tenant_id"):
+            if isinstance(tenant, TenantContext):
                 tenant_id = tenant.tenant_id
 
             approval_id = f"apr_{tc.get('id', '') or 'unknown'}"
@@ -487,7 +497,7 @@ async def _execute_tool_calls(
             try:
                 await approval_gate.request_approval(
                     tool_name, tool_args,
-                    run_id=run_id, tenant_id=tenant_id,
+                    run_id=run_id, tenant_id=tenant_id, approval_id=approval_id,
                 )
             except ApprovalDeniedError as denied:
                 await emit(
@@ -551,6 +561,36 @@ async def _execute_tool_calls(
             tool_name,
             sorted(tool_args.keys()),
         )
+        quota_store = context.extras.get("_quota_store")
+        quota_tenant_id = context.extras.get("_quota_tenant_id")
+        if isinstance(quota_store, QuotaStore) and isinstance(quota_tenant_id, str):
+            try:
+                await quota_store.check_and_acquire_tool_call(quota_tenant_id)
+            except QuotaExceededError as quota_error:
+                tool_call_id = tc.get("id", "") or ""
+                rendered = str(quota_error)
+                await emit(
+                    ToolCallStarted(
+                        run_id=run_id,
+                        turn_id=turn_id,
+                        tool_call_id=tool_call_id,
+                        tool_name=tool_name,
+                        arguments=tool_args,
+                    )
+                )
+                await emit(
+                    ToolCallFailed(
+                        run_id=run_id,
+                        turn_id=turn_id,
+                        tool_call_id=tool_call_id,
+                        tool_name=tool_name,
+                        error_type="QuotaExceededError",
+                        error_message=rendered,
+                        elapsed_seconds=0.0,
+                    )
+                )
+                agent.memory.add_tool_message(rendered, tool_call_id=tool_call_id)
+                continue
 
         # PreToolUse fires after the approval gate has accepted the call but
         # before the tool actually runs. Aborting here skips the tool and

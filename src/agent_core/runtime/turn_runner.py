@@ -32,6 +32,7 @@ from agent_core.runtime.file_access_tracker import TurnFileAccessTracker
 from agent_core.runtime.run_state import RunState, TerminalReason
 from agent_core.runtime.sinks import RuntimeEventFanout
 from agent_core.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS, run_turn
+from agent_core.spec import AgentSpec
 
 EventCallback = Callable[[RuntimeEvent], Awaitable[None] | None]
 TurnFn = Callable[[AgentRun, AgentContext, str], Awaitable[str]]
@@ -175,7 +176,11 @@ class TurnRunner:
         terminal_status = "completed"
         try:
             if self.middleware is not None:
-                async def _inner(spec, ctx, q):
+                async def _inner(
+                    spec: AgentSpec,
+                    ctx: AgentContext,
+                    q: str,
+                ) -> str:
                     if turn_fn is None:
                         return await run_turn(
                             agent, ctx, q,

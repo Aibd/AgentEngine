@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Protocol, runtime_checkable
+from typing import AsyncContextManager, AsyncIterator, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 class ConversationLockManager(Protocol):
     """Acquire a mutual-exclusion lock scoped to a conversation."""
 
-    def acquire(self, conversation_id: str) -> "AsyncContextManager[None]":  # noqa: F821
+    def acquire(self, conversation_id: str) -> AsyncContextManager[None]:
         """Return an async context manager that holds the conversation lock."""
         ...
 
