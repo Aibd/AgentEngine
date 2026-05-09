@@ -12,10 +12,25 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from agents import REGISTRY as AGENT_REGISTRY
 from agent_core.concurrency import InMemoryConversationLockManager
+from agent_core.enterprise import (
+    ApprovalGate,
+    ApprovalResult,
+    EnvSecrets,
+    MiddlewareChain,
+    QuotaLimits,
+    QuotaStore,
+    TenantContext,
+    approval_middleware,
+    otel_tracing_middleware,
+    quota_middleware,
+    retry_middleware,
+)
 from agent_core.errors import error_to_dict
 from agent_core.persistence import SqlitePersistence
-from agent_core.tools.builtin import ReadFileTool
+from agent_core.skills.loader import SkillLoader
+from agent_core.tools.builtin import ReadFileTool, SkillTool
 from services.agent_orchestration_service import AgentOrchestrationService
 
 
@@ -45,6 +60,8 @@ _load_dotenv(REPO_ROOT / ".env")
 DEFAULT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 PERSISTENCE = SqlitePersistence(DEFAULT_DB_PATH)
 LOCK_MANAGER = InMemoryConversationLockManager()
+QUOTA_STORE = QuotaStore()
+APPROVAL_GATE = ApprovalGate(timeout_seconds=float(os.getenv("APPROVAL_TIMEOUT_SECONDS", "300")))
 
 app = FastAPI(title="Agent Core Web API")
 app.add_middleware(
@@ -64,8 +81,53 @@ async def health() -> dict[str, Any]:
     }
 
 
+@app.post("/api/approvals/{approval_id}")
+async def approval_decision(
+    approval_id: str,
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """Resolve a pending destructive-tool approval request."""
+    approved = bool(body.get("approved"))
+    reason = str(body.get("reason", ""))
+    resolved = APPROVAL_GATE.resolve(
+        approval_id,
+        ApprovalResult(approved=approved, reason=reason),
+    )
+    if not resolved:
+        raise HTTPException(status_code=404, detail="approval request not found")
+    return {"ok": True, "approval_id": approval_id, "approved": approved}
+
+
+@app.get("/api/capabilities")
+async def capabilities() -> dict[str, Any]:
+    """Return the agents, tools, and skills that the web UI can surface."""
+    skill_loader = SkillLoader(cwd=REPO_ROOT)
+    skills = skill_loader.discover()
+    tools = [
+        ReadFileTool(workspace_root=REPO_ROOT),
+        SkillTool(skill_loader),
+    ]
+    return {
+        "agents": [
+            {"name": name, "description": spec.description}
+            for name, spec in sorted(AGENT_REGISTRY.items())
+        ],
+        "tools": [
+            {"name": tool.name, "description": tool.description}
+            for tool in tools
+        ],
+        "skills": [
+            {"name": skill.name, "description": skill.description}
+            for skill in sorted(skills.values(), key=lambda item: item.name)
+        ],
+    }
+
+
 @app.get("/api/conversations/{conversation_id}/messages")
-async def conversation_messages(conversation_id: str) -> dict[str, Any]:
+async def conversation_messages(
+    conversation_id: str,
+    tenant_id: str = Query("default", min_length=1),
+) -> dict[str, Any]:
     """Return persisted messages for a conversation so the UI can rehydrate.
 
     Filters out system messages (prompts injected by the agent itself) and
@@ -73,7 +135,8 @@ async def conversation_messages(conversation_id: str) -> dict[str, Any]:
     """
     if not conversation_id.strip():
         raise HTTPException(status_code=400, detail="conversation_id is required")
-    messages = await PERSISTENCE.load_messages(conversation_id)
+    scoped_conversation_id = _scoped_conversation_id(conversation_id, tenant_id)
+    messages = await PERSISTENCE.load_messages(scoped_conversation_id)
     visible = [m for m in messages if m.get("role") != "system"]
     return {"conversation_id": conversation_id, "messages": visible}
 
@@ -83,6 +146,9 @@ async def run_stream(
     query: str = Query(..., min_length=1),
     agent_name: str = Query("deep_research", min_length=1),
     conversation_id: str = Query("web-conversation", min_length=1),
+    tenant_id: str = Query("default", min_length=1),
+    user_id: str = Query("", min_length=0),
+    scopes: str = Query("", min_length=0),
 ) -> StreamingResponse:
     query = query.strip()
     if not query:
@@ -94,6 +160,9 @@ async def run_stream(
             query=query,
             agent_name=agent_name,
             conversation_id=conversation_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            scopes=_parse_scopes(scopes),
             request_id=request_id,
         ):
             yield _format_sse_frame(frame)
@@ -107,6 +176,7 @@ async def run_stream(
             "X-Streaming-Protocol": "agent-core.sse.v2",
             "X-Request-ID": request_id,
             "X-Conversation-ID": conversation_id,
+            "X-Tenant-ID": tenant_id,
         },
     )
 
@@ -116,22 +186,38 @@ async def _run_agent_events(
     query: str,
     agent_name: str,
     conversation_id: str,
+    tenant_id: str = "default",
+    user_id: str = "",
+    scopes: list[str] | None = None,
     request_id: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     service = AgentOrchestrationService(
-        config_path=REPO_ROOT / "config" / "agents.yaml",
         persistence=PERSISTENCE,
         lock_manager=LOCK_MANAGER,
+        middleware=_build_enterprise_middleware(),
     )
     request_id = request_id or f"web-{uuid.uuid4().hex[:12]}"
+    scoped_conversation_id = _scoped_conversation_id(conversation_id, tenant_id)
     context, event_stream = service.create_streaming_context(
         request_id=request_id,
         query=query,
-        conversation_id=conversation_id,
+        conversation_id=scoped_conversation_id,
     )
+    if context.printer is not None:
+        context.printer.conversation_id = conversation_id
+    context.extras["tenant"] = TenantContext(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        session_id=scoped_conversation_id,
+        scopes=scopes or [],
+    )
+    context.extras["secrets"] = EnvSecrets()
+    context.extras["public_conversation_id"] = conversation_id
 
     if context.tool_collection.get("read_file") is None:
         context.tool_collection.add(ReadFileTool(workspace_root=REPO_ROOT))
+    if context.tool_collection.get("Skill") is None:
+        context.tool_collection.add(SkillTool(SkillLoader(cwd=REPO_ROOT)))
 
     async def run_and_close() -> None:
         try:
@@ -166,3 +252,46 @@ def _format_sse_frame(frame: dict[str, Any]) -> str:
     event = str(frame.get("event", "message"))
     data = json.dumps(frame.get("data", {}), ensure_ascii=False)
     return f"event: {event}\ndata: {data}\n\n"
+
+
+def _build_enterprise_middleware() -> MiddlewareChain:
+    _configure_quota_from_env(QUOTA_STORE)
+    return MiddlewareChain([
+        otel_tracing_middleware(),
+        quota_middleware(QUOTA_STORE),
+        retry_middleware(),
+        approval_middleware(APPROVAL_GATE),
+    ])
+
+
+def _configure_quota_from_env(store: QuotaStore) -> None:
+    default_limits = QuotaLimits(
+        max_runs=_env_int("QUOTA_MAX_RUNS"),
+        max_tool_calls=_env_int("QUOTA_MAX_TOOL_CALLS"),
+        max_tokens_in=_env_int("QUOTA_MAX_TOKENS_IN"),
+        max_tokens_out=_env_int("QUOTA_MAX_TOKENS_OUT"),
+        window_seconds=float(os.getenv("QUOTA_WINDOW_SECONDS", "60")),
+    )
+    if any([
+        default_limits.max_runs,
+        default_limits.max_tool_calls,
+        default_limits.max_tokens_in,
+        default_limits.max_tokens_out,
+    ]):
+        store.set_limits("default", default_limits)
+
+
+def _env_int(name: str) -> int:
+    raw = os.getenv(name, "0").strip()
+    return int(raw) if raw.isdigit() else 0
+
+
+def _parse_scopes(raw: str) -> list[str]:
+    return [scope.strip() for scope in raw.split(",") if scope.strip()]
+
+
+def _scoped_conversation_id(conversation_id: str, tenant_id: str) -> str:
+    tenant = tenant_id.strip() or "default"
+    if tenant == "default":
+        return conversation_id
+    return f"{tenant}:{conversation_id}"

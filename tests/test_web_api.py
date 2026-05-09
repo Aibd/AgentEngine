@@ -12,6 +12,7 @@ import httpx
 import pytest
 
 from agent_core.llm.client import LLMResponse
+from agent_core.enterprise import ApprovalGate, QuotaLimits, QuotaStore
 from mock_llm import MockLLMClient
 from services import web_api
 
@@ -60,6 +61,8 @@ def _patch_llm(monkeypatch):
     # patch that directly so context.llm gets injected at request time.
     from services import agent_orchestration_service as orch_module
     monkeypatch.setattr(orch_module, "_default_llm_factory", _factory_returns_mock)
+    monkeypatch.setattr(web_api, "QUOTA_STORE", QuotaStore())
+    monkeypatch.setattr(web_api, "APPROVAL_GATE", ApprovalGate(timeout_seconds=0.1))
 
 
 async def test_health_endpoint() -> None:
@@ -70,6 +73,18 @@ async def test_health_endpoint() -> None:
     body = response.json()
     assert body["ok"] is True
     assert "model" in body
+
+
+async def test_capabilities_endpoint_lists_web_agent_tools_and_skills() -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/capabilities")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert {agent["name"] for agent in body["agents"]} >= {"general_chat", "deep_research"}
+    assert {tool["name"] for tool in body["tools"]} >= {"read_file", "Skill"}
+    assert any(skill["name"] == "codebase-research" for skill in body["skills"])
 
 
 async def test_run_stream_emits_full_event_sequence() -> None:
@@ -119,3 +134,69 @@ async def test_run_stream_rejects_empty_query() -> None:
     # Our explicit handler returns 400 if it slips through. Either is fine —
     # the frontend just needs a non-200.
     assert response.status_code in (400, 422)
+
+
+async def test_run_stream_scopes_persistence_by_tenant() -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver", timeout=10.0) as client:
+        async with client.stream(
+            "GET",
+            "/api/runs/stream",
+            params={
+                "query": "tenant hello",
+                "agent_name": "general_chat",
+                "conversation_id": "tenant-test-conv",
+                "tenant_id": "acme",
+                "user_id": "u1",
+            },
+        ) as response:
+            assert response.status_code == 200
+            events = [evt async for evt in _consume_sse(response)]
+
+        default_messages = await client.get("/api/conversations/tenant-test-conv/messages")
+        tenant_messages = await client.get(
+            "/api/conversations/tenant-test-conv/messages",
+            params={"tenant_id": "acme"},
+        )
+
+    assert events[-1]["event"] == "done"
+    assert default_messages.json()["messages"] == []
+    assert any(
+        msg["role"] == "user" and msg["content"] == "tenant hello"
+        for msg in tenant_messages.json()["messages"]
+    )
+
+
+async def test_run_stream_emits_quota_error_for_limited_tenant() -> None:
+    web_api.QUOTA_STORE.set_limits("limited", QuotaLimits(max_runs=1))
+    await web_api.QUOTA_STORE.check_and_acquire_run("limited")
+
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver", timeout=10.0) as client:
+        async with client.stream(
+            "GET",
+            "/api/runs/stream",
+            params={
+                "query": "hello",
+                "agent_name": "general_chat",
+                "conversation_id": "quota-test-conv",
+                "tenant_id": "limited",
+            },
+        ) as response:
+            assert response.status_code == 200
+            events = [evt async for evt in _consume_sse(response)]
+
+    error = next(evt for evt in events if evt["event"] == "error")
+    assert error["data"]["code"] == "quota_exceeded"
+    assert error["data"]["details"]["tenant_id"] == "limited"
+
+
+async def test_approval_decision_rejects_unknown_id() -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/approvals/apr_missing",
+            json={"approved": True},
+        )
+
+    assert response.status_code == 404
