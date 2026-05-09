@@ -58,7 +58,7 @@ async def run_example():
     # 创建服务
     print("\n3. 创建服务...")
     try:
-        service = AgentOrchestrationService(config_path="config/agents.yaml")
+        service = AgentOrchestrationService()
         print("✅ 服务创建成功")
     except Exception as e:
         print(f"❌ 服务创建失败: {e}")

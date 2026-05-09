@@ -44,11 +44,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run an agent from the command line.")
     parser.add_argument("agent_name", help="Agent name, e.g. general_chat or deep_research")
     parser.add_argument("query", nargs="+", help="User query text")
-    parser.add_argument(
-        "--config",
-        default="config/agents.yaml",
-        help="Path to agents config YAML",
-    )
     parser.add_argument("--request-id", default="cli", help="Request id for this run")
     parser.add_argument(
         "--max-steps",
@@ -93,7 +88,7 @@ async def run() -> int:
 
     try:
         agent_kwargs = {"max_steps": args.max_steps} if args.max_steps is not None else None
-        result = await AgentOrchestrationService(config_path=args.config).run(
+        result = await AgentOrchestrationService().run(
             agent_name=args.agent_name,
             query=query,
             context=context,

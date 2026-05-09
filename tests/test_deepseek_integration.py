@@ -39,7 +39,6 @@ async def test_deepseek_general_chat_smoke() -> None:
 
     try:
         result = await AgentOrchestrationService(
-            config_path="config/agents.yaml",
             llm_factory=lambda: llm,
         ).run(
             agent_name="general_chat",
@@ -62,7 +61,6 @@ async def test_general_chat_emits_v2_sse_sequence() -> None:
     assert llm is not None
 
     service = AgentOrchestrationService(
-        config_path="config/agents.yaml",
         llm_factory=lambda: llm,
     )
     context, stream = service.create_streaming_context(
@@ -122,7 +120,6 @@ async def test_deep_research_invokes_read_file_tool(tmp_path: Path) -> None:
     assert llm is not None
 
     service = AgentOrchestrationService(
-        config_path="config/agents.yaml",
         llm_factory=lambda: llm,
     )
     context, stream = service.create_streaming_context(
@@ -177,7 +174,6 @@ async def test_conversation_history_persists_across_runs(tmp_path: Path) -> None
     llm_one = create_llm_from_env()
     assert llm_one is not None
     service_one = AgentOrchestrationService(
-        config_path="config/agents.yaml",
         llm_factory=lambda: llm_one,
         persistence=store,
     )
@@ -203,7 +199,6 @@ async def test_conversation_history_persists_across_runs(tmp_path: Path) -> None
     llm_two = create_llm_from_env()
     assert llm_two is not None
     service_two = AgentOrchestrationService(
-        config_path="config/agents.yaml",
         llm_factory=lambda: llm_two,
         persistence=store,
     )
@@ -243,7 +238,6 @@ async def test_invalid_api_key_surfaces_as_error_event() -> None:
         model=os.getenv("LLM_MODEL", "deepseek-chat"),
     )
     service = AgentOrchestrationService(
-        config_path="config/agents.yaml",
         llm_factory=lambda: bad_llm,
     )
     context, stream = service.create_streaming_context(
@@ -292,7 +286,6 @@ async def test_jsonl_run_log_is_written(tmp_path: Path, monkeypatch) -> None:
 
     try:
         await AgentOrchestrationService(
-            config_path="config/agents.yaml",
             llm_factory=lambda: llm,
         ).run(
             agent_name="general_chat",

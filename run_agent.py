@@ -72,7 +72,7 @@ async def run_quick_test():
     
     # 创建服务和上下文
     print("\n⏳ 2. 初始化服务...")
-    service = AgentOrchestrationService(config_path="config/agents.yaml")
+    service = AgentOrchestrationService()
     
     context, event_stream = service.create_streaming_context(
         request_id="quick-test-001",
@@ -126,8 +126,7 @@ async def run_quick_test():
     print("💡 下一步:")
     print("   1. 尝试运行深度研究代理: python scripts/chat.py deep_research \"你的查询\"")
     print("   2. 启用流式输出: python scripts/chat.py general_chat \"你的查询\" --trace")
-    print("   3. 查看配置: config/agents.yaml")
-    print("   4. 集成到你的应用中: from services import AgentOrchestrationService")
+    print("   3. 集成到你的应用中: from services import AgentOrchestrationService")
 
 if __name__ == "__main__":
     asyncio.run(run_quick_test())

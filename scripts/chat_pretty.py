@@ -25,7 +25,7 @@ for path in (SRC, SCRIPTS):
         sys.path.insert(0, str(path))
 
 from agent_core.llm.factory import create_llm_from_env  # noqa: E402
-import agents  # noqa: E402,F401  -- import side effects register agents
+import agents  # noqa: E402,F401  -- load explicit agent registry
 
 from rich.console import Console  # noqa: E402
 
@@ -37,7 +37,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run an agent with the pretty terminal renderer.")
     parser.add_argument("agent_name", help="Agent name, e.g. general_chat or deep_research")
     parser.add_argument("query", nargs="+", help="User query text")
-    parser.add_argument("--config", default="config/agents.yaml", help="Path to agents config YAML")
     parser.add_argument("--request-id", default="cli-pretty", help="Request id for this run")
     parser.add_argument("--conversation-id", default="cli-conv", help="Conversation id for this run")
     parser.add_argument("--max-steps", type=int, default=None, help="Override agent max_steps")
@@ -80,7 +79,7 @@ async def run() -> int:
         console.print(f"[bold red]✗ Failed to create LLM client:[/bold red] {exc}")
         return 2
 
-    service = AgentOrchestrationService(config_path=args.config)
+    service = AgentOrchestrationService()
     context, stream = service.create_streaming_context(
         request_id=args.request_id,
         query=query,

@@ -4,7 +4,6 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import replace
-from pathlib import Path
 from typing import Any, cast
 
 from agent_core.base.agent import AgentRun
@@ -16,6 +15,7 @@ from agent_core.concurrency import (
 from agent_core.llm.client import LLMClient
 from agent_core.llm.factory import create_llm_from_env
 from agent_core.persistence.port import PersistencePort
+from agent_core.enterprise.middleware import MiddlewareChain
 from agent_core.runtime.events import RuntimeEvent
 from agent_core.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS
 from agent_core.runtime.turn_runner import TurnRunner
@@ -24,11 +24,6 @@ from agent_core.stream.printer import Printer
 from agent_core.stream.sse_queue import SseEventQueue
 from agent_core.stream.sse_sink import SseSink
 from agents import REGISTRY as AGENT_REGISTRY
-
-try:
-    import yaml
-except ImportError:  # pragma: no cover
-    yaml = None  # type: ignore[assignment]
 
 
 DEFAULT_MAX_QUERY_CHARS = 20_000
@@ -42,46 +37,28 @@ def _default_llm_factory() -> LLMClient | None:
 class AgentOrchestrationService:
     """Application-facing entry point.
 
-    Looks up an `AgentSpec` by name (optionally reading per-agent settings
-    from `config/agents.yaml`), constructs an `AgentRun`, and dispatches it
-    through `TurnRunner` → `run_turn()`. Provides a streaming context factory
-    for SSE endpoints.
+    Looks up an `AgentSpec` by name, constructs an `AgentRun`, and dispatches
+    it through `TurnRunner` -> `run_turn()`. Provides a streaming context
+    factory for SSE endpoints.
     """
 
     def __init__(
         self,
-        config_path: str | Path | None = None,
         *,
         llm_factory: Callable[[], LLMClient | None] | None = None,
         max_query_chars: int = DEFAULT_MAX_QUERY_CHARS,
         persistence: PersistencePort | None = None,
         lock_manager: ConversationLockManager | None = None,
+        middleware: MiddlewareChain | None = None,
     ) -> None:
         if max_query_chars < 1:
             raise ValueError("max_query_chars must be at least 1")
-        self._config: dict[str, Any] = self._load_config(config_path)
         self._llm_factory = llm_factory or _default_llm_factory
         self._max_query_chars = max_query_chars
         self._managed_llms: dict[int, LLMClient] = {}
         self._persistence = persistence
         self._lock_manager = lock_manager or InMemoryConversationLockManager()
-
-    def _load_config(self, config_path: str | Path | None) -> dict[str, Any]:
-        if config_path is None or yaml is None:
-            return {}
-        path = Path(config_path)
-        if not path.exists():
-            return {}
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        return data if isinstance(data, dict) else {}
-
-    def agent_config(self, agent_name: str) -> dict[str, Any]:
-        agents_cfg = self._config.get("agents", {}) or {}
-        return agents_cfg.get(agent_name, {}) or {}
-
-    def is_enabled(self, agent_name: str) -> bool:
-        cfg = self.agent_config(agent_name)
-        return bool(cfg.get("enabled", True))
+        self._middleware = middleware
 
     async def run(
         self,
@@ -93,9 +70,6 @@ class AgentOrchestrationService:
         agent_kwargs: dict[str, Any] | None = None,
     ) -> str:
         self._validate_run_inputs(agent_name=agent_name, query=query)
-        if not self.is_enabled(agent_name):
-            raise RuntimeError(f"Agent disabled in config: {agent_name}")
-
         spec = self._resolve_spec(agent_name, agent_kwargs=agent_kwargs)
 
         context = context or AgentContext(request_id="local", query=query)
@@ -122,7 +96,8 @@ class AgentOrchestrationService:
             await sse_sink.consume(event)
 
         runner = TurnRunner(
-            session_id=context.session_id or context.conversation_id or context.request_id
+            session_id=context.session_id or context.conversation_id or context.request_id,
+            middleware=self._middleware,
         )
         try:
             # Serialize concurrent runs that share a conversation_id so their
@@ -152,8 +127,7 @@ class AgentOrchestrationService:
         spec = AGENT_REGISTRY.get(agent_name)
         if spec is None:
             raise KeyError(f"Agent not registered: {agent_name}")
-        cfg = self.agent_config(agent_name)
-        max_steps = (agent_kwargs or {}).get("max_steps", cfg.get("max_steps"))
+        max_steps = (agent_kwargs or {}).get("max_steps")
         if max_steps is not None and max_steps != spec.max_steps:
             return replace(spec, max_steps=int(max_steps))
         return spec
