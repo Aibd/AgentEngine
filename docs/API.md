@@ -1,12 +1,8 @@
 # AgentEngine API
 
-> ⚠️ **此文档正在重构中。** `BaseAgent` 已被 `AgentSpec + AgentRun` 取代（Phase 2 完成）。
-> `pipeline_steps()` 方法已随 `PipelineHandler` 一起删除（Phase 1 完成）。
-> 请参阅 [REFACTOR_PLAN.md](REFACTOR_PLAN.md) 了解完整路线图。
+本文档描述了 Agent、工具、LLM 客户端、运行时事件和公共流式信封的稳定契约。
 
-本文档描述了 Agent、Handler、工具、LLM 客户端、运行时事件和公共流式信封的稳定契约。
-
-## AgentSpec / AgentRun（取代 BaseAgent）
+## AgentSpec / AgentRun
 
 `BaseAgent` 是一个运行容器。循环逻辑位于 Handler 中。
 
