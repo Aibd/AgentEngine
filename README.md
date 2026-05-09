@@ -7,17 +7,15 @@ Agent 模块重构的独立脚手架。位于现有的 `gjsk_wiseagent_ai` 项�
 ```
 src/
   agent_core/    框架代码，不依赖业务服务导入
-    base/        BaseAgent（数据容器）+ AgentContext + AgentState
-    handlers/    ReActHandler / PipelineHandler / LegacyHandler
+    base/        AgentRun + AgentContext + AgentState
+    runtime/     run_turn() + TurnRunner
     llm/         OpenAI 兼容客户端、Mock 客户端契约、环境变量工厂
     memory/      Message + Memory（支持裁剪 + 多模态）
     prompts/     PromptLoader（缓存 YAML）
-    registry/    基于装饰器的 Agent + Handler 注册表
-    stream/      EventStream + Printer（完整 SSE 信封）
+    stream/      Printer + SSE v2 桥接
     tools/       Tool / ToolCollection / Registry / ReadFileTool / SkillTool
-  agents/        业务 Agent 声明 + 旧版适配器
+  agents/        业务 AgentSpec 声明 + 显式 REGISTRY
   services/      面向应用的入口点
-config/agents.yaml  Agent 启用和默认处理器/模型配置
 tests/         覆盖每个框架模块的 pytest 测试套件
 ```
 
@@ -31,7 +29,7 @@ tests/         覆盖每个框架模块的 pytest 测试套件
 - `system_prompt()`：返回系统提示词字符串
 - `next_step_prompt()`：可选的每轮指导
 
-真正的 think→act 循环运行在 `ReActHandler`（或 `PipelineHandler`、`LegacyHandler`）内部。这使得 Agent 保持声明式，并且允许通过配置（`agents.yaml`）决定任何 Agent 使用哪种循环模式，而无需复杂的继承操作。
+真正的 think→act 循环运行在 `runtime/turn.py::run_turn()` 中。Agent 保持声明式：`src/agents/*/spec.py` 定义 `AgentSpec`，`src/agents/__init__.py` 的 `REGISTRY` 负责显式注册。
 
 ### 工具调用以原始 OpenAI 字典形式端到端流动
 

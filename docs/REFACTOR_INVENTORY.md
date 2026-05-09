@@ -39,7 +39,7 @@
 | `src/agents/adapters/file_clerk_adapter.py`(整文件 88 行) | FileClerkAdapter | 🔴 删整文件 |
 | `src/agents/adapters/__init__.py`(整文件) | 导出 FileClerkAdapter | 🔴 删整文件 |
 | `src/agents/adapters/`(整目录) | 适配器目录 | 🔴 删整目录 |
-| `config/agents.yaml:12-18` | `file_clerk:` 节 + `compatibility.legacy_agent_type_map` | 🟠 暂时移除 file_clerk(Phase 2 重写) + 删 compatibility 整段 |
+| `config/agents.yaml` | Agent YAML 配置 | ✅ 已删除,改用 `agents.REGISTRY` + `AgentSpec` |
 
 ### B.2 测试
 
@@ -280,7 +280,7 @@
 - [x] grep `file_clerk` / `FileClerk` — 完整
 - [x] grep `responseAll` / `useTimes` / `responseType` — 完整
 - [x] grep `EventStream` / `EventType` — 完整
-- [x] 验证 `config/agents.yaml` 当前内容 — 完整
+- [x] 删除 `config/agents.yaml` 配置分支 — 完整
 - [x] 验证 `services/agent_orchestration_service.py` 含 USE_LEGACY_RUNNER — 完整
 - [x] 列出 `registry/` `stream/` `runtime/` 目录结构 — 完整
 

@@ -69,21 +69,12 @@ async def chat_stream(
 
 `Printer` 发出终端和 Web 渲染器消费的稳定 SSE 信封：
 
-```json
-{
-  "responseType": "tool_result",
-  "response": "...",
-  "responseAll": "",
-  "useTimes": 0,
-  "reqId": "req-1",
-  "errorMsg": null,
-  "resultMap": {},
-  "conversation_id": "conv-1",
-  "finished": false
-}
+```text
+event: tool_result
+data: {"tool":"read_file","ok":true,"result":"...","request_id":"req-1","conversation_id":"conv-1"}
 ```
 
-当前的 `responseType` 值：
+当前的 `event:` 值：
 
 - 生命周期：`start`、`step`、`step_end`、`usage`
 - 模型输出：`thinking`、`text`
@@ -123,9 +114,9 @@ async def chat_stream(
 
 ## 注册表
 
-- `register_agent()` / `create_agent()` / `registered_agents()`
-- `register_handler()` / `create_handler()` / `registered_handlers()`
-- `register_tool()` / `create_tool()` / `registered_tools()`
+- Agent 使用 `agents.REGISTRY` 显式注册。
+- Loop 使用 `agent_core.runtime.turn.run_turn()`，不再注册 handler。
+- Tool 仍通过 `ToolCollection` 注入到 `AgentContext`。
 
 注册表的读写由 `RLock` 保护；`registered_*()` 返回副本。
 
@@ -134,7 +125,7 @@ async def chat_stream(
 `AgentOrchestrationService` 验证输入，在需要时创建 `AgentContext`，解析配置的 Agent 和 Handler，通过 `TurnRunner` 运行，并在 `context.extras` 中记录有用的元数据。
 
 ```python
-service = AgentOrchestrationService(config_path="config/agents.yaml")
+service = AgentOrchestrationService()
 context, stream = service.create_streaming_context(
     request_id="req-1",
     query="hello",

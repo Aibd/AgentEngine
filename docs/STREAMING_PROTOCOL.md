@@ -193,14 +193,9 @@ done
 
 v1 使用一个无名称的 SSE 消息，其中包含一个大的 JSON 信封：
 
-```json
-{
-  "responseType": "text",
-  "response": "...",
-  "responseAll": "",
-  "useTimes": 0,
-  "resultMap": null
-}
+```text
+event: text
+data: {"delta":"...","request_id":"req-1","conversation_id":"conv-1"}
 ```
 
 v2 将信封从实时协议中移除。消费者应依据 SSE 的 `event:` 名称进行分发，并读取紧凑的 `data` 对象。术语 `responseType`、`responseAll`、`useTimes`、`resultMap` 和 `errorMsg` 不再由 `Printer`、`SseSink`、Web 端点或 CLI 渲染器发出。

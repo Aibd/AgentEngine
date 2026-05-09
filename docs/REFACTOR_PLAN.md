@@ -87,7 +87,7 @@ REGISTRY: dict[str, AgentSpec] = {
 | `BaseAgent`(`src/agent_core/base/agent.py`) | — | 替换为 `AgentSpec` dataclass |
 | `tests/test_pipeline_legacy_handlers.py` | — | 删 |
 | `Printer.responseAll` / `useTimes` | — | 删字段 |
-| `compatibility.legacy_agent_type_map`(`config/agents.yaml`) | — | 删 |
+| `config/agents.yaml` | - | 已删除,配置收敛到 `AgentSpec` |
 | `USE_LEGACY_RUNNER` 环境变量 | — | 删 |
 | EventStream(独立类) | — | 合并入 `RuntimeEvent` 的 SSE sink |
 
@@ -124,12 +124,12 @@ REGISTRY: dict[str, AgentSpec] = {
 
 **改动:**
 1. 删除 `handlers/legacy.py` `handlers/pipeline.py` `handlers/base.py`
-2. 删除 `agents/adapters/file_clerk_adapter.py` 及其在 yaml/services 的引用
+2. 删除 `agents/adapters/file_clerk_adapter.py` 及其在 services 的引用
 3. 删除 `services/agent_orchestration_service.py` 中:
    - `USE_LEGACY_RUNNER` 分支
    - `legacy_agent_type_map` 路由逻辑
    - `legacy_factory` 注入路径
-4. 删除 `config/agents.yaml` 的 `compatibility:` 节
+4. 删除 `config/agents.yaml` 整体配置分支
 5. 删除 `tests/test_pipeline_legacy_handlers.py`
 6. `general_chat` / `deep_research` 暂时仍走 `ReActHandler`(下一阶段处理)
 

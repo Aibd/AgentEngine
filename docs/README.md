@@ -456,18 +456,9 @@ await printer.done()                 # → eventType=DONE, finished=True
 ```
 
 输出 dict 结构（与前端 SSE 契约一致）：
-```json
-{
-  "responseType": "text",
-  "response": "开始处理: 用户的问题",
-  "responseAll": "",
-  "useTimes": 0,
-  "reqId": "xxx",
-  "errorMsg": null,
-  "resultMap": null,
-  "conversation_id": "yyy",
-  "finished": false
-}
+```text
+event: text
+data: {"delta":"开始处理: 用户的问题","request_id":"xxx","conversation_id":"yyy"}
 ```
 
 ### persistence —— 持久化抽象

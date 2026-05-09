@@ -44,18 +44,9 @@ agents/
 
 `Printer` 发出传统的 SSE 信封格式：
 
-```json
-{
-  "responseType": "text",
-  "response": "...",
-  "responseAll": "",
-  "useTimes": 0,
-  "reqId": "req-1",
-  "errorMsg": null,
-  "resultMap": null,
-  "conversation_id": "conv-1",
-  "finished": false
-}
+```text
+event: text
+data: {"delta":"...","request_id":"req-1","conversation_id":"conv-1"}
 ```
 
 当前事件类型：

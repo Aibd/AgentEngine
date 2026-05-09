@@ -29,7 +29,7 @@
                                         ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  ⓪ services/   AgentOrchestrationService — 应用入口                      │
-│      读 agents.yaml → 找 Agent → 找 Handler → 交给 TurnRunner            │
+│      查 agents.REGISTRY → 创建 AgentRun → 交给 TurnRunner                │
 └─────────────────────────────────────────────────────────────────────────┘
                                         │
                                         ▼
@@ -168,7 +168,7 @@ SPEC = AgentSpec(
 REGISTRY["my_agent"] = SPEC
 ```
 
-`max_steps` 等参数仍可在 `agents.yaml` 里覆盖（Service 用 `dataclasses.replace()` 创建新冻结对象，不修改原始 SPEC）。
+`max_steps` 等参数现在直接在 `AgentSpec` 中声明；单次运行仍可通过 `agent_kwargs` 覆盖。
 
 ---
 
@@ -338,48 +338,24 @@ start ──▶ step ──▶ thinking ──▶ tool_call_start ──▶ tool
 
 ---
 
-## 8. 配置驱动:agents.yaml 的作用
+## 8. 显式 Agent 注册
 
-[config/agents.yaml](config/agents.yaml) 是「**运行期开关 + 默认参数**」:
-
-```yaml
-agents:
-  general_chat:
-    enabled: true          # ← 一行关闭这个 agent
-    handler: react         # ← 改成 pipeline 它就走另一种循环
-    default_model: default
-    max_steps: 3           # ← 不改代码就能调上限
-
-  deep_research:
-    enabled: true
-    handler: react
-    max_steps: 10
-
-  file_clerk:
-    enabled: true
-    handler: pipeline
-    legacy_adapter: true   # ← 标记是旧代码适配器
-
-compatibility:
-  legacy_agent_type_map:
-    "3": deep_research     # ← 老系统传"agentType=3"时,路由到 deep_research
-```
+`src/agents/__init__.py` 是 Agent 注册入口。默认参数直接写在各自的
+`src/agents/*/spec.py` 中，运行时通过 `agents.REGISTRY` 查找。
 
 **Service 启动时:**
 
 ```
-service = AgentOrchestrationService(config_path="config/agents.yaml")
+service = AgentOrchestrationService()
                           │
                           ▼
         ┌────── 调用 service.run(name) ──────┐
         │                                    │
-        │ ① is_enabled(name)?  否 → 报错      │
-        │ ② spec = AGENT_REGISTRY[name]      │
-        │ ③ 合并 config 里的 max_steps         │
+        │ ① spec = AGENT_REGISTRY[name]      │
+        │ ② 合并 agent_kwargs 里的 max_steps  │
         │   → replace(spec, max_steps=N)     │  ← frozen spec 安全
-        │ ④ agent = AgentRun(spec, context)  │
-        │ ⑤ handler = create_handler("react")│
-        │ ⑥ TurnRunner.run(agent, handler)   │
+        │ ③ agent = AgentRun(spec, context)  │
+        │ ④ TurnRunner.run(agent)            │
         └────────────────────────────────────┘
 ```
 
@@ -428,7 +404,7 @@ LLM_BASE_URL=https://api.deepseek.com/v1   # 可选,默认就是这个
 llm = create_llm_from_env(required=True)
 
 # 3) 起服务
-service = AgentOrchestrationService(config_path="config/agents.yaml")
+service = AgentOrchestrationService()
 
 # 4) 拿到一个流式 Context(reqId / convId / EventStream 都齐了)
 context, event_stream = service.create_streaming_context(
@@ -489,7 +465,6 @@ web/
 ├─ src/traceTransport.ts ← fetch + SSE 解析
 └─ src/friendlyErrors.ts ← 错误码 → 用户语(与 Python 镜像)
 
-config/agents.yaml      ← 开关 + 默认参数
 tests/                  ← 完整 pytest 套件(含 SSE 黄金兼容测试)
 docs/API.md             ← 公共契约文档
 docs/STREAMING_PROTOCOL.md ← SSE 协议规范(本文档的扩写版)
@@ -502,7 +477,7 @@ run_agent.py            ← 五分钟体验脚本
 
 | 决定 | 为什么这么做 |
 |---|---|
-| Loop 在 Handler 里,不在 Agent 里 | 让 Agent 保持声明式,循环策略可以通过 yaml 切换 |
+| Loop 在 runtime 里,不在 Agent 里 | 让 Agent 保持声明式,循环策略集中维护 |
 | Tool calls 走 OpenAI 原始 dict | 直接塞回 LLM,免转换、免漂移 |
 | Streaming 在 client 层就拼好 | Handler 永远只看到完整 tool_calls,代码简单 |
 | `Printer` 信封字段写死 | 前端契约稳定 ↔ 内部模型可演进 |
@@ -582,7 +557,7 @@ PYTHONIOENCODING=utf-8 uv run python scripts/chat_pretty.py deep_research "..." 
 
 ## 14. 你接下来可能想做什么
 
-- **加一个新 Agent**:复制 `general_chat`,改 system prompt 和 setup,在 yaml 里登记。
+- **加一个新 Agent**:复制 `general_chat`,改 system prompt 和 setup,在 `agents.REGISTRY` 里登记。
 - **加一个新工具**:继承 `Tool`,加 `@register_tool("xxx")`,在 Agent 的 setup 里 add。
 - **换 LLM 提供商**:实现 `LLMClient` 协议(`chat` + `chat_stream`),或调 `LLM_BASE_URL` 指向兼容 OpenAI 的端点。
 - **接你自己的前端**:订阅 `event_stream`,按 `responseType` 分发即可,字段已经稳定。

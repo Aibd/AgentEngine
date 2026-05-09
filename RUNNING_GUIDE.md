@@ -66,7 +66,7 @@ async def main():
     llm = create_llm_from_env(required=True)
     
     # 2. 创建服务
-    service = AgentOrchestrationService(config_path="config/agents.yaml")
+    service = AgentOrchestrationService()
     
     # 3. 创建上下文
     context, event_stream = service.create_streaming_context(
@@ -94,27 +94,7 @@ if __name__ == "__main__":
 
 ## 📋 可用代理
 
-查看 `config/agents.yaml` 了解可用代理：
-
-```yaml
-agents:
-  general_chat:
-    enabled: true
-    handler: react
-    default_model: default
-    max_steps: 3
-    
-  deep_research:
-    enabled: true
-    handler: react
-    default_model: deep_research
-    max_steps: 10
-    
-  file_clerk:
-    enabled: true
-    handler: pipeline
-    legacy_adapter: true
-```
+可用代理在 `src/agents/__init__.py` 的 `REGISTRY` 中显式列出；每个代理的默认参数在对应的 `src/agents/*/spec.py` 中声明。
 
 ## 🔧 配置选项
 
@@ -132,16 +112,7 @@ agents:
 
 ### 代理配置
 
-在 `config/agents.yaml` 中：
-
-```yaml
-agents:
-  my_agent:
-    enabled: true          # 是否启用
-    handler: react         # 处理器类型: react/pipeline/legacy
-    default_model: default # 默认模型
-    max_steps: 5           # 最大步骤数
-```
+新增代理时，创建 `src/agents/my_agent/spec.py`，导出 `SPEC = AgentSpec(...)`，再把它加入 `src/agents/__init__.py` 的 `REGISTRY`。
 
 ## 🎯 常见使用场景
 
@@ -240,7 +211,7 @@ from services.agent_orchestration_service import AgentOrchestrationService
 from agent_core.base.context import AgentContext
 
 app = FastAPI()
-service = AgentOrchestrationService(config_path="config/agents.yaml")
+service = AgentOrchestrationService()
 
 class ChatRequest(BaseModel):
     query: str
@@ -325,7 +296,7 @@ async def websocket_chat(websocket: WebSocket):
 1. **API文档**: `docs/API.md`
 2. **架构设计**: 查看项目README
 3. **测试示例**: `tests/` 目录
-4. **配置参考**: `config/agents.yaml`
+4. **代理注册**: `src/agents/__init__.py`
 
 ## 🎉 开始使用
 
