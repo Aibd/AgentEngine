@@ -35,8 +35,12 @@ class AgentRun:
         return self.spec.name
 
     @property
-    def max_steps(self) -> int:
-        return self.spec.max_steps
+    def max_turns(self) -> int | None:
+        return self.spec.effective_max_turns
+
+    @property
+    def max_steps(self) -> int | None:
+        return self.max_turns
 
     def system_prompt(self) -> str:
         return self.spec.system_prompt

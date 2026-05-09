@@ -90,10 +90,10 @@ async def run_turn(
         agent.state = AgentState.RUNNING
 
         logger.info(
-            "agent_run_start request_id=%s agent=%s max_steps=%d",
+            "agent_run_start request_id=%s agent=%s max_turns=%s",
             context.request_id,
             agent.name,
-            agent.max_steps,
+            agent.max_turns,
         )
 
         if context.persistence and context.conversation_id:
@@ -236,7 +236,11 @@ async def _loop(
     completion_tokens_total = 0
     loop_started_at = time.perf_counter()
 
-    for _ in range(agent.max_steps):
+    while True:
+        if agent.max_turns is not None and agent.current_step >= agent.max_turns:
+            context.extras["terminal_reason"] = "max_turns"
+            break
+
         agent.current_step += 1
         turn_started_at = time.perf_counter()
 

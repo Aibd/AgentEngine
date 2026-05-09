@@ -115,6 +115,7 @@ class TurnRunner:
         context.extras["turn_id"] = turn_id
         context.extras["runtime_events"] = events
         context.extras["run_state"] = state
+        context.extras.pop("terminal_reason", None)
         # Expose the emit function so tools that need to surface side-channel
         # events (TodoWriteTool's TodosUpdated, AskUserQuestionTool's
         # UserQuestionAsked) can publish them without re-wrapping the fanout.
@@ -251,12 +252,14 @@ class TurnRunner:
             )
             raise
 
-        state.mark_completed()
+        completion_reason = self._completion_reason(context)
+        state.mark_completed(completion_reason)
         await emit(
             RunCompleted(
                 run_id=run_id,
                 turn_id=turn_id,
                 result_summary=result[:200],
+                terminal_reason=completion_reason.value,
                 elapsed_seconds=time.perf_counter() - started_at,
             )
         )
@@ -321,3 +324,15 @@ class TurnRunner:
         if isinstance(error, QuotaExceededError):
             return TerminalReason.QUOTA_EXCEEDED
         return TerminalReason.RUNTIME_FAILED
+
+    @staticmethod
+    def _completion_reason(context: AgentContext) -> TerminalReason:
+        raw = context.extras.get("terminal_reason")
+        if isinstance(raw, TerminalReason):
+            return raw
+        if isinstance(raw, str):
+            try:
+                return TerminalReason(raw)
+            except ValueError:
+                return TerminalReason.NORMAL
+        return TerminalReason.NORMAL

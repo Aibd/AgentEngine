@@ -52,6 +52,21 @@ async def test_turn_runner_happy_path_records_state_and_events() -> None:
     assert context.extras["turn_id"].startswith("turn_")
     assert context.extras["runtime_events"] == events
     assert context.extras["run_state"].status == RunStatus.COMPLETED
+    assert context.extras["run_state"].terminal_reason == TerminalReason.NORMAL
+
+
+async def test_turn_runner_records_max_turns_completion_reason() -> None:
+    async def _max_turns_turn(agent: AgentRun, context: AgentContext, query: str) -> str:
+        context.extras["terminal_reason"] = "max_turns"
+        return "partial"
+
+    events, context, result = await _run_with(_max_turns_turn)
+
+    assert result == "partial"
+    assert isinstance(events[-1], RunCompleted)
+    assert events[-1].terminal_reason == "max_turns"
+    assert context.extras["run_state"].status == RunStatus.COMPLETED
+    assert context.extras["run_state"].terminal_reason == TerminalReason.MAX_TURNS
 
 
 @pytest.mark.parametrize(

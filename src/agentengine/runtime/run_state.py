@@ -22,6 +22,7 @@ class TerminalReason(str, Enum):
     TOOL_FAILED = "tool_failed"
     MODEL_FAILED = "model_failed"
     CONTEXT_EXCEEDED = "context_exceeded"
+    MAX_TURNS = "max_turns"
     RUNTIME_FAILED = "runtime_failed"
     QUOTA_EXCEEDED = "quota_exceeded"
     CANCELLED = "cancelled"
@@ -44,9 +45,9 @@ class RunState:
         self.ended_at = None
         self.terminal_reason = None
 
-    def mark_completed(self) -> None:
+    def mark_completed(self, reason: TerminalReason = TerminalReason.NORMAL) -> None:
         self.status = RunStatus.COMPLETED
-        self.terminal_reason = TerminalReason.NORMAL
+        self.terminal_reason = reason
         self.ended_at = _utc_now()
 
     def mark_failed(self, reason: TerminalReason) -> None:

@@ -35,6 +35,5 @@ SPEC = AgentSpec(
     description="Deep research agent with model-native planning.",
     system_prompt=_SYSTEM_PROMPT,
     next_step_prompt=_NEXT_STEP_PROMPT,
-    max_steps=10,
     setup=_setup,
 )

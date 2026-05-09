@@ -151,6 +151,7 @@ class ToolCallFailed(RuntimeEvent):
 @dataclass(frozen=True, slots=True)
 class RunCompleted(RuntimeEvent):
     result_summary: str = ""
+    terminal_reason: str = "normal"
     elapsed_seconds: float = 0.0
 
     event_type: ClassVar[str] = "run_completed"

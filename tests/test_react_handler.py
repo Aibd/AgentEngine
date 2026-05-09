@@ -52,6 +52,11 @@ def _agent(spec: AgentSpec, context: AgentContext, *, max_steps: int | None = No
     return AgentRun(spec=spec, context=context)
 
 
+def _agent_with_max_turns(spec: AgentSpec, context: AgentContext, *, max_turns: int | None) -> AgentRun:
+    spec = replace(spec, max_turns=max_turns, max_steps=None)
+    return AgentRun(spec=spec, context=context)
+
+
 class _SlowTool(Tool):
     name = "slow_tool"
     description = "Sleeps longer than the test timeout"
@@ -235,8 +240,8 @@ class TestRunTurn:
         tool_msgs = [m for m in agent.memory.messages if m.role == Role.TOOL]
         assert tool_msgs and "Tool timeout after" in tool_msgs[0].content
 
-    async def test_max_steps_terminates_loop(self):
-        # LLM keeps requesting tool calls; max_steps caps the loop.
+    async def test_max_turns_terminates_loop(self):
+        # LLM keeps requesting tool calls; max_turns caps the loop.
         looping = LLMResponse(
             content="",
             finish_reason="tool_calls",
@@ -250,12 +255,35 @@ class TestRunTurn:
         )
         llm = MockLLMClient([looping] * 10)
         context, _ = _make_context(llm, with_tools=True)
-        agent = _agent(RESEARCHY_SPEC, context, max_steps=2)
+        agent = _agent_with_max_turns(RESEARCHY_SPEC, context, max_turns=2)
 
         await run_turn(agent, context, "loop forever")
 
         assert agent.current_step == 2
         assert len(llm.calls) == 2
+        assert context.extras["terminal_reason"] == "max_turns"
+
+    async def test_default_has_no_turn_limit(self):
+        looping = LLMResponse(
+            content="",
+            finish_reason="tool_calls",
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "echo", "arguments": '{"text": "loop"}'},
+                }
+            ],
+        )
+        llm = MockLLMClient([looping] * 12 + [LLMResponse(content="done", finish_reason="stop")])
+        context, _ = _make_context(llm, with_tools=True)
+        agent = _agent_with_max_turns(RESEARCHY_SPEC, context, max_turns=None)
+
+        result = await run_turn(agent, context, "loop more than old default")
+
+        assert result == "done"
+        assert agent.current_step == 13
+        assert len(llm.calls) == 13
 
     async def test_setup_hook_runs_before_loop(self):
         llm = MockLLMClient([LLMResponse(content="ok", finish_reason="stop")])
@@ -274,5 +302,13 @@ class TestRunTurn:
             AgentSpec(name="bad", max_steps=0)
         except ValueError as exc:
             assert "max_steps" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+
+    async def test_invalid_max_turns_raises(self):
+        try:
+            AgentSpec(name="bad", max_turns=0)
+        except ValueError as exc:
+            assert "max_turns" in str(exc)
         else:
             raise AssertionError("expected ValueError")

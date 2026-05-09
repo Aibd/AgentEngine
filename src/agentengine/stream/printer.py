@@ -137,7 +137,7 @@ class Printer:
                 EventType.DONE,
                 event,
                 {
-                    "reason": "completed",
+                    "reason": event.terminal_reason,
                     "result": event.result_summary,
                     "elapsed_ms": _seconds_to_ms(event.elapsed_seconds),
                 },

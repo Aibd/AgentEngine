@@ -127,9 +127,12 @@ class AgentOrchestrationService:
         spec = AGENT_REGISTRY.get(agent_name)
         if spec is None:
             raise KeyError(f"Agent not registered: {agent_name}")
-        max_steps = (agent_kwargs or {}).get("max_steps")
-        if max_steps is not None and max_steps != spec.max_steps:
-            return replace(spec, max_steps=int(max_steps))
+        kwargs = agent_kwargs or {}
+        max_turns = kwargs.get("max_turns")
+        if max_turns is None:
+            max_turns = kwargs.get("max_steps")
+        if max_turns is not None and max_turns != spec.effective_max_turns:
+            return replace(spec, max_turns=int(max_turns), max_steps=None)
         return spec
 
     def _record_agent_finish(

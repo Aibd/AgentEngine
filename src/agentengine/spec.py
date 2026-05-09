@@ -33,7 +33,8 @@ class AgentSpec:
     system_prompt: str = ""
     next_step_prompt: str = ""
     description: str = ""
-    max_steps: int = 10
+    max_turns: int | None = None
+    max_steps: int | None = None
     max_messages: int = 0
     setup: SetupHook | None = None
     teardown: SetupHook | None = None
@@ -42,7 +43,20 @@ class AgentSpec:
     def __post_init__(self) -> None:
         if not self.name or not self.name.strip():
             raise ValueError("AgentSpec.name must not be empty")
-        if self.max_steps < 1:
+        if self.max_turns is not None and self.max_turns < 1:
+            raise ValueError("AgentSpec.max_turns must be at least 1")
+        if self.max_steps is not None and self.max_steps < 1:
             raise ValueError("AgentSpec.max_steps must be at least 1")
+        if (
+            self.max_turns is not None
+            and self.max_steps is not None
+            and self.max_turns != self.max_steps
+        ):
+            raise ValueError("AgentSpec.max_turns and max_steps must match when both are set")
         if self.max_messages < 0:
             raise ValueError("AgentSpec.max_messages must be at least 0")
+
+    @property
+    def effective_max_turns(self) -> int | None:
+        """Runtime turn limit, with deprecated ``max_steps`` as a compat alias."""
+        return self.max_turns if self.max_turns is not None else self.max_steps
