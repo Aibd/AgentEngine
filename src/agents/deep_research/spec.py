@@ -12,13 +12,11 @@ _SYSTEM_PROMPT = (
     "可用工具：\n"
     "- `read_file`：读取工作区下的文本文件（源码、配置、文档等）。\n"
     "- `Skill`：调用预定义的研究流程，先 `Skill` 看是否有匹配技能再决定下一步。\n\n"
-    "注意：\n"
-    "- 每次只处理一个子任务，完成后再进入下一个。\n"
+    "推进原则：\n"
+    "- 每轮只处理一个子任务，完成后再进入下一个；所有子任务完成后输出最终报告。\n"
     "- 如果某步结果不理想，可以调整策略重新尝试。\n"
     "- 最终报告要有明确的结论和依据。"
 )
-
-_NEXT_STEP_PROMPT = "继续执行下一个子任务。如果所有子任务已完成，输出最终报告。"
 
 
 async def _setup(context: AgentContext) -> None:
@@ -34,6 +32,5 @@ SPEC = AgentSpec(
     name="deep_research",
     description="Deep research agent with model-native planning.",
     system_prompt=_SYSTEM_PROMPT,
-    next_step_prompt=_NEXT_STEP_PROMPT,
     setup=_setup,
 )
