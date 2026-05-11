@@ -30,7 +30,7 @@ from agentengine.enterprise import (
 from agentengine.errors import error_to_dict
 from agentengine.persistence import SqlitePersistence
 from agentengine.skills.loader import SkillLoader
-from agentengine.tools.builtin import ReadFileTool, SkillTool
+from agentengine.tools.builtin import build_default_tools, ReadFileTool, SkillTool
 from services.agent_orchestration_service import AgentOrchestrationService
 
 
@@ -103,10 +103,8 @@ async def capabilities() -> dict[str, Any]:
     """Return the agents, tools, and skills that the web UI can surface."""
     skill_loader = SkillLoader(cwd=REPO_ROOT)
     skills = skill_loader.discover()
-    tools = [
-        ReadFileTool(workspace_root=REPO_ROOT),
-        SkillTool(skill_loader),
-    ]
+    tools = build_default_tools(workspace_root=REPO_ROOT)
+    tools.append(SkillTool(skill_loader))
     return {
         "agents": [
             {"name": name, "description": spec.description}
