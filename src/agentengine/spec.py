@@ -31,7 +31,6 @@ class AgentSpec:
 
     name: str
     system_prompt: str = ""
-    next_step_prompt: str = ""
     description: str = ""
     max_turns: int | None = None
     max_steps: int | None = None

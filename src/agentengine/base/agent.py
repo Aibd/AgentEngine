@@ -45,10 +45,13 @@ class AgentRun:
     def system_prompt(self) -> str:
         return self.spec.system_prompt
 
-    def next_step_prompt(self) -> str:
-        return self.spec.next_step_prompt
-
     async def setup(self) -> None:
+        # System prompt is injected before the user prompt hook fires so
+        # downstream handlers (and memory hydration from persistence) see a
+        # consistent ordering. Memory.load_from_db preserves leading system
+        # messages, so we won't duplicate it on resumed conversations.
+        if self.spec.system_prompt:
+            self.memory.add_system_message(self.spec.system_prompt)
         if self.spec.setup is not None:
             await self.spec.setup(self.context)
 

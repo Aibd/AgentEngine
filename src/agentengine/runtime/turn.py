@@ -207,10 +207,6 @@ async def _loop(
         or context.request_id
     )
 
-    sys_prompt = agent.system_prompt()
-    if sys_prompt:
-        agent.memory.add_system_message(sys_prompt)
-
     # UserPromptSubmit fires right before the user's query enters memory,
     # giving handlers a chance to vet/sanitize the prompt or abort the run
     # before any model invocation.
@@ -229,7 +225,6 @@ async def _loop(
 
     agent.memory.add_user_message(query)
 
-    next_step = agent.next_step_prompt()
     final_answer = ""
 
     prompt_tokens_total = 0
@@ -248,7 +243,7 @@ async def _loop(
             TurnStarted(run_id=run_id, turn_id=turn_id, turn=agent.current_step)
         )
 
-        messages = _build_messages(agent, next_step)
+        messages = agent.memory.snapshot()
         tools = (
             context.tool_collection.to_openai_tools()
             if context.tool_collection and len(context.tool_collection.tool_map) > 0
@@ -423,20 +418,6 @@ def _accumulate_tool_calls(
                 slot["function"]["name"] = func["name"]
             if func.get("arguments"):
                 slot["function"]["arguments"] += func["arguments"]
-
-
-def _build_messages(agent: AgentRun, next_step: str) -> list[Message]:
-    if not next_step:
-        return agent.memory.snapshot()
-
-    msgs = agent.memory.snapshot()
-    insert_at = len(msgs)
-    for i in range(len(msgs) - 1, -1, -1):
-        if msgs[i].role.value == "user":
-            insert_at = i
-            break
-    msgs.insert(insert_at, Message.system(next_step))
-    return msgs
 
 
 async def _execute_tool_calls(
