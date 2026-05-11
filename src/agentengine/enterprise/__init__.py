@@ -24,7 +24,7 @@ Usage::
         retry_middleware,
         approval_middleware,
     ])
-    result = await chain.run(spec, context, query, inner_turn_fn)
+    result = await chain.run(config, context, query, inner_turn_fn)
 """
 
 from agentengine.enterprise.approval import (

@@ -74,13 +74,13 @@ def otel_tracing_middleware() -> MiddlewareFn:
         trace = _get_trace_module()
         status_module = _get_status_module()
 
-        span_name = f"agent_run.{ctx.spec.name}"
+        span_name = f"agent_run.{ctx.config.name}"
         agent_span = tracer.start_as_current_span(span_name)
         span = agent_span.__enter__()
         _current_span.set(span)
 
-        span.set_attribute("agentengine.agent_name", ctx.spec.name)
-        max_turns = ctx.spec.effective_max_turns
+        span.set_attribute("agentengine.agent_name", ctx.config.name)
+        max_turns = ctx.config.effective_max_turns
         span.set_attribute(
             "agentengine.max_turns",
             max_turns if max_turns is not None else "unbounded",

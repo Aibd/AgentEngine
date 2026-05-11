@@ -14,8 +14,8 @@ Protocol:
         ) -> str:
             ...
 
-``MiddlewareContext`` bundles all the primitives a middleware might need —
-spec, context, query, and the original turn function reference — so layers
+``MiddlewareContext`` bundles all the primitives a middleware might need -
+run config, context, query, and the original turn function reference - so layers
 don't need to know about each other.
 
 Usage::
@@ -27,8 +27,8 @@ Usage::
         TracingMiddleware(...),
     ])
     result = await chain.run(
-        spec, context, query,
-        inner=lambda spec, ctx, q: run_turn(...),
+        config, context, query,
+        inner=lambda config, ctx, q: run_turn(...),
     )
 """
 
@@ -40,12 +40,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentengine.base.context import AgentContext
-from agentengine.spec import AgentSpec
+from agentengine.run_config import RunConfig
 
 logger = logging.getLogger(__name__)
 
 InnerTurnFn = Callable[
-    [AgentSpec, AgentContext, str], Awaitable[str],
+    [RunConfig, AgentContext, str], Awaitable[str],
 ]
 
 MiddlewareFn = Callable[
@@ -58,11 +58,11 @@ MiddlewareFn = Callable[
 class MiddlewareContext:
     """Bundled primitives for one middleware invocation.
 
-    Every middleware receives this context so it can inspect the agent spec,
+    Every middleware receives this context so it can inspect the run config,
     the run context, or inject extra data into ``extras``.
     """
 
-    spec: AgentSpec
+    config: RunConfig
     run_context: AgentContext
     query: str
     extras: dict[str, Any]
@@ -79,7 +79,7 @@ class MiddlewareChain:
 
     async def run(
         self,
-        spec: AgentSpec,
+        config: RunConfig,
         context: AgentContext,
         query: str,
         *,
@@ -88,15 +88,15 @@ class MiddlewareChain:
         """Execute the full chain with an inner-most turn function."""
 
         async def _inner(mw_ctx: MiddlewareContext) -> str:
-            return await inner(spec, mw_ctx.run_context, query)
+            return await inner(config, mw_ctx.run_context, query)
 
-        return await _compose(self._layers, _inner, spec, context, query)
+        return await _compose(self._layers, _inner, config, context, query)
 
 
 async def _compose(
     layers: list[MiddlewareFn],
     inner: Callable[[MiddlewareContext], Awaitable[str]],
-    spec: AgentSpec,
+    config: RunConfig,
     context: AgentContext,
     query: str,
 ) -> str:
@@ -111,7 +111,7 @@ async def _compose(
         return await layers[index](mw_ctx, lambda ctx: _dispatch(index + 1, ctx))
 
     mw_ctx = MiddlewareContext(
-        spec=spec,
+        config=config,
         run_context=context,
         query=query,
         extras=context.extras,

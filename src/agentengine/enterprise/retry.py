@@ -4,7 +4,7 @@ Wraps the turn function with retry logic for transient LLM failures:
 502/503/429 rate limits, timeouts, connection errors. Non-retryable errors
 (context window exceeded, tool failures) propagate immediately.
 
-Configuration lives on ``AgentSpec.extras`` or can be passed inline.
+Configuration lives on ``RunConfig.extras`` or can be passed inline.
 
 Usage::
 
