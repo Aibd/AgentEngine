@@ -32,7 +32,7 @@ from agentengine.runtime.file_access_tracker import TurnFileAccessTracker
 from agentengine.runtime.run_state import RunState, TerminalReason
 from agentengine.runtime.sinks import RuntimeEventFanout
 from agentengine.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS, run_turn
-from agentengine.spec import AgentSpec
+from agentengine.run_config import RunConfig
 
 EventCallback = Callable[[RuntimeEvent], Awaitable[None] | None]
 TurnFn = Callable[[AgentRun, AgentContext, str], Awaitable[str]]
@@ -178,7 +178,7 @@ class TurnRunner:
         try:
             if self.middleware is not None:
                 async def _inner(
-                    spec: AgentSpec,
+                    config: RunConfig,
                     ctx: AgentContext,
                     q: str,
                 ) -> str:
@@ -192,7 +192,7 @@ class TurnRunner:
                         return await turn_fn(agent, ctx, q)
 
                 result = await self.middleware.run(
-                    agent.spec, context, query, inner=_inner,
+                    agent.config, context, query, inner=_inner,
                 )
             elif turn_fn is None:
                 result = await run_turn(

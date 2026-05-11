@@ -9,7 +9,7 @@ The SSE bridge (`Printer.from_runtime_event`) and any other sinks subscribe
 to that channel - `run_turn()` itself never touches `context.printer`.
 
 Mirrors the codex/claude-code-src pattern where the loop is a single function
-parameterised by data (AgentSpec) instead of a hierarchy of handler classes.
+parameterised by runtime data instead of a hierarchy of handler classes.
 """
 
 from __future__ import annotations

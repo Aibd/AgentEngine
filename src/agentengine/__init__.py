@@ -1,6 +1,6 @@
 from agentengine.base.agent import AgentRun
 from agentengine.base.context import AgentContext
 from agentengine.base.state import AgentState
-from agentengine.spec import AgentSpec
+from agentengine.run_config import RunConfig
 
-__all__ = ["AgentContext", "AgentRun", "AgentSpec", "AgentState"]
+__all__ = ["AgentContext", "AgentRun", "AgentState", "RunConfig"]
