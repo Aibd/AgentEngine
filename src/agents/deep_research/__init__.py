@@ -1,3 +1,3 @@
-from agents.deep_research.spec import SPEC
+from agents.deep_research.preset import PRESET
 
-__all__ = ["SPEC"]
+__all__ = ["PRESET"]

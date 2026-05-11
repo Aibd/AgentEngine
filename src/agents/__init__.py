@@ -1,17 +1,12 @@
-"""Built-in agent registry.
+"""Application presets used by the demo CLI and web API."""
 
-Each `AgentSpec` is declared in its own module's `spec.py` and registered
-explicitly here. No decorators, no import side effects beyond the imports
-on this line — `agents.REGISTRY[name]` is the single source of truth.
-"""
+from agents.deep_research.preset import PRESET as DEEP_RESEARCH
+from agents.general_chat.preset import PRESET as GENERAL_CHAT
+from agents.preset import AgentPreset
 
-from agentengine.spec import AgentSpec
-from agents.deep_research.spec import SPEC as DEEP_RESEARCH
-from agents.general_chat.spec import SPEC as GENERAL_CHAT
-
-REGISTRY: dict[str, AgentSpec] = {
+REGISTRY: dict[str, AgentPreset] = {
     GENERAL_CHAT.name: GENERAL_CHAT,
     DEEP_RESEARCH.name: DEEP_RESEARCH,
 }
 
-__all__ = ["DEEP_RESEARCH", "GENERAL_CHAT", "REGISTRY"]
+__all__ = ["AgentPreset", "DEEP_RESEARCH", "GENERAL_CHAT", "REGISTRY"]
