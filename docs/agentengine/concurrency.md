@@ -72,15 +72,15 @@ manager = InMemoryConversationLockManager()
 多进程/多机部署时，需要对接分布式锁：
 
 ```python
-class RedisLockManager(ConversationLockManager):
-    async def acquire(self, conversation_id: str):
-        lock = self.redis.lock(f"agent:conv:{conversation_id}")
-        await lock.acquire()
-        try:
-            yield
-        finally:
-            await lock.release()
+from agentengine import AgentEngine, RedisConversationLockManager
+
+engine = AgentEngine(
+    presets=presets,
+    lock_manager=RedisConversationLockManager(redis_client),
+)
 ```
+
+`RedisConversationLockManager` 使用 `SET NX PX` 获取锁，并用 compare-and-delete 脚本释放锁。它不直接依赖 `redis` 包，业务系统传入兼容的 async Redis client 即可。
 
 ---
 

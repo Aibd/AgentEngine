@@ -101,7 +101,7 @@ PYTHONIOENCODING=utf-8 uv run python scripts/chat_pretty.py deep_research "分�
 ### 4.1 启动后端
 
 ```bash
-uv run --env-file .env uvicorn --app-dir src services.web_api:app --host 127.0.0.1 --port 8000
+uv run --env-file .env uvicorn examples.reference_app.services.web_api:app --host 127.0.0.1 --port 8000
 ```
 
 ### 4.2 启动前端
@@ -232,14 +232,14 @@ async def _setup(context: AgentContext) -> None:
 ```python
 import asyncio
 from agentengine.llm.factory import create_llm_from_env
-from services.agent_orchestration_service import AgentOrchestrationService
+from agentengine import AgentContext, AgentEngine, AgentPreset
 
 async def main():
     # 1. 创建 LLM
     llm = create_llm_from_env(required=True)
 
     # 2. 创建服务
-    service = AgentOrchestrationService()
+    service = AgentEngine(presets={"general_chat": AgentPreset(name="general_chat")})
 
     # 3. 创建流式上下文
     context, event_stream = service.create_streaming_context(

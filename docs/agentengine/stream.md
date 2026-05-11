@@ -282,9 +282,9 @@ eventSource.addEventListener('error', (e) => {
 ### Python（异步迭代）
 
 ```python
-from services.agent_orchestration_service import AgentOrchestrationService
+from agentengine import AgentEngine
 
-service = AgentOrchestrationService()
+service = AgentEngine(presets=presets, llm_factory=make_llm)
 context, event_stream = service.create_streaming_context(
     request_id="r1", query="hello", conversation_id="c1"
 )

@@ -118,7 +118,7 @@ class SkillTool(Tool):
     description = "Execute a named skill. Call this FIRST before doing work a skill covers."
 ```
 
-每个 `AgentContext` 自动挂载 `SkillTool`，所以所有 Agent 默认都能调用 Skill。
+`SkillTool` 需要显式挂载到 `AgentContext.tool_collection`。核心 SDK 不会默认让所有 Agent 调用 Skill。
 
 调用示例（LLM 发起）：
 

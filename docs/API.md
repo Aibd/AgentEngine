@@ -1,135 +1,120 @@
 # AgentEngine API
 
-本文档描述了 Agent、工具、LLM 客户端、运行时事件和公共流式信封的稳定契约。
+本文是核心契约速览。更完整的集成说明见 [../INTEGRATION.md](../INTEGRATION.md)，稳定性边界见 [PUBLIC_API.md](PUBLIC_API.md)。
 
-## AgentSpec / AgentRun
+## AgentEngine
 
-`BaseAgent` 是一个运行容器。循环逻辑位于 Handler 中。
+`AgentEngine` 是业务系统嵌入 AgentEngine 的正式 SDK 入口：
 
-- `setup() -> None`：注册工具、初始化记忆或设置上下文额外数据。
-- `teardown() -> None`：释放每次运行的资源。
-- `system_prompt() -> str`：返回系统提示词。
-- `next_step_prompt() -> str`：可选的指导，在每个 ReAct 轮次中插入到最后一条用户消息之前。
-- `pipeline_steps() -> list[PipelineStep]`：`PipelineHandler` 的固定工作流步骤。
+```python
+from agentengine import AgentContext, AgentEngine, AgentPreset
 
-Handler 拥有的状态值包括 `IDLE`、`RUNNING`、`FINISHED`、`ERROR` 和 `CANCELLED`。
+engine = AgentEngine(
+    presets={"chat": AgentPreset(name="chat", instructions="Answer briefly.")}
+)
+
+context = AgentContext(request_id="req-1", query="hello", llm=llm)
+result = await engine.run(agent_name="chat", query="hello", context=context)
+```
+
+核心 SDK 不会自动读取环境变量，也不会自动注册业务 Agent。调用方需要显式传入 `presets`、`config_resolver`、`context.llm` 或 `llm_factory`。
+
+## AgentPreset / RunConfig
+
+`AgentPreset` 是业务友好的 Agent 声明，最终会编译成 `RunConfig`：
+
+```python
+AgentPreset(
+    name="support",
+    instructions="You are a concise support assistant.",
+    max_turns=4,
+)
+```
+
+`RunConfig` 是运行时真正使用的不可变配置，包含初始消息、轮数上限、setup/teardown hooks 和 extras。
 
 ## AgentContext
 
-`AgentContext` 携带一次运行的依赖项：
+`AgentContext` 是宿主业务系统传入引擎的上下文：
 
-- `request_id: str`
-- `query: str`
-- `llm: LLMClient | None`
-- `printer: Printer | None`
-- `tool_collection: ToolCollection`
-- `session_id: str`
-- `conversation_id: str`
-- `user: Any`
-- `db: Any`
-- `persistence: PersistencePort | None`
-- `extras: dict[str, Any]`
+- `request_id`
+- `query`
+- `llm`
+- `tool_collection`
+- `session_id`
+- `conversation_id`
+- `user`
+- `db`
+- `persistence`
+- `extras`
 
-除非已存在名为 `Skill` 的工具，否则 `AgentContext` 会自动注册 `SkillTool`。
+`AgentContext` 不会自动注册 `SkillTool`。需要 Skill 能力时，由 preset setup hook 或调用方显式加入 `tool_collection`。
 
 ## LLMClient
 
 ```python
 async def chat(
-    messages: list[Message],
+    messages,
     *,
-    tools: list[dict[str, Any]] | None = None,
-    stream: bool = False,
-    **kwargs: Any,
+    tools=None,
+    stream=False,
+    **kwargs,
 ) -> LLMResponse: ...
 
 async def chat_stream(
-    messages: list[Message],
+    messages,
     *,
-    tools: list[dict[str, Any]] | None = None,
-    **kwargs: Any,
+    tools=None,
+    **kwargs,
 ) -> AsyncIterator[LLMChunk]: ...
 ```
 
-`LLMResponse` 字段：`content`、`reasoning_content`、`tool_calls`、`finish_reason`、`usage`、`raw`。
+`LLMResponse` 和 `LLMChunk` 支持 `content`、`reasoning_content`、`tool_calls`、`finish_reason`、`usage` 和 `raw`。
 
-`LLMChunk` 字段：`content`、`reasoning_content`、`finish_reason`、`usage`、`raw`。
+## Tool
 
-## 记忆消息
-
-`Message.tool_calls` 存储原始 OpenAI 兼容的工具调用字典。因此助手消息可以写入记忆，并在后续工具轮次中原样发回给 LLM。
-
-`Message.reasoning_content` 保留提供商特定的推理增量，用于后续调用和公共 `thinking` 事件。
-
-## 公共流式信封
-
-`Printer` 发出终端和 Web 渲染器消费的稳定 SSE 信封：
-
-```text
-event: tool_result
-data: {"tool":"read_file","ok":true,"result":"...","request_id":"req-1","conversation_id":"conv-1"}
-```
-
-当前的 `event:` 值：
-
-- 生命周期：`start`、`step`、`step_end`、`usage`
-- 模型输出：`thinking`、`text`
-- 工具生命周期：`tool_call_start`、`tool_result`
-- 兼容性：`task`、`tool_thought`、`search_result`、`final_result`
-- 终止：`result`、`error`、`done`
-
-终止事件设置 `finished=True`：`result`、`error`、`done` 和 `final_result`。
-
-## 运行时事件
-
-运行时事件是语义诊断信息，不是公共协议。它们位于 `agentengine.runtime.events` 中，可通过 `to_dict()` 序列化。
-
-- 运行生命周期：`RunStarted`、`RunCompleted`、`RunFailed`、`RunCancelled`
-- 轮次生命周期：`TurnStarted`、`TurnEnded`、`UsageReport`
-- 模型增量：`ReasoningDelta`、`TextDelta`
-- 工具生命周期：`ToolCallStarted`、`ToolCallCompleted`、`ToolCallFailed`
-
-`TurnRunner` 记录运行生命周期事件。`ToolExecutor` 记录工具事件。`Printer.from_runtime_event()` 可以在需要时将事件桥接到公共 SSE 信封。
-
-## 工具
-
-`Tool` 是单次调用的基础接口。`StreamingTool` 可以在运行时发出中间 `ToolStreamEvent` 值。
-
-工具执行集中在 `ToolExecutor` 中，它处理：
-
-- 超时强制执行
-- 破坏性工具警告
-- 结果截断
-- 运行时 `ToolCallStarted`、`ToolCallCompleted` 和 `ToolCallFailed` 事件
-- 将流式工具事件转发到 `Printer`
-
-内置工具：
-
-- `ReadFileTool`
-- `SkillTool`
-
-## 注册表
-
-- Agent 使用 `agents.REGISTRY` 显式注册。
-- Loop 使用 `agentengine.runtime.turn.run_turn()`，不再注册 handler。
-- Tool 仍通过 `ToolCollection` 注入到 `AgentContext`。
-
-注册表的读写由 `RLock` 保护；`registered_*()` 返回副本。
-
-## OrchestrationService
-
-`AgentOrchestrationService` 验证输入，在需要时创建 `AgentContext`，解析配置的 Agent 和 Handler，通过 `TurnRunner` 运行，并在 `context.extras` 中记录有用的元数据。
+工具通过 `ToolCollection` 显式传入：
 
 ```python
-service = AgentOrchestrationService()
-context, stream = service.create_streaming_context(
-    request_id="req-1",
-    query="hello",
-    conversation_id="conv-1",
-)
-result = await service.run(
-    agent_name="general_chat",
-    query="hello",
+from agentengine import Tool, ToolCollection
+
+class SearchTool(Tool):
+    name = "search"
+    description = "Search internal docs."
+    schema = {"type": "object", "properties": {"query": {"type": "string"}}}
+
+    async def run(self, **kwargs):
+        return "result"
+
+context.tool_collection = ToolCollection([SearchTool()])
+```
+
+## PersistencePort
+
+业务系统可以实现 `PersistencePort` 接自己的 MySQL、Postgres、Redis 或领域存储。只要 `conversation_id` 非空，引擎会在 run 前加载消息，结束后保存消息。
+
+## ConversationLockManager
+
+默认 `InMemoryConversationLockManager` 只适合单进程。多副本部署应注入 `RedisConversationLockManager` 或业务自己的分布式锁实现。
+
+## RuntimeEvent
+
+`RuntimeEvent` 是引擎原生事件，SSE 只是参考适配。业务系统可以用 `on_event` 订阅：
+
+```python
+async def on_event(event):
+    await websocket.send_json(event.to_dict())
+
+await engine.run(
+    agent_name="support",
+    query=query,
     context=context,
+    on_event=on_event,
 )
 ```
+
+稳定事件包括 `RunStarted`、`TextDelta`、`ToolCallStarted`、`ToolCallCompleted`、`UsageReport`、`RunCompleted`、`RunFailed` 等。
+
+## Reference App
+
+`examples/reference_app/services/agent_orchestration_service.py` 是参考应用兼容包装，不是核心 SDK。它保留了示例 preset registry 和 env LLM factory，方便本仓库 CLI/Web 测试使用。

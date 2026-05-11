@@ -155,15 +155,12 @@ class AgentContext:
     extras: dict[str, Any] = field(default_factory=dict)
 ```
 
-### 自动注册 SkillTool
+### 显式注册 SkillTool
 
-`__post_init__` 会自动检查 tool_collection 是否已有 "Skill" 工具，如果没有，就创建一个 `SkillTool` 加进去。这保证了**每个 Agent 默认都有 Skill 能力**。
+`AgentContext` 不会自动挂载 `SkillTool`。如果业务系统需要 Skill 能力，应在创建 context 时显式传入，或在 `AgentPreset.setup` hook 中注册：
 
 ```python
-def __post_init__(self) -> None:
-    if not any(t.name == "Skill" for t in self.tool_collection.tool_map.values()):
-        loader = self.extras.get("skill_loader") or SkillLoader()
-        self.tool_collection.add(SkillTool(loader))
+context.tool_collection.add(SkillTool(SkillLoader()))
 ```
 
 ### extras 的用途

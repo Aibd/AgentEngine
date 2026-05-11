@@ -70,10 +70,10 @@ class PersistencePort(Protocol):
 ## 注入方式
 
 ```python
-from services.agent_orchestration_service import AgentOrchestrationService
+from agentengine import AgentEngine
 
 # 方式 1：注入 Service
-service = AgentOrchestrationService(persistence=my_persistence_impl)
+service = AgentEngine(presets=presets, persistence=my_persistence_impl)
 
 # 方式 2：注入 Context
 context.persistence = my_persistence_impl

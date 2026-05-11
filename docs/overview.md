@@ -117,7 +117,7 @@ PYTHONIOENCODING=utf-8 uv run python scripts/chat_pretty.py deep_research "..." 
 ### Web — React + FastAPI
 
 ```bash
-后端:  uv run --env-file .env uvicorn --app-dir src services.web_api:app --host 127.0.0.1 --port 8000
+后端:  uv run --env-file .env uvicorn examples.reference_app.services.web_api:app --host 127.0.0.1 --port 8000
 前端:  cd web && npm run dev          # http://localhost:5173
 ```
 

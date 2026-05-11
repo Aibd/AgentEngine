@@ -9,9 +9,9 @@
 ### 方式 1：使用 AgentOrchestrationService
 
 ```python
-from services.agent_orchestration_service import AgentOrchestrationService
+from agentengine import AgentEngine
 
-service = AgentOrchestrationService()
+service = AgentEngine(presets=presets, llm_factory=make_llm)
 context, event_stream = service.create_streaming_context(
     request_id="web-123",
     query="你好",
@@ -34,7 +34,7 @@ async for event in event_stream:
 
 ### 方式 2：Web API
 
-项目自带 FastAPI 后端 (`src/services/web_api.py`)：
+项目自带 FastAPI 参考后端 (`examples/reference_app/services/web_api.py`)：
 
 ```
 GET /api/runs/stream?query=...&agent_name=...&conversation_id=...
