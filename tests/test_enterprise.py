@@ -29,7 +29,7 @@ from agentengine.errors import (
     LLMContextWindowError,
     ToolExecutionError,
 )
-from agentengine.spec import AgentSpec
+from agentengine.run_config import RunConfig
 
 
 # ---------------------------------------------------------------------------
@@ -107,9 +107,9 @@ class TestQuotaMiddleWare:
         store = QuotaStore()
         store.set_limits("acme", QuotaLimits(max_runs=5))
         mw = quota_middleware(store)
-        spec = AgentSpec(name="test")
+        spec = RunConfig(name="test")
         ctx = MiddlewareContext(
-            spec=spec,
+            config=spec,
             run_context=AgentContext(request_id="r1", query="q"),
             query="q",
             extras={"tenant": TenantContext(tenant_id="acme")},
@@ -132,9 +132,9 @@ class TestQuotaMiddleWare:
         # Pre-acquire the only allowed run
         await store.check_and_acquire_run("acme")
         mw = quota_middleware(store)
-        spec = AgentSpec(name="test")
+        spec = RunConfig(name="test")
         ctx = MiddlewareContext(
-            spec=spec,
+            config=spec,
             run_context=AgentContext(request_id="r1", query="q"),
             query="q",
             extras={"tenant": TenantContext(tenant_id="acme")},
@@ -149,9 +149,9 @@ class TestQuotaMiddleWare:
     async def test_passes_without_tenant(self):
         store = QuotaStore()
         mw = quota_middleware(store)
-        spec = AgentSpec(name="test")
+        spec = RunConfig(name="test")
         ctx = MiddlewareContext(
-            spec=spec,
+            config=spec,
             run_context=AgentContext(request_id="r1", query="q"),
             query="q",
             extras={},
@@ -218,9 +218,9 @@ class TestApprovalGate:
     async def test_approval_middleware_injects_gate(self):
         gate = ApprovalGate()
         mw = approval_middleware(gate)
-        spec = AgentSpec(name="test")
+        spec = RunConfig(name="test")
         ctx = MiddlewareContext(
-            spec=spec,
+            config=spec,
             run_context=AgentContext(request_id="r1", query="q"),
             query="q",
             extras={},
@@ -242,9 +242,9 @@ class TestRetryMiddleware:
     async def test_retries_transient_llm_errors(self):
         config = RetryConfig(max_retries=2, base_delay=0.01)
         mw = retry_middleware(config)
-        spec = AgentSpec(name="test")
+        spec = RunConfig(name="test")
         ctx = MiddlewareContext(
-            spec=spec,
+            config=spec,
             run_context=AgentContext(request_id="r1", query="q"),
             query="q",
             extras={},
@@ -266,9 +266,9 @@ class TestRetryMiddleware:
     async def test_does_not_retry_non_retryable(self):
         config = RetryConfig(max_retries=3, base_delay=0.01)
         mw = retry_middleware(config)
-        spec = AgentSpec(name="test")
+        spec = RunConfig(name="test")
         ctx = MiddlewareContext(
-            spec=spec,
+            config=spec,
             run_context=AgentContext(request_id="r1", query="q"),
             query="q",
             extras={},
@@ -288,9 +288,9 @@ class TestRetryMiddleware:
     async def test_exhausts_retries(self):
         config = RetryConfig(max_retries=2, base_delay=0.01)
         mw = retry_middleware(config)
-        spec = AgentSpec(name="test")
+        spec = RunConfig(name="test")
         ctx = MiddlewareContext(
-            spec=spec,
+            config=spec,
             run_context=AgentContext(request_id="r1", query="q"),
             query="q",
             extras={},
@@ -305,9 +305,9 @@ class TestRetryMiddleware:
     async def test_passes_success_on_first_try(self):
         config = RetryConfig(max_retries=3, base_delay=0.01)
         mw = retry_middleware(config)
-        spec = AgentSpec(name="test")
+        spec = RunConfig(name="test")
         ctx = MiddlewareContext(
-            spec=spec,
+            config=spec,
             run_context=AgentContext(request_id="r1", query="q"),
             query="q",
             extras={},
@@ -327,7 +327,7 @@ class TestRetryMiddleware:
 class TestMiddlewareChain:
     async def test_empty_chain_passes_through(self):
         chain = MiddlewareChain()
-        spec = AgentSpec(name="test")
+        spec = RunConfig(name="test")
         context = AgentContext(request_id="r1", query="q")
 
         async def inner(s, c, q):
@@ -352,7 +352,7 @@ class TestMiddlewareChain:
             return result
 
         chain = MiddlewareChain([mw1, mw2])
-        spec = AgentSpec(name="test")
+        spec = RunConfig(name="test")
         context = AgentContext(request_id="r1", query="q")
 
         async def inner(s, c, q):
@@ -378,7 +378,7 @@ class TestMiddlewareChain:
         chain.add(mw1)
         chain.add(mw2)
 
-        spec = AgentSpec(name="test")
+        spec = RunConfig(name="test")
         context = AgentContext(request_id="r1", query="q")
 
         async def inner(s, c, q):

@@ -10,7 +10,7 @@ from agentengine.base.context import AgentContext
 from agentengine.base.state import AgentState
 from agentengine.runtime.turn import run_turn
 from agentengine.llm.client import LLMChunk, LLMResponse
-from agentengine.spec import AgentSpec
+from agentengine.run_config import RunConfig
 from mock_llm import MockLLMClient
 from services.agent_orchestration_service import AgentOrchestrationService
 
@@ -34,7 +34,7 @@ class _HangingLLM:
 
 
 def _make_run(context: AgentContext, *, name: str = "lifecycle_test", max_steps: int = 10) -> AgentRun:
-    return AgentRun(spec=AgentSpec(name=name, max_steps=max_steps), context=context)
+    return AgentRun(config=RunConfig(name=name, max_steps=max_steps), context=context)
 
 
 def _make_run_with_teardown(context: AgentContext) -> tuple[AgentRun, dict]:
@@ -43,8 +43,8 @@ def _make_run_with_teardown(context: AgentContext) -> tuple[AgentRun, dict]:
     async def teardown(_ctx: AgentContext) -> None:
         counter["calls"] += 1
 
-    spec = AgentSpec(name="teardown_test", teardown=teardown)
-    return AgentRun(spec=spec, context=context), counter
+    spec = RunConfig(name="teardown_test", teardown=teardown)
+    return AgentRun(config=spec, context=context), counter
 
 
 async def test_service_close_closes_managed_llm_once():

@@ -10,7 +10,7 @@ from agentengine.errors import LLMTimeoutError, ToolExecutionError
 from agentengine.runtime.events import RunCancelled, RunCompleted, RunFailed, RunStarted, RuntimeEvent
 from agentengine.runtime.run_state import RunStatus, TerminalReason
 from agentengine.runtime.turn_runner import TurnRunner
-from agentengine.spec import AgentSpec
+from agentengine.run_config import RunConfig
 
 
 async def _ok_turn(agent: AgentRun, context: AgentContext, query: str) -> str:
@@ -26,7 +26,7 @@ def _failing_turn(error: BaseException):
 
 async def _run_with(turn_fn) -> tuple[list[RuntimeEvent], AgentContext, str | None]:
     context = AgentContext(request_id="req-1", query="hello")
-    agent = AgentRun(spec=AgentSpec(name="turn_runner_test"), context=context)
+    agent = AgentRun(config=RunConfig(name="turn_runner_test"), context=context)
     events: list[RuntimeEvent] = []
 
     async def on_event(event: RuntimeEvent) -> None:
@@ -82,7 +82,7 @@ async def test_turn_runner_classifies_failures(
     reason: TerminalReason,
 ) -> None:
     context = AgentContext(request_id="req-1", query="hello")
-    agent = AgentRun(spec=AgentSpec(name="turn_runner_test"), context=context)
+    agent = AgentRun(config=RunConfig(name="turn_runner_test"), context=context)
     events: list[RuntimeEvent] = []
 
     async def on_event(event: RuntimeEvent) -> None:
@@ -105,7 +105,7 @@ async def test_turn_runner_classifies_failures(
 
 async def test_turn_runner_records_cancelled() -> None:
     context = AgentContext(request_id="req-1", query="hello")
-    agent = AgentRun(spec=AgentSpec(name="turn_runner_test"), context=context)
+    agent = AgentRun(config=RunConfig(name="turn_runner_test"), context=context)
     events: list[RuntimeEvent] = []
 
     async def on_event(event: RuntimeEvent) -> None:

@@ -25,7 +25,7 @@ from agentengine.runtime.events import (
     ToolCallFailed,
 )
 from agentengine.runtime.turn_runner import TurnRunner
-from agentengine.spec import AgentSpec
+from agentengine.run_config import RunConfig
 from agentengine.tools.base import Tool
 
 
@@ -53,7 +53,7 @@ async def _run_with_manager(
     turn_fn: Any = _ok_turn,
 ) -> tuple[list[RuntimeEvent], AgentContext, str | None]:
     context = AgentContext(request_id="req-1", query="hello")
-    agent = AgentRun(spec=AgentSpec(name="hook_test"), context=context)
+    agent = AgentRun(config=RunConfig(name="hook_test"), context=context)
     events: list[RuntimeEvent] = []
 
     async def on_event(event: RuntimeEvent) -> None:
@@ -144,7 +144,7 @@ class TestUserPromptSubmit:
         llm.enqueue(LLMResponse(content="done", finish_reason="stop"))
 
         context = AgentContext(request_id="req-1", query="hello", llm=llm)
-        agent = AgentRun(spec=AgentSpec(name="hook_test"), context=context)
+        agent = AgentRun(config=RunConfig(name="hook_test"), context=context)
         events: list[RuntimeEvent] = []
         runner = TurnRunner("session-1", hook_manager=manager)
         await runner.run(
@@ -174,7 +174,7 @@ class TestUserPromptSubmit:
         llm.enqueue(LLMResponse(content="done", finish_reason="stop"))
 
         context = AgentContext(request_id="req-1", query="hello", llm=llm)
-        agent = AgentRun(spec=AgentSpec(name="hook_test"), context=context)
+        agent = AgentRun(config=RunConfig(name="hook_test"), context=context)
         events: list[RuntimeEvent] = []
         runner = TurnRunner("session-1", hook_manager=manager)
         with pytest.raises(Exception):
@@ -229,7 +229,7 @@ class TestPreAndPostToolUse:
         context = AgentContext(
             request_id="req-1", query="hello", llm=llm, tool_collection=coll
         )
-        agent = AgentRun(spec=AgentSpec(name="hook_test"), context=context)
+        agent = AgentRun(config=RunConfig(name="hook_test"), context=context)
         events: list[RuntimeEvent] = []
         runner = TurnRunner("session-1", hook_manager=manager)
         await runner.run(
@@ -282,7 +282,7 @@ class TestPreAndPostToolUse:
         context = AgentContext(
             request_id="req-1", query="hello", llm=llm, tool_collection=coll
         )
-        agent = AgentRun(spec=AgentSpec(name="hook_test"), context=context)
+        agent = AgentRun(config=RunConfig(name="hook_test"), context=context)
         events: list[RuntimeEvent] = []
         runner = TurnRunner("session-1", hook_manager=manager)
         await runner.run(

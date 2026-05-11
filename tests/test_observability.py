@@ -10,7 +10,7 @@ from agentengine.runtime.turn import run_turn
 from agentengine.llm.client import LLMResponse
 from agentengine.llm.openai_compat import OpenAICompatibleClient
 from agentengine.memory.message import Message
-from agentengine.spec import AgentSpec
+from agentengine.run_config import RunConfig
 from agentengine.tools.base import Tool
 from agentengine.tools.collection import ToolCollection
 from mock_llm import MockLLMClient
@@ -29,7 +29,7 @@ class _EchoTool(Tool):
         return kwargs.get("text", "")
 
 
-_TOOL_AGENT_SPEC = AgentSpec(name="tool_agent")
+_TOOL_AGENT_SPEC = RunConfig(name="tool_agent")
 
 
 async def test_react_logs_run_and_tool_without_argument_values(caplog):
@@ -57,7 +57,7 @@ async def test_react_logs_run_and_tool_without_argument_values(caplog):
         tool_collection=ToolCollection([_EchoTool()]),
     )
 
-    agent = AgentRun(spec=_TOOL_AGENT_SPEC, context=context)
+    agent = AgentRun(config=_TOOL_AGENT_SPEC, context=context)
     result = await run_turn(agent, context, "run")
 
     assert result == "done"

@@ -31,15 +31,15 @@ from agentengine.stream.sse_queue import SseEventQueue
 from agentengine.stream.sse_sink import SseSink
 from agentengine.tools.base import Tool
 from agentengine.tools.collection import ToolCollection
-from agents.general_chat.spec import SPEC as GENERAL_CHAT_SPEC
+from agents.general_chat.preset import PRESET as GENERAL_CHAT_PRESET
 from mock_llm import MockLLMClient
 
 
 def _make_agent(context: AgentContext, *, max_steps: int | None = None) -> AgentRun:
-    spec = GENERAL_CHAT_SPEC
-    if max_steps is not None and max_steps != spec.max_steps:
-        spec = replace(spec, max_steps=max_steps)
-    return AgentRun(spec=spec, context=context)
+    config = GENERAL_CHAT_PRESET.to_run_config()
+    if max_steps is not None and max_steps != config.max_steps:
+        config = replace(config, max_steps=max_steps)
+    return AgentRun(config=config, context=context)
 
 
 class _StaticTool(Tool):

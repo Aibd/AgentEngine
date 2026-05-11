@@ -8,9 +8,9 @@ from agentengine.base.context import AgentContext
 from agentengine.base.state import AgentState
 from agentengine.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS, run_turn
 from agentengine.llm.client import LLMResponse
-from agentengine.memory.message import Role
+from agentengine.memory.message import Message, Role
 from agentengine.runtime.turn_runner import TurnRunner
-from agentengine.spec import AgentSpec
+from agentengine.run_config import RunConfig
 from agentengine.stream.printer import Printer
 from agentengine.stream.sse_queue import SseEventQueue
 from agentengine.stream.sse_sink import SseSink
@@ -28,9 +28,9 @@ class _EchoTool(Tool):
         return kwargs.get("text", "echo")
 
 
-SIMPLE_SPEC = AgentSpec(
+SIMPLE_CONFIG = RunConfig(
     name="simple",
-    system_prompt="You are a helpful assistant.",
+    initial_messages=(Message.system("You are a helpful assistant."),),
 )
 
 
@@ -39,22 +39,22 @@ async def _setup_research(context: AgentContext) -> None:
         context.tool_collection.add(_EchoTool())
 
 
-RESEARCHY_SPEC = AgentSpec(
+RESEARCHY_CONFIG = RunConfig(
     name="researchy",
-    system_prompt="Plan first, then execute.",
+    initial_messages=(Message.system("Plan first, then execute."),),
     setup=_setup_research,
 )
 
 
-def _agent(spec: AgentSpec, context: AgentContext, *, max_steps: int | None = None) -> AgentRun:
+def _agent(spec: RunConfig, context: AgentContext, *, max_steps: int | None = None) -> AgentRun:
     if max_steps is not None and max_steps != spec.max_steps:
         spec = replace(spec, max_steps=max_steps)
-    return AgentRun(spec=spec, context=context)
+    return AgentRun(config=spec, context=context)
 
 
-def _agent_with_max_turns(spec: AgentSpec, context: AgentContext, *, max_turns: int | None) -> AgentRun:
+def _agent_with_max_turns(spec: RunConfig, context: AgentContext, *, max_turns: int | None) -> AgentRun:
     spec = replace(spec, max_turns=max_turns, max_steps=None)
-    return AgentRun(spec=spec, context=context)
+    return AgentRun(config=spec, context=context)
 
 
 class _SlowTool(Tool):
@@ -116,7 +116,7 @@ class TestRunTurn:
     async def test_single_turn_completes(self):
         llm = MockLLMClient([LLMResponse(content="The answer is 4.", finish_reason="stop")])
         context, stream = _make_context(llm)
-        agent = _agent(SIMPLE_SPEC, context, max_steps=5)
+        agent = _agent(SIMPLE_CONFIG, context, max_steps=5)
 
         result = await _run_with_sse(agent, context, "What is 2+2?")
 
@@ -133,7 +133,7 @@ class TestRunTurn:
     async def test_system_prompt_injected(self):
         llm = MockLLMClient([LLMResponse(content="ok", finish_reason="stop")])
         context, _ = _make_context(llm)
-        agent = _agent(SIMPLE_SPEC, context, max_steps=3)
+        agent = _agent(SIMPLE_CONFIG, context, max_steps=3)
 
         await run_turn(agent, context, "hi")
 
@@ -162,7 +162,7 @@ class TestRunTurn:
             LLMResponse(content="Plan created with 2 steps.", finish_reason="stop"),
         ])
         context, stream = _make_context(llm, with_tools=True)
-        agent = _agent(RESEARCHY_SPEC, context, max_steps=5)
+        agent = _agent(RESEARCHY_CONFIG, context, max_steps=5)
 
         result = await _run_with_sse(agent, context, "make a plan")
 
@@ -206,7 +206,7 @@ class TestRunTurn:
             LLMResponse(content="I'll skip that tool.", finish_reason="stop"),
         ])
         context, _ = _make_context(llm)
-        agent = _agent(SIMPLE_SPEC, context, max_steps=5)
+        agent = _agent(SIMPLE_CONFIG, context, max_steps=5)
 
         await run_turn(agent, context, "use missing tool")
 
@@ -232,7 +232,7 @@ class TestRunTurn:
         ])
         context, _ = _make_context(llm)
         context.tool_collection.add(_SlowTool())
-        agent = _agent(SIMPLE_SPEC, context, max_steps=5)
+        agent = _agent(SIMPLE_CONFIG, context, max_steps=5)
 
         result = await run_turn(agent, context, "use slow tool", tool_timeout_seconds=0.01)
 
@@ -255,7 +255,7 @@ class TestRunTurn:
         )
         llm = MockLLMClient([looping] * 10)
         context, _ = _make_context(llm, with_tools=True)
-        agent = _agent_with_max_turns(RESEARCHY_SPEC, context, max_turns=2)
+        agent = _agent_with_max_turns(RESEARCHY_CONFIG, context, max_turns=2)
 
         await run_turn(agent, context, "loop forever")
 
@@ -277,7 +277,7 @@ class TestRunTurn:
         )
         llm = MockLLMClient([looping] * 12 + [LLMResponse(content="done", finish_reason="stop")])
         context, _ = _make_context(llm, with_tools=True)
-        agent = _agent_with_max_turns(RESEARCHY_SPEC, context, max_turns=None)
+        agent = _agent_with_max_turns(RESEARCHY_CONFIG, context, max_turns=None)
 
         result = await run_turn(agent, context, "loop more than old default")
 
@@ -288,7 +288,7 @@ class TestRunTurn:
     async def test_setup_hook_runs_before_loop(self):
         llm = MockLLMClient([LLMResponse(content="ok", finish_reason="stop")])
         context, _ = _make_context(llm)  # no echo tool initially
-        agent = _agent(RESEARCHY_SPEC, context, max_steps=3)
+        agent = _agent(RESEARCHY_CONFIG, context, max_steps=3)
 
         assert context.tool_collection.get("echo") is None
 
@@ -299,7 +299,7 @@ class TestRunTurn:
 
     async def test_invalid_max_steps_raises(self):
         try:
-            AgentSpec(name="bad", max_steps=0)
+            RunConfig(name="bad", max_steps=0)
         except ValueError as exc:
             assert "max_steps" in str(exc)
         else:
@@ -307,7 +307,7 @@ class TestRunTurn:
 
     async def test_invalid_max_turns_raises(self):
         try:
-            AgentSpec(name="bad", max_turns=0)
+            RunConfig(name="bad", max_turns=0)
         except ValueError as exc:
             assert "max_turns" in str(exc)
         else:

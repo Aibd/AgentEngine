@@ -11,7 +11,6 @@ class TestPromptLoader:
         content = """
 version: 1
 system: You are a test assistant.
-next_step: What next?
 templates:
   greeting: "Hello, {name}!"
 """
