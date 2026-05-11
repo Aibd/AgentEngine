@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 SCRIPTS = ROOT / "scripts"
-for path in (SRC, SCRIPTS):
+for path in (ROOT, SRC, SCRIPTS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
@@ -29,7 +29,7 @@ from agentengine.llm.factory import create_llm_from_env  # noqa: E402
 from rich.console import Console  # noqa: E402
 
 from renderers.rich_renderer import ReasoningMode, RichRenderer  # noqa: E402
-from services import AgentOrchestrationService  # noqa: E402
+from examples.reference_app.services import AgentOrchestrationService  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:

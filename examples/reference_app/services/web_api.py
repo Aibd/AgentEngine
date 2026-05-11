@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from agents import REGISTRY as AGENT_REGISTRY
+from examples.reference_app.agents import REGISTRY as AGENT_REGISTRY
 from agentengine.concurrency import InMemoryConversationLockManager
 from agentengine.enterprise import (
     ApprovalGate,
@@ -31,10 +31,10 @@ from agentengine.errors import error_to_dict
 from agentengine.persistence import SqlitePersistence
 from agentengine.skills.loader import SkillLoader
 from agentengine.tools.builtin import build_default_tools, ReadFileTool, SkillTool
-from services.agent_orchestration_service import AgentOrchestrationService
+from examples.reference_app.services.agent_orchestration_service import AgentOrchestrationService
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DB_PATH = REPO_ROOT / "data" / "chatbot.db"
 
 

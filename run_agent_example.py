@@ -9,7 +9,9 @@ import sys
 from pathlib import Path
 
 # 添加项目路径
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+ROOT = Path(__file__).parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
 
 def _load_dotenv(path: Path) -> None:
@@ -49,7 +51,7 @@ async def run_example():
     try:
         from agentengine.base.context import AgentContext
         from agentengine.llm.factory import create_llm_from_env
-        from services.agent_orchestration_service import AgentOrchestrationService
+        from examples.reference_app.services.agent_orchestration_service import AgentOrchestrationService
         print("✅ 模块导入成功")
     except Exception as e:
         print(f"❌ 模块导入失败: {e}")

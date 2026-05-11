@@ -9,7 +9,9 @@ import sys
 from pathlib import Path
 
 # 确保项目路径在Python路径中
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+ROOT = Path(__file__).parent
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
 
 def _load_dotenv(path: Path) -> None:
@@ -53,7 +55,7 @@ async def run_quick_test():
     try:
         from agentengine.base.context import AgentContext
         from agentengine.llm.factory import create_llm_from_env
-        from services.agent_orchestration_service import AgentOrchestrationService
+        from examples.reference_app.services.agent_orchestration_service import AgentOrchestrationService
     except ImportError as e:
         print(f"❌ 导入错误: {e}")
         print("请确保已安装依赖: uv sync --extra dev")
@@ -126,7 +128,7 @@ async def run_quick_test():
     print("💡 下一步:")
     print("   1. 尝试运行深度研究代理: python scripts/chat.py deep_research \"你的查询\"")
     print("   2. 启用流式输出: python scripts/chat.py general_chat \"你的查询\" --trace")
-    print("   3. 集成到你的应用中: from services import AgentOrchestrationService")
+    print("   3. SDK 集成入口: from agentengine import AgentEngine")
 
 if __name__ == "__main__":
     asyncio.run(run_quick_test())

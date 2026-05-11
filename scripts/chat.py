@@ -13,6 +13,8 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
@@ -20,7 +22,7 @@ from agentengine.base.context import AgentContext  # noqa: E402
 from agentengine.llm.factory import create_llm_from_env  # noqa: E402
 from agentengine.stream.printer import Printer  # noqa: E402
 from agentengine.stream.sse_queue import SseEventQueue  # noqa: E402
-from services import AgentOrchestrationService  # noqa: E402
+from examples.reference_app.services import AgentOrchestrationService  # noqa: E402
 
 
 def _load_dotenv(path: Path) -> None:
