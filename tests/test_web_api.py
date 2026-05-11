@@ -14,7 +14,7 @@ import pytest
 from agentengine.llm.client import LLMResponse
 from agentengine.enterprise import ApprovalGate, QuotaLimits, QuotaStore
 from mock_llm import MockLLMClient
-from services import web_api
+from examples.reference_app.services import web_api
 
 
 pytestmark = pytest.mark.asyncio
@@ -59,7 +59,7 @@ def _patch_llm(monkeypatch):
     monkeypatch.setattr(web_api, "_default_llm_factory_for_tests", _factory_returns_mock, raising=False)
     # The web_api module reuses AgentOrchestrationService's default factory;
     # patch that directly so context.llm gets injected at request time.
-    from services import agent_orchestration_service as orch_module
+    from examples.reference_app.services import agent_orchestration_service as orch_module
     monkeypatch.setattr(orch_module, "_default_llm_factory", _factory_returns_mock)
     monkeypatch.setattr(web_api, "QUOTA_STORE", QuotaStore())
     monkeypatch.setattr(web_api, "APPROVAL_GATE", ApprovalGate(timeout_seconds=0.1))

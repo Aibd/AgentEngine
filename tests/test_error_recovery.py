@@ -33,7 +33,7 @@ from agentengine.runtime.run_state import RunStatus, TerminalReason
 from agentengine.tools.base import Tool
 from agentengine.tools.collection import ToolCollection
 from mock_llm import MockLLMClient
-from services.agent_orchestration_service import AgentOrchestrationService
+from examples.reference_app.services.agent_orchestration_service import AgentOrchestrationService
 
 
 class _FailingLLM:

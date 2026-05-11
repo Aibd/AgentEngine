@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import pytest
 
+from agentengine import AgentEngine, AgentPreset
 from agentengine.base.context import AgentContext
 from agentengine.llm.client import LLMResponse
 from mock_llm import MockLLMClient
-from services.agent_orchestration_service import AgentOrchestrationService
+from examples.reference_app.services.agent_orchestration_service import AgentOrchestrationService
 
 
 async def test_general_chat_runs():
@@ -62,3 +63,23 @@ async def test_service_rejects_too_long_query():
 
     with pytest.raises(ValueError, match="too long"):
         await service.run(agent_name="general_chat", query="hello")
+
+
+async def test_public_engine_uses_explicit_presets_and_llm():
+    llm = MockLLMClient([LLMResponse(content="sdk response", finish_reason="stop")])
+    engine = AgentEngine(
+        presets={"chat": AgentPreset(name="chat", instructions="Be brief.")},
+    )
+    context = AgentContext(request_id="sdk-1", query="hello", llm=llm)
+
+    result = await engine.run(agent_name="chat", query="hello", context=context)
+
+    assert result == "sdk response"
+    assert llm.calls[0]["messages"][0]["role"] == "system"
+
+
+async def test_public_engine_requires_explicit_llm():
+    engine = AgentEngine(presets={"chat": AgentPreset(name="chat")})
+
+    with pytest.raises(RuntimeError, match="No LLM client configured"):
+        await engine.run(agent_name="chat", query="hello")

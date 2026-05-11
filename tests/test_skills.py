@@ -115,7 +115,7 @@ async def test_skill_tool_reports_unknown_skill(tmp_path: Path) -> None:
     assert result == "Unknown skill: missing. Available: (none)"
 
 
-def test_context_auto_registers_skill_tool_with_injected_loader(tmp_path: Path) -> None:
+def test_context_does_not_auto_register_skill_tool(tmp_path: Path) -> None:
     loader = SkillLoader(roots=[tmp_path / "custom-skills"])
     collection = ToolCollection()
 
@@ -126,12 +126,10 @@ def test_context_auto_registers_skill_tool_with_injected_loader(tmp_path: Path) 
         extras={"skill_loader": loader},
     )
 
-    tool = context.tool_collection.require("Skill")
-    assert isinstance(tool, SkillTool)
-    assert tool._loader is loader
+    assert context.tool_collection.get("Skill") is None
 
 
-def test_context_does_not_replace_existing_skill_tool(tmp_path: Path) -> None:
+def test_context_preserves_explicit_skill_tool(tmp_path: Path) -> None:
     existing_loader = SkillLoader(roots=[tmp_path / "existing"])
     existing_tool = SkillTool(existing_loader)
     collection = ToolCollection([existing_tool])

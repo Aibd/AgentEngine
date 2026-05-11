@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from agentengine.llm.factory import create_llm_from_env
-from services.agent_orchestration_service import AgentOrchestrationService
+from examples.reference_app.services.agent_orchestration_service import AgentOrchestrationService
 
 
 pytestmark = pytest.mark.integration

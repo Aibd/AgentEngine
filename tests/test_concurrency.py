@@ -30,11 +30,12 @@ from agentengine.base.context import AgentContext
 from agentengine.concurrency import (
     ConversationLockManager,
     InMemoryConversationLockManager,
+    RedisConversationLockManager,
 )
 from agentengine.llm.client import LLMChunk, LLMResponse
 from agentengine.persistence import SqlitePersistence
 from mock_llm import MockLLMClient
-from services.agent_orchestration_service import AgentOrchestrationService
+from examples.reference_app.services.agent_orchestration_service import AgentOrchestrationService
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +103,66 @@ class TestInMemoryConversationLockManager:
     async def test_runtime_checkable_protocol(self) -> None:
         manager = InMemoryConversationLockManager()
         assert isinstance(manager, ConversationLockManager)
+
+
+class _FakeRedis:
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+
+    async def set(self, key: str, value: str, *, nx: bool = False, px: int | None = None) -> bool:
+        if nx and key in self.store:
+            return False
+        self.store[key] = value
+        return True
+
+    async def get(self, key: str) -> str | None:
+        return self.store.get(key)
+
+    async def delete(self, key: str) -> int:
+        existed = key in self.store
+        self.store.pop(key, None)
+        return int(existed)
+
+    async def eval(self, script: str, numkeys: int, key: str, token: str) -> int:
+        if self.store.get(key) == token:
+            del self.store[key]
+            return 1
+        return 0
+
+
+class TestRedisConversationLockManager:
+    async def test_serializes_same_id(self) -> None:
+        manager = RedisConversationLockManager(
+            _FakeRedis(),
+            retry_interval_seconds=0.001,
+        )
+        order: list[str] = []
+
+        async def task(label: str, hold_for: float) -> None:
+            async with manager.acquire("conv-redis"):
+                order.append(f"{label}:enter")
+                await asyncio.sleep(hold_for)
+                order.append(f"{label}:exit")
+
+        await asyncio.gather(task("A", 0.02), task("B", 0.0))
+
+        assert order in (
+            ["A:enter", "A:exit", "B:enter", "B:exit"],
+            ["B:enter", "B:exit", "A:enter", "A:exit"],
+        ), order
+
+    async def test_acquire_timeout(self) -> None:
+        fake = _FakeRedis()
+        fake.store["agentengine:conversation-lock:busy"] = "other"
+        manager = RedisConversationLockManager(
+            fake,
+            retry_interval_seconds=0.001,
+            acquire_timeout_seconds=0.005,
+        )
+
+        with pytest.raises(TimeoutError):
+            async with manager.acquire("busy"):
+                pass
 
 
 # ---------------------------------------------------------------------------
