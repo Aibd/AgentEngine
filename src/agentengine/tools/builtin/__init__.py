@@ -1,7 +1,7 @@
 """Built-in tools shipped with agentengine.
 
 Each tool here is independently importable. ``BUILTIN_TOOL_FACTORIES`` lets
-``AgentSpec`` setup hooks register tools by name without re-importing each
+``RunConfig`` setup hooks register tools by name without re-importing each
 module:
 
     from agentengine.tools.builtin import build_default_tools_for_context
@@ -93,7 +93,7 @@ def build_default_tools(
     exclude: list[str] | None = None,
     access_tracker: FileAccessTracker | None = None,
 ) -> list[Tool]:
-    """Construct the standard set of builtin tools for an agent spec.
+    """Construct the standard set of builtin tools for an agent preset.
 
     Args:
         workspace_root: workspace root path; defaults to ``$AGENT_WORKSPACE_ROOT``
@@ -130,7 +130,7 @@ def build_default_tools_for_context(
     include: list[str] | None = None,
     exclude: list[str] | None = None,
 ) -> list[Tool]:
-    """AgentSpec-setup-friendly wrapper.
+    """RunConfig-setup-friendly wrapper.
 
     Pulls ``workspace_root``, the per-run :class:`FileAccessTracker`, the
     runtime ``emit`` function, and the run/turn ids out of the context's

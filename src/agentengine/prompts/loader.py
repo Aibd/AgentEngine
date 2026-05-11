@@ -5,8 +5,6 @@ Expected YAML shape::
     version: 1
     system: |
       You are a helpful assistant.
-    next_step: |
-      Decide the next action.
     templates:
       greeting: "Hello, {name}!"
 
@@ -62,9 +60,6 @@ class PromptLoader:
 
     def get_system_prompt(self, relative_path: str | Path) -> str:
         return _string_value(self.load(relative_path).get("system", ""))
-
-    def get_next_step_prompt(self, relative_path: str | Path) -> str:
-        return _string_value(self.load(relative_path).get("next_step", ""))
 
     def get_template(self, relative_path: str | Path, template_name: str) -> str:
         templates = self.load(relative_path).get("templates", {})
