@@ -11,8 +11,10 @@ from agentengine.concurrency.lock_manager import (
     ConversationLockManager,
     InMemoryConversationLockManager,
 )
+from agentengine.concurrency.redis_lock import RedisConversationLockManager
 
 __all__ = [
     "ConversationLockManager",
     "InMemoryConversationLockManager",
+    "RedisConversationLockManager",
 ]
