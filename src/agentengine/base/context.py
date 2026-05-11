@@ -1,4 +1,4 @@
-"""Agent context — auto-registers SkillTool so every agent gets skill support."""
+"""Mutable per-run context passed from the host application into the engine."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -25,11 +25,3 @@ class AgentContext:
     db: Any = None
     persistence: PersistencePort | None = None
     extras: dict[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        """Ensure every agent context has the Skill tool available."""
-        from agentengine.skills.loader import SkillLoader
-        from agentengine.tools.builtin.skill_tool import SkillTool
-        if not any(t.name == "Skill" for t in self.tool_collection.tool_map.values()):
-            loader = self.extras.get("skill_loader") or SkillLoader()
-            self.tool_collection.add(SkillTool(loader))
