@@ -25,7 +25,6 @@ for path in (SRC, SCRIPTS):
         sys.path.insert(0, str(path))
 
 from agentengine.llm.factory import create_llm_from_env  # noqa: E402
-import agents  # noqa: E402,F401  -- load explicit agent registry
 
 from rich.console import Console  # noqa: E402
 

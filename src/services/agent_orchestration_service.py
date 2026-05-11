@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, cast
 
+from agents import REGISTRY as AGENT_REGISTRY
 from agentengine.base.agent import AgentRun
 from agentengine.base.context import AgentContext
 from agentengine.concurrency import (
@@ -19,11 +20,10 @@ from agentengine.enterprise.middleware import MiddlewareChain
 from agentengine.runtime.events import RuntimeEvent
 from agentengine.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS
 from agentengine.runtime.turn_runner import TurnRunner
-from agentengine.spec import AgentSpec
+from agentengine.run_config import RunConfig
 from agentengine.stream.printer import Printer
 from agentengine.stream.sse_queue import SseEventQueue
 from agentengine.stream.sse_sink import SseSink
-from agents import REGISTRY as AGENT_REGISTRY
 
 
 DEFAULT_MAX_QUERY_CHARS = 20_000
@@ -37,9 +37,9 @@ def _default_llm_factory() -> LLMClient | None:
 class AgentOrchestrationService:
     """Application-facing entry point.
 
-    Looks up an `AgentSpec` by name, constructs an `AgentRun`, and dispatches
-    it through `TurnRunner` -> `run_turn()`. Provides a streaming context
-    factory for SSE endpoints.
+    Looks up an application preset by name, compiles it to `RunConfig`,
+    constructs an `AgentRun`, and dispatches it through `TurnRunner` ->
+    `run_turn()`. Provides a streaming context factory for SSE endpoints.
     """
 
     def __init__(
@@ -70,7 +70,7 @@ class AgentOrchestrationService:
         agent_kwargs: dict[str, Any] | None = None,
     ) -> str:
         self._validate_run_inputs(agent_name=agent_name, query=query)
-        spec = self._resolve_spec(agent_name, agent_kwargs=agent_kwargs)
+        config = self._resolve_config(agent_name, agent_kwargs=agent_kwargs)
 
         context = context or AgentContext(request_id="local", query=query)
         if context.llm is None:
@@ -80,9 +80,9 @@ class AgentOrchestrationService:
             context.persistence = self._persistence
 
         started_at = time.perf_counter()
-        agent = AgentRun(spec=spec, context=context)
+        agent = AgentRun(config=config, context=context)
         context.extras["agent"] = agent
-        context.extras["agent_spec"] = spec
+        context.extras["run_config"] = config
         logger.info(
             "agent_run_start request_id=%s agent=%s conversation_id=%s",
             context.request_id,
@@ -118,22 +118,23 @@ class AgentOrchestrationService:
                 agent_name=agent_name,
             )
 
-    def _resolve_spec(
+    def _resolve_config(
         self,
         agent_name: str,
         *,
         agent_kwargs: dict[str, Any] | None = None,
-    ) -> AgentSpec:
-        spec = AGENT_REGISTRY.get(agent_name)
-        if spec is None:
+    ) -> RunConfig:
+        preset = AGENT_REGISTRY.get(agent_name)
+        if preset is None:
             raise KeyError(f"Agent not registered: {agent_name}")
+        config = preset.to_run_config()
         kwargs = agent_kwargs or {}
         max_turns = kwargs.get("max_turns")
         if max_turns is None:
             max_turns = kwargs.get("max_steps")
-        if max_turns is not None and max_turns != spec.effective_max_turns:
-            return replace(spec, max_turns=int(max_turns), max_steps=None)
-        return spec
+        if max_turns is not None and max_turns != config.effective_max_turns:
+            return replace(config, max_turns=int(max_turns), max_steps=None)
+        return config
 
     def _record_agent_finish(
         self,
