@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from agentengine.base.agent import AgentRun
 from agentengine.base.context import AgentContext
-from agentengine.llm.client import LLMResponse
+from agentengine.llm.interfaces import LLMResponse
 from agentengine.runtime.events import (
     ReasoningDelta,
     ToolCallCompleted,

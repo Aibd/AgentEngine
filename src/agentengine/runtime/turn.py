@@ -35,7 +35,7 @@ from agentengine.hooks import (
     PreToolUsePayload,
     UserPromptSubmitPayload,
 )
-from agentengine.llm.client import LLMResponse
+from agentengine.llm.interfaces import LLMResponse
 from agentengine.memory.message import Message
 from agentengine.runtime.cancellation import CancellationToken
 from agentengine.runtime.compaction import Compactor, LLMSummaryCompactor

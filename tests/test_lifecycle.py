@@ -9,7 +9,7 @@ from agentengine.base.agent import AgentRun
 from agentengine.base.context import AgentContext
 from agentengine.base.state import AgentState
 from agentengine.runtime.turn import run_turn
-from agentengine.llm.client import LLMChunk, LLMResponse
+from agentengine.llm.interfaces import LLMChunk, LLMResponse
 from agentengine.run_config import RunConfig
 from mock_llm import MockLLMClient
 from examples.reference_app.services.agent_orchestration_service import AgentOrchestrationService

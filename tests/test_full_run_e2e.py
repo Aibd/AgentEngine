@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from agentengine.llm.client import LLMResponse
+from agentengine.llm.interfaces import LLMResponse
 from mock_llm import MockLLMClient
 from examples.reference_app.services.agent_orchestration_service import AgentOrchestrationService
 

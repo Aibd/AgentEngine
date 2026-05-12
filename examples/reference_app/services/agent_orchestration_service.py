@@ -14,8 +14,8 @@ from examples.reference_app.agents import REGISTRY as AGENT_REGISTRY
 from agentengine.engine import AgentEngine, DEFAULT_MAX_QUERY_CHARS, PresetLike
 from agentengine.concurrency import ConversationLockManager
 from agentengine.enterprise.middleware import MiddlewareChain
-from agentengine.llm.client import LLMClient
-from agentengine.llm.factory import create_llm_from_env
+from agentengine.llm.interfaces import LLMClient
+from agentengine.llm.env import create_llm_from_env
 from agentengine.persistence.port import PersistencePort
 
 

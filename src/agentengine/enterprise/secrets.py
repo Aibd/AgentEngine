@@ -15,7 +15,7 @@ Usage::
 
 Integration point:
     Inject a ``SecretsProvider`` into ``AgentContext.extras["secrets"]``.
-    The LLM factory and tool implementations can look it up there.
+    The LLM provider callback and tool implementations can look it up there.
 """
 
 from __future__ import annotations

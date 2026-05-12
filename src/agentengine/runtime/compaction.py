@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from agentengine.errors import ContextWindowExceededError
-from agentengine.llm.client import LLMClient
+from agentengine.llm.interfaces import LLMClient
 from agentengine.memory.message import Message, Role
 
 

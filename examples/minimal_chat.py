@@ -11,7 +11,7 @@ for path in (ROOT, SRC):
         sys.path.insert(0, str(path))
 
 from agentengine import AgentContext, AgentEngine, AgentPreset  # noqa: E402
-from agentengine.llm.client import LLMChunk, LLMResponse  # noqa: E402
+from agentengine.llm.interfaces import LLMChunk, LLMResponse  # noqa: E402
 
 
 class EchoLLM:

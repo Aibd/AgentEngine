@@ -241,7 +241,7 @@ class TestServiceIntegration:
     """End-to-end: two successive service.run() calls share conversation history."""
 
     async def test_second_call_sees_first_conversation_history(self, db_path: str) -> None:
-        from agentengine.llm.client import LLMResponse
+        from agentengine.llm.interfaces import LLMResponse
         from mock_llm import MockLLMClient
         from examples.reference_app.services.agent_orchestration_service import AgentOrchestrationService
 
@@ -307,7 +307,7 @@ class TestServiceIntegration:
         assert len(assistant_messages) >= 1, f"expected prior assistant turns, got roles={roles}"
 
     async def test_service_without_persistence_still_works(self) -> None:
-        from agentengine.llm.client import LLMResponse
+        from agentengine.llm.interfaces import LLMResponse
         from mock_llm import MockLLMClient
         from examples.reference_app.services.agent_orchestration_service import AgentOrchestrationService
 

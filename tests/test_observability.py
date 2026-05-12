@@ -7,7 +7,7 @@ import httpx
 from agentengine.base.agent import AgentRun
 from agentengine.base.context import AgentContext
 from agentengine.runtime.turn import run_turn
-from agentengine.llm.client import LLMResponse
+from agentengine.llm.interfaces import LLMResponse
 from agentengine.llm.openai_compat import OpenAICompatibleClient
 from agentengine.memory.message import Message
 from agentengine.run_config import RunConfig

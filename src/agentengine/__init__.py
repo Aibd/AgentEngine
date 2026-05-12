@@ -8,7 +8,7 @@ from agentengine.concurrency import (
     RedisConversationLockManager,
 )
 from agentengine.enterprise import MiddlewareChain
-from agentengine.llm.client import LLMChunk, LLMClient, LLMResponse
+from agentengine.llm.interfaces import LLMChunk, LLMClient, LLMResponse
 from agentengine.persistence import PersistencePort
 from agentengine.preset import AgentPreset, DEFAULT_AGENT_SYSTEM_PROMPT
 from agentengine.run_config import RunConfig

@@ -18,7 +18,7 @@ from agentengine.hooks import (
     StopPayload,
     UserPromptSubmitPayload,
 )
-from agentengine.llm.client import LLMResponse
+from agentengine.llm.interfaces import LLMResponse
 from agentengine.runtime.events import (
     RunCompleted,
     RunFailed,

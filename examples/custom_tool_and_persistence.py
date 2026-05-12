@@ -19,7 +19,7 @@ from agentengine import (  # noqa: E402
     Tool,
     ToolCollection,
 )
-from agentengine.llm.client import LLMChunk, LLMResponse  # noqa: E402
+from agentengine.llm.interfaces import LLMChunk, LLMResponse  # noqa: E402
 
 
 class InMemoryPersistence:

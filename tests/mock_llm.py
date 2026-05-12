@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, AsyncIterator
 
-from agentengine.llm.client import LLMChunk, LLMResponse
+from agentengine.llm.interfaces import LLMChunk, LLMResponse
 from agentengine.memory.message import Message
 
 

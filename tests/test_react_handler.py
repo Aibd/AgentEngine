@@ -7,7 +7,7 @@ from agentengine.base.context import AgentContext
 from agentengine.base.state import AgentState
 from agentengine.hooks import HookEvent, HookManager, HookResult
 from agentengine.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS, run_turn
-from agentengine.llm.client import LLMResponse
+from agentengine.llm.interfaces import LLMResponse
 from agentengine.memory.message import Message, Role
 from agentengine.runtime.turn_runner import TurnRunner
 from agentengine.run_config import RunConfig

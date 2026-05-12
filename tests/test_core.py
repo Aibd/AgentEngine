@@ -9,7 +9,7 @@ import pytest
 
 from agentengine import AgentEngine, AgentPreset, DEFAULT_AGENT_SYSTEM_PROMPT
 from agentengine.base.context import AgentContext
-from agentengine.llm.client import LLMChunk, LLMResponse
+from agentengine.llm.interfaces import LLMChunk, LLMResponse
 from agentengine.runtime.events import RunCancelled
 from mock_llm import MockLLMClient
 from examples.reference_app.services.agent_orchestration_service import AgentOrchestrationService

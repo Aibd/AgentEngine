@@ -16,7 +16,7 @@ from agentengine.concurrency import (
     InMemoryConversationLockManager,
 )
 from agentengine.enterprise.middleware import MiddlewareChain
-from agentengine.llm.client import LLMClient
+from agentengine.llm.interfaces import LLMClient
 from agentengine.persistence.port import PersistencePort
 from agentengine.preset import AgentPreset
 from agentengine.run_config import RunConfig

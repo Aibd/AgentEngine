@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator
 import httpx
 import pytest
 
-from agentengine.llm.client import LLMResponse
+from agentengine.llm.interfaces import LLMResponse
 from agentengine.enterprise import ApprovalGate, QuotaLimits, QuotaStore
 from mock_llm import MockLLMClient
 from examples.reference_app.services import web_api

@@ -27,7 +27,7 @@ from agentengine.errors import (
     LLMTimeoutError,
     ToolExecutionError,
 )
-from agentengine.llm.client import LLMChunk, LLMResponse
+from agentengine.llm.interfaces import LLMChunk, LLMResponse
 from agentengine.runtime.events import RunCancelled, RunFailed
 from agentengine.runtime.run_state import RunStatus, TerminalReason
 from agentengine.tools.base import Tool

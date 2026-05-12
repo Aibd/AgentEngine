@@ -5,7 +5,7 @@ import pytest
 from agentengine.base.agent import AgentRun
 from agentengine.base.context import AgentContext
 from agentengine.errors import ContextWindowExceededError
-from agentengine.llm.client import LLMResponse
+from agentengine.llm.interfaces import LLMResponse
 from agentengine.memory.message import Message
 from agentengine.run_config import RunConfig
 from agentengine.runtime.turn import run_turn

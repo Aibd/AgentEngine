@@ -24,7 +24,7 @@ for path in (ROOT, SRC, SCRIPTS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from agentengine.llm.factory import create_llm_from_env  # noqa: E402
+from agentengine.llm.env import create_llm_from_env  # noqa: E402
 
 from rich.console import Console  # noqa: E402
 

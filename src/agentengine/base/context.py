@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from agentengine.llm.client import LLMClient
+from agentengine.llm.interfaces import LLMClient
 from agentengine.stream.printer import Printer
 from agentengine.tools.collection import ToolCollection
 

@@ -26,7 +26,7 @@ from agentengine.errors import (
     LLMTimeoutError,
     UsageLimitReachedError,
 )
-from agentengine.llm.client import LLMChunk, LLMResponse
+from agentengine.llm.interfaces import LLMChunk, LLMResponse
 from agentengine.memory.message import Message
 
 

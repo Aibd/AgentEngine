@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from agentengine.base.context import AgentContext
-from agentengine.llm.client import LLMResponse
+from agentengine.llm.interfaces import LLMResponse
 from mock_llm import MockLLMClient
 from agentengine.stream.printer import Printer
 from agentengine.stream.sse_queue import SseEventQueue
