@@ -337,6 +337,13 @@ async def setup(context: AgentContext) -> None:
 ## 关联文档
 
 - [runtime.md](runtime.md) — run_turn 如何调用 ToolExecutor
+
+## ExecPolicy
+
+`ExecPolicy` is evaluated by `ToolExecutor` before a tool runs. Prefix rules can
+`allow`, `deny`, or `ask`. `deny` returns a failed tool result to the model;
+`ask` emits `ApprovalRequired` and returns a failed tool result until the host
+approval flow handles the request.
 - [base.md](base.md) — AgentContext 中的 ToolCollection
 - [skills.md](skills.md) — SkillTool 和 SkillLoader
 - [guides/create-tool.md](../guides/create-tool.md) — 更详细的工具开发指南

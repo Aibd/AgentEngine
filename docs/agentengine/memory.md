@@ -185,7 +185,7 @@ await memory.save_to_db(persistence, conversation_id="conv-123")
 |------|------|
 | 普通聊天 | `max_messages=20` 防止无限增长 |
 | 长文档分析 | `max_messages=0, max_tokens=8000` 按 Token 裁剪 |
-| 多轮工具调用 | `max_steps=10, max_messages=30` 给工具调用留空间 |
+| 多轮工具调用 | `max_messages=30` 配合 auto-compaction 给工具调用留空间 |
 | 保留完整上下文 | `max_messages=0, max_tokens=0`（不裁剪，注意爆窗） |
 
 ---

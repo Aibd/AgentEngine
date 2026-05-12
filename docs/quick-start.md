@@ -134,7 +134,7 @@ SPEC = AgentSpec(
     name="my_agent",
     description="Python 代码审查 Agent",
     system_prompt=_SYSTEM_PROMPT,
-    max_steps=5,
+    auto_compact_tokens=120_000,
     setup=_setup,
 )
 ```

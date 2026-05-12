@@ -14,7 +14,7 @@ engine = AgentEngine(
         "support": AgentPreset(
             name="support",                                    # Agent 名称，run() 时引用
             instructions="You are a concise support assistant.", # 系统提示词
-            max_turns=4,                                       # 最多执行 4 轮（每轮：思考→工具调用）
+            auto_compact_tokens=120_000,                       # 超过阈值时自动压缩历史
         )
     }
 )
