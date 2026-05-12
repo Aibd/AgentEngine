@@ -10,8 +10,10 @@ from agentengine.concurrency import (
 from agentengine.enterprise import MiddlewareChain
 from agentengine.llm.client import LLMChunk, LLMClient, LLMResponse
 from agentengine.persistence import PersistencePort
-from agentengine.preset import AgentPreset
+from agentengine.preset import AgentPreset, DEFAULT_AGENT_SYSTEM_PROMPT
 from agentengine.run_config import RunConfig
+from agentengine.runtime.cancellation import CancellationToken
+from agentengine.runtime.compaction import Compactor, LLMSummaryCompactor
 from agentengine.runtime.events import (
     ApprovalRequired,
     ReasoningDelta,
@@ -33,6 +35,7 @@ from agentengine.runtime.events import (
 )
 from agentengine.tools.base import StreamingTool, Tool, ToolStreamEvent
 from agentengine.tools.collection import ToolCollection
+from agentengine.tools.policy import ExecPolicy, ExecPolicyAction, ExecPolicyRule
 
 __all__ = [
     "AgentContext",
@@ -41,8 +44,15 @@ __all__ = [
     "AgentRun",
     "AgentState",
     "ApprovalRequired",
+    "CancellationToken",
+    "Compactor",
     "ConversationLockManager",
+    "DEFAULT_AGENT_SYSTEM_PROMPT",
+    "ExecPolicy",
+    "ExecPolicyAction",
+    "ExecPolicyRule",
     "InMemoryConversationLockManager",
+    "LLMSummaryCompactor",
     "LLMChunk",
     "LLMClient",
     "LLMResponse",
