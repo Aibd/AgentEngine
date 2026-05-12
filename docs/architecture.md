@@ -9,7 +9,7 @@
 ```
                        ┌──────────────────────────────────┐
                        │   你的应用 / CLI / Web / SSE      │
-                       │   run_agent.py · API endpoint    │
+                       │   scripts/chat.py · API endpoint │
                        └────────────────┬─────────────────┘
                                         │ service.run("general_chat", query, ctx)
                                         ▼

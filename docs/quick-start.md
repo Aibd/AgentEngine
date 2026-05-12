@@ -38,21 +38,7 @@ uv run --env-file .env pytest -q
 
 ---
 
-## 2. 最快体验：run_agent.py
-
-```bash
-uv run --env-file .env python run_agent.py
-```
-
-这是项目自带的演示脚本，会：
-1. 从环境变量创建 LLM 客户端
-2. 启动 `AgentOrchestrationService`
-3. 运行 `general_chat` Agent
-4. 打印流式事件
-
----
-
-## 3. CLI 聊天
+## 2. CLI 聊天
 
 ### 3.1 简单模式（原始事件）
 

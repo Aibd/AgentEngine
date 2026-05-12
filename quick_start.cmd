@@ -64,7 +64,7 @@ echo.
 :: --- Quick smoke test ---
 echo Running smoke test...
 timeout /t 3 /nobreak >nul
-py run_agent.py
+PYTHONIOENCODING=utf-8 py scripts\chat.py general_chat "你好"
 
 echo.
 pause
