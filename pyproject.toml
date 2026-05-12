@@ -38,6 +38,11 @@ asyncio_mode = "auto"
 markers = [
   "integration: tests that call real external APIs"
 ]
+filterwarnings = [
+  "ignore::pytest.PytestUnraisableExceptionWarning",
+  "ignore:unclosed transport.*:ResourceWarning",
+  "ignore:unclosed event loop.*:ResourceWarning"
+]
 
 [tool.mypy]
 python_version = "3.11"
