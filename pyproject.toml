@@ -1,6 +1,6 @@
 [project]
 name = "agentengine"
-version = "0.1.0"
+version = "0.2.0"
 description = "Standalone AgentEngine scaffold for WiseAgent refactor"
 requires-python = ">=3.11"
 dependencies = [
