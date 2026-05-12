@@ -37,6 +37,11 @@ const TEMPLATES: Record<string, [string, string, string]> = {
     "提示词超过了模型上下文窗口。",
     "减少输入内容，或新开会话后再试。",
   ],
+  llm_usage_limit_reached: [
+    "Usage limit reached",
+    "The LLM provider reported that the account or project usage limit is exhausted.",
+    "Check billing, quotas, or switch to a different configured provider.",
+  ],
   llm_http_error: [
     "模型接口错误",
     "模型 API 返回了非成功响应。",

@@ -48,18 +48,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("query", nargs="+", help="User query text")
     parser.add_argument("--request-id", default="cli", help="Request id for this run")
     parser.add_argument(
-        "--max-steps",
-        type=int,
-        default=None,
-        help="Deprecated alias for --max-turns",
-    )
-    parser.add_argument(
-        "--max-turns",
-        type=int,
-        default=None,
-        help="Override the run turn limit; omit for no turn limit",
-    )
-    parser.add_argument(
         "--trace",
         action="store_true",
         help="Print stream events and memory messages after the run",
@@ -95,13 +83,10 @@ async def run() -> int:
     )
 
     try:
-        max_turns = args.max_turns if args.max_turns is not None else args.max_steps
-        agent_kwargs = {"max_turns": max_turns} if max_turns is not None else None
         result = await AgentOrchestrationService().run(
             agent_name=args.agent_name,
             query=query,
             context=context,
-            agent_kwargs=agent_kwargs,
         )
     finally:
         close: Any = getattr(llm, "close", None)

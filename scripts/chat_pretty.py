@@ -4,7 +4,7 @@ Usage::
 
     uv run python scripts/chat_pretty.py general_chat "你好,介绍下这个项目"
     uv run python scripts/chat_pretty.py deep_research "调研 X 项目结构" --show-reasoning expanded
-    uv run python scripts/chat_pretty.py general_chat "..." --max-turns 5 --show-reasoning hidden
+    uv run python scripts/chat_pretty.py general_chat "..." --show-reasoning hidden
 
 Requires ``LLM_API_KEY`` and ``LLM_MODEL`` in the environment (or `.env`).
 """
@@ -38,8 +38,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("query", nargs="+", help="User query text")
     parser.add_argument("--request-id", default="cli-pretty", help="Request id for this run")
     parser.add_argument("--conversation-id", default="cli-conv", help="Conversation id for this run")
-    parser.add_argument("--max-steps", type=int, default=None, help="Deprecated alias for --max-turns")
-    parser.add_argument("--max-turns", type=int, default=None, help="Override the run turn limit")
     parser.add_argument(
         "--show-reasoning",
         choices=[m.value for m in ReasoningMode],
@@ -87,11 +85,6 @@ async def run() -> int:
     )
     context.llm = llm
 
-    agent_kwargs: dict = {}
-    max_turns = args.max_turns if args.max_turns is not None else args.max_steps
-    if max_turns is not None:
-        agent_kwargs["max_turns"] = max_turns
-
     renderer = RichRenderer(
         agent_name=args.agent_name,
         console=console,
@@ -104,7 +97,6 @@ async def run() -> int:
                 agent_name=args.agent_name,
                 query=query,
                 context=context,
-                agent_kwargs=agent_kwargs or None,
             )
         finally:
             # Always close the stream so the renderer's drain loop exits.
