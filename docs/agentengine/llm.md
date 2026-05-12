@@ -1,6 +1,6 @@
-# llm — LLM 客户端与工厂
+# llm — LLM 接口与实现
 
-> `src/agentengine/llm/` 提供与大型语言模型交互的抽象层：一个极简的 `LLMClient` 协议、一个 OpenAI 兼容的实现、以及从环境变量创建客户端的工厂。
+> `src/agentengine/llm/` 提供与大型语言模型交互的抽象层：一个极简的 `LLMClient` 协议、一个 OpenAI 兼容的实现，以及从环境变量创建 OpenAI 兼容客户端的配置入口。
 
 ---
 
@@ -8,9 +8,9 @@
 
 ```
 llm/
-├── client.py        # LLMClient Protocol + LLMResponse + LLMChunk
+├── interfaces.py    # LLMClient Protocol + LLMResponse + LLMChunk
 ├── openai_compat.py # OpenAICompatibleClient（httpx 实现）
-├── factory.py       # create_llm_from_env() 环境变量工厂
+├── env.py           # create_llm_from_env() 环境变量配置入口
 └── __init__.py
 ```
 
@@ -18,7 +18,7 @@ llm/
 
 ## LLMClient — 抽象协议
 
-**文件：** `src/agentengine/llm/client.py`
+**文件：** `src/agentengine/llm/interfaces.py`
 
 ### 设计意图
 
@@ -115,9 +115,9 @@ OpenAI 的流式响应中，tool_calls 是按 `index` 分片到达的：
 
 ---
 
-## 工厂：create_llm_from_env
+## 环境变量入口：create_llm_from_env
 
-**文件：** `src/agentengine/llm/factory.py`
+**文件：** `src/agentengine/llm/env.py`
 
 ### 环境变量映射
 
@@ -132,7 +132,7 @@ OpenAI 的流式响应中，tool_calls 是按 `index` 分片到达的：
 ### 用法
 
 ```python
-from agentengine.llm.factory import create_llm_from_env
+from agentengine.llm.env import create_llm_from_env
 
 # 严格模式：缺少变量直接抛 LLMConfigError
 llm = create_llm_from_env(required=True)
@@ -175,7 +175,7 @@ LLM_MODEL=llama3
 ### 方式二：实现 LLMClient 协议
 
 ```python
-from agentengine.llm.client import LLMClient, LLMResponse, LLMChunk
+from agentengine.llm.interfaces import LLMClient, LLMResponse, LLMChunk
 from agentengine.memory.message import Message
 
 class ClaudeNativeClient(LLMClient):

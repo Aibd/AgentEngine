@@ -135,7 +135,7 @@ src/
 │  ├─ spec.py      AgentSpec(frozen dataclass)
 │  ├─ base/        AgentRun · AgentContext · AgentState
 │  ├─ runtime/     turn.py(run_turn 唯一循环) · turn_runner · run_state · events
-│  ├─ llm/         OpenAICompatibleClient · 工厂 · 协议
+│  ├─ llm/         OpenAICompatibleClient · 环境变量入口 · 协议
 │  ├─ memory/      Message · Memory(自动裁剪)
 │  ├─ tools/       Tool · Collection · Registry · Executor + builtin/
 │  ├─ stream/      EventStream · Printer · EventType

@@ -39,31 +39,59 @@ answer = await engine.run(
 
 ## 注入 LLM
 
-核心 SDK 不会读取环境变量。业务系统可以直接把 LLM 放进 `AgentContext`，也可以给 `AgentEngine` 一个工厂：
+核心 SDK 只依赖 `LLMClient` 协议，不强行读取环境变量，也不绑定某个提供商。生产集成时优先让宿主系统创建 LLM，再从外部注入到 AgentEngine。
+
+### 方式 A：从宿主 DI 容器注入
+
+适合 Web 服务、租户隔离、密钥托管、按用户选择模型等场景。`llm_factory` 是宿主系统提供给 SDK 的回调，每次 `run()` 缺少 `context.llm` 时会被调用。
 
 ```python
-# 方式 A：通过工厂函数注入（推荐）
-# 每次 run() 时自动调用工厂创建 LLM 实例
+from agentengine import AgentEngine, AgentPreset
+
+
+def make_llm_for_current_request():
+    # 示例：从你的 DI 容器 / tenant 配置 / secret manager 里拿到已配置好的 LLMClient。
+    # 返回对象只需要实现 chat() 和 chat_stream()。
+    return app_container.llm_client()
+
+
 engine = AgentEngine(
     presets={"support": AgentPreset(name="support")},
-    llm_factory=lambda: app_container.llm_client(),  # 从你的 DI 容器获取
+    llm_factory=make_llm_for_current_request,
+)
+```
+
+### 方式 B：每个请求显式注入
+
+适合每个请求都有不同模型、API key、tenant 或 tracing 配置的场景。
+
+```python
+from agentengine import AgentContext
+
+context = AgentContext(
+    request_id=request_id,
+    query=query,
+    llm=app_container.llm_client_for_user(current_user),
+    user=current_user,
+    conversation_id=conversation_id,
 )
 
-# 方式 B：直接注入到 context（见上方最小集成示例）
-# context = AgentContext(..., llm=llm_client)
+answer = await engine.run(
+    agent_name="support",
+    query=query,
+    context=context,
+)
 ```
 
 `LLMClient` 需要实现以下接口：
 
 ```python
-# 非流式调用（返回完整响应）
 async def chat(messages, *, tools=None, stream=False, **kwargs): ...
 
-# 流式调用（返回 AsyncIterator，逐步输出 token）
 async def chat_stream(messages, *, tools=None, **kwargs): ...
 ```
 
-项目自带 `agentengine.llm.OpenAICompatibleClient` 和 `create_llm_from_env()`，但环境变量工厂只适合脚本或 reference app，不是核心 SDK 默认行为。
+项目自带 `agentengine.llm.OpenAICompatibleClient` 和 `create_llm_from_env()`。`create_llm_from_env()` 是脚本和 reference app 的环境变量配置入口；宿主系统集成时可以不用它，直接注入自己管理的 `LLMClient`。
 
 ## 注入持久化
 

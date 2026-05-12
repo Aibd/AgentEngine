@@ -215,9 +215,100 @@ async def _setup(context: AgentContext) -> None:
 
 ## 7. 以库形式使用
 
+### 7.1 核心概念：run() 的返回语义
+
+`engine.run()` 的返回类型**始终是 `str`**——即完整的最终回答文本。它会等待整个 agent turn（可能包含多轮 LLM 调用 + 工具执行）结束后才返回。
+
+```python
+# 这行会阻塞直到 agent 完成所有工作
+answer = await engine.run(agent_name="support", query="帮我查订单", context=context)
+# answer 此时已经是完整回答，不是流式增量
+```
+
+**流式是旁路通道**，不影响 `run()` 的返回值。流式 token 通过 `SseEventQueue` 或 `on_event` 回调实时推送，与 `run()` 并行运行：
+
+```python
+# run() 在后台执行，同时 event_stream 实时推送 token
+task = asyncio.create_task(engine.run(..., context=context))
+async for frame in event_stream:
+    print(frame)  # 实时收到 {"event": "text", "data": {"delta": "你"}}
+answer = await task  # 最终完整文本
+```
+
+### 7.2 创建 LLM 客户端
+
+`context.llm` 需要一个符合 `LLMClient` 协议的实例。框架自带 `OpenAICompatibleClient`，也支持自定义实现。
+
+```python
+from agentengine.llm.env import create_llm_from_env
+from agentengine.llm.openai_compat import OpenAICompatibleClient
+
+# 方式一：从环境变量创建（推荐）
+llm = create_llm_from_env(required=True)  # 读取 LLM_API_KEY, LLM_MODEL, LLM_BASE_URL
+
+# 方式二：手动创建
+llm = OpenAICompatibleClient(
+    api_key="sk-xxx",
+    base_url="https://api.deepseek.com/v1",
+    model="deepseek-chat",
+    max_tokens=4096,
+)
+
+# 方式三：自定义实现（只需满足 Protocol）
+class MyLLM:
+    async def chat(self, messages, *, tools=None, stream=False, **kwargs):
+        return LLMResponse(content="...")
+
+    async def chat_stream(self, messages, *, tools=None, **kwargs):
+        yield LLMChunk(content="Hello")
+        yield LLMChunk(content=" world")
+
+llm = MyLLM()
+```
+
+### 7.3 生成 request_id
+
+`request_id` 是每次请求的唯一标识，用于日志追踪、取消操作和 SSE 元数据。实际项目中的常见做法：
+
+```python
+import uuid
+
+# 方式一：UUID4（最常用，无冲突风险）
+request_id = str(uuid.uuid4())
+# "550e8400-e29b-41d4-a716-446655440000"
+
+# 方式二：带前缀的短 ID（便于日志搜索）
+request_id = f"req-{uuid.uuid4().hex[:12]}"
+# "req-550e8400e29b"
+
+# 方式三：基于时间的有序 ID（适合高并发场景按时间排序）
+import time
+request_id = f"req-{int(time.time()*1000)}-{uuid.uuid4().hex[:6]}"
+# "req-1715500000000-a3f2c1"
+```
+
+在 Web 框架中，通常从中间件生成并透传：
+
+```python
+# FastAPI 中间件示例
+from fastapi import Request
+import uuid
+
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
+```
+
+### 7.4 完整示例
+
 ```python
 import asyncio
-from agentengine.llm.factory import create_llm_from_env
+import uuid
+from agentengine.llm.env import create_llm_from_env
 from agentengine import AgentContext, AgentEngine, AgentPreset
 
 async def main():
@@ -229,18 +320,18 @@ async def main():
 
     # 3. 创建流式上下文
     context, event_stream = service.create_streaming_context(
-        request_id="quick-test-001",
+        request_id=str(uuid.uuid4()),
         query="请用中文简要介绍一下这个项目",
         conversation_id="test-conv-001",
     )
     context.llm = llm
 
-    # 4. 在后台运行 Agent
+    # 4. 在后台运行 Agent（run() 返回完整字符串）
     task = asyncio.create_task(
         service.run(agent_name="general_chat", query=context.query, context=context)
     )
 
-    # 5. 消费 SSE 事件
+    # 5. 消费 SSE 事件（实时流式）
     async for event in event_stream:
         print(f"[{event['event']}] {event.get('data', {})}")
 
@@ -265,6 +356,15 @@ if __name__ == "__main__":
 ### Q: 日志在哪里？
 运行时事件日志：`logs/runs/<YYYY-MM-DD>/<run_id>.jsonl`
 应用日志：`logs/web-api.log`
+
+### Q: engine.run() 是等全部回答完才返回吗？
+是的。`run()` 返回类型始终是 `str`（完整最终回答），会等待整个 agent turn 结束后才返回。流式输出通过旁路通道（`SseEventQueue` 或 `on_event` 回调）实时推送，与 `run()` 并行运行。详见 [7.1 核心概念](#71-核心概念run-的返回语义)。
+
+### Q: llm_client 是什么？必须自己实现吗？
+不需要。`llm_client` 是符合 `LLMClient` Protocol 的实例，框架自带 `OpenAICompatibleClient` 实现，通过 `create_llm_from_env()` 即可从环境变量创建。如需接入非 OpenAI 格式的模型，只需实现 `chat()` 和 `chat_stream()` 两个异步方法。详见 [LLM 文档](agentengine/llm.md)。
+
+### Q: request_id 怎么生成？
+用 `uuid.uuid4()` 即可。Web 项目建议从中间件生成并透传 `X-Request-ID` 头。详见 [7.3 生成 request_id](#73-生成-request_id)。
 
 ---
 

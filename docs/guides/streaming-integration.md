@@ -4,9 +4,35 @@
 
 ---
 
+## 关键概念：run() 返回值 vs 流式输出
+
+`engine.run()` 的返回类型**始终是 `str`**（完整最终回答），会等待整个 agent turn 结束后才返回：
+
+```python
+answer = await engine.run(agent_name="support", query="帮我查订单", context=context)
+# answer 是完整的最终文本，不是流式增量
+```
+
+流式是**旁路通道**——LLM 的 token 增量通过 `SseEventQueue`（或 `on_event` 回调）实时推送，与 `run()` 并行运行：
+
+```python
+task = asyncio.create_task(engine.run(..., context=context))
+async for frame in event_stream:
+    # 实时收到 token 增量、工具调用等事件
+    send_sse_to_client(frame)
+answer = await task  # 完整文本
+```
+
+这种设计的好处：
+- **Web SSE**：前端实时渲染 token，同时后端持有完整结果用于持久化
+- **CLI**：实时打印 token，结束后统一处理（如保存日志）
+- **测试**：可以直接 `await engine.run()` 拿到完整断言内容
+
+---
+
 ## 获取 SSE 流
 
-### 方式 1：使用 AgentOrchestrationService
+### 方式 1：使用 AgentEngine
 
 ```python
 from agentengine import AgentEngine
