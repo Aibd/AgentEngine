@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
 
 from agentengine.base.agent import AgentRun
 from agentengine.base.context import AgentContext
 from agentengine.base.state import AgentState
+from agentengine.hooks import HookEvent, HookManager, HookResult
 from agentengine.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS, run_turn
 from agentengine.llm.client import LLMResponse
 from agentengine.memory.message import Message, Role
@@ -46,14 +46,7 @@ RESEARCHY_CONFIG = RunConfig(
 )
 
 
-def _agent(spec: RunConfig, context: AgentContext, *, max_steps: int | None = None) -> AgentRun:
-    if max_steps is not None and max_steps != spec.max_steps:
-        spec = replace(spec, max_steps=max_steps)
-    return AgentRun(config=spec, context=context)
-
-
-def _agent_with_max_turns(spec: RunConfig, context: AgentContext, *, max_turns: int | None) -> AgentRun:
-    spec = replace(spec, max_turns=max_turns, max_steps=None)
+def _agent(spec: RunConfig, context: AgentContext) -> AgentRun:
     return AgentRun(config=spec, context=context)
 
 
@@ -116,7 +109,7 @@ class TestRunTurn:
     async def test_single_turn_completes(self):
         llm = MockLLMClient([LLMResponse(content="The answer is 4.", finish_reason="stop")])
         context, stream = _make_context(llm)
-        agent = _agent(SIMPLE_CONFIG, context, max_steps=5)
+        agent = _agent(SIMPLE_CONFIG, context)
 
         result = await _run_with_sse(agent, context, "What is 2+2?")
 
@@ -133,7 +126,7 @@ class TestRunTurn:
     async def test_system_prompt_injected(self):
         llm = MockLLMClient([LLMResponse(content="ok", finish_reason="stop")])
         context, _ = _make_context(llm)
-        agent = _agent(SIMPLE_CONFIG, context, max_steps=3)
+        agent = _agent(SIMPLE_CONFIG, context)
 
         await run_turn(agent, context, "hi")
 
@@ -162,7 +155,7 @@ class TestRunTurn:
             LLMResponse(content="Plan created with 2 steps.", finish_reason="stop"),
         ])
         context, stream = _make_context(llm, with_tools=True)
-        agent = _agent(RESEARCHY_CONFIG, context, max_steps=5)
+        agent = _agent(RESEARCHY_CONFIG, context)
 
         result = await _run_with_sse(agent, context, "make a plan")
 
@@ -206,7 +199,7 @@ class TestRunTurn:
             LLMResponse(content="I'll skip that tool.", finish_reason="stop"),
         ])
         context, _ = _make_context(llm)
-        agent = _agent(SIMPLE_CONFIG, context, max_steps=5)
+        agent = _agent(SIMPLE_CONFIG, context)
 
         await run_turn(agent, context, "use missing tool")
 
@@ -232,7 +225,7 @@ class TestRunTurn:
         ])
         context, _ = _make_context(llm)
         context.tool_collection.add(_SlowTool())
-        agent = _agent(SIMPLE_CONFIG, context, max_steps=5)
+        agent = _agent(SIMPLE_CONFIG, context)
 
         result = await run_turn(agent, context, "use slow tool", tool_timeout_seconds=0.01)
 
@@ -240,8 +233,8 @@ class TestRunTurn:
         tool_msgs = [m for m in agent.memory.messages if m.role == Role.TOOL]
         assert tool_msgs and "Tool timeout after" in tool_msgs[0].content
 
-    async def test_max_turns_terminates_loop(self):
-        # LLM keeps requesting tool calls; max_turns caps the loop.
+    async def test_after_turn_hook_can_stop_loop(self):
+        # LLM keeps requesting tool calls; the host stop hook caps the loop.
         looping = LLMResponse(
             content="",
             finish_reason="tool_calls",
@@ -255,13 +248,22 @@ class TestRunTurn:
         )
         llm = MockLLMClient([looping] * 10)
         context, _ = _make_context(llm, with_tools=True)
-        agent = _agent_with_max_turns(RESEARCHY_CONFIG, context, max_turns=2)
+        manager = HookManager()
+
+        async def stop_after_two(payload):
+            if payload.turn >= 2:
+                return HookResult.stop("test stop")
+            return HookResult.success()
+
+        manager.register(HookEvent.AFTER_TURN, stop_after_two)
+        context.extras["hooks"] = manager
+        agent = _agent(RESEARCHY_CONFIG, context)
 
         await run_turn(agent, context, "loop forever")
 
         assert agent.current_step == 2
         assert len(llm.calls) == 2
-        assert context.extras["terminal_reason"] == "max_turns"
+        assert context.extras["terminal_reason"] == "hook_stopped"
 
     async def test_default_has_no_turn_limit(self):
         looping = LLMResponse(
@@ -277,7 +279,7 @@ class TestRunTurn:
         )
         llm = MockLLMClient([looping] * 12 + [LLMResponse(content="done", finish_reason="stop")])
         context, _ = _make_context(llm, with_tools=True)
-        agent = _agent_with_max_turns(RESEARCHY_CONFIG, context, max_turns=None)
+        agent = _agent(RESEARCHY_CONFIG, context)
 
         result = await run_turn(agent, context, "loop more than old default")
 
@@ -288,7 +290,7 @@ class TestRunTurn:
     async def test_setup_hook_runs_before_loop(self):
         llm = MockLLMClient([LLMResponse(content="ok", finish_reason="stop")])
         context, _ = _make_context(llm)  # no echo tool initially
-        agent = _agent(RESEARCHY_CONFIG, context, max_steps=3)
+        agent = _agent(RESEARCHY_CONFIG, context)
 
         assert context.tool_collection.get("echo") is None
 
@@ -297,18 +299,18 @@ class TestRunTurn:
         # setup() should have registered echo tool
         assert context.tool_collection.get("echo") is not None
 
-    async def test_invalid_max_steps_raises(self):
+    async def test_invalid_auto_compact_tokens_raises(self):
         try:
-            RunConfig(name="bad", max_steps=0)
+            RunConfig(name="bad", auto_compact_tokens=-1)
         except ValueError as exc:
-            assert "max_steps" in str(exc)
+            assert "auto_compact_tokens" in str(exc)
         else:
             raise AssertionError("expected ValueError")
 
-    async def test_invalid_max_turns_raises(self):
+    async def test_invalid_compaction_keep_recent_raises(self):
         try:
-            RunConfig(name="bad", max_turns=0)
+            RunConfig(name="bad", compaction_keep_recent=-1)
         except ValueError as exc:
-            assert "max_turns" in str(exc)
+            assert "compaction_keep_recent" in str(exc)
         else:
             raise AssertionError("expected ValueError")

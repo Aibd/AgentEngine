@@ -4,7 +4,12 @@ import httpx
 import pytest
 
 import agentengine.llm.openai_compat as openai_compat
-from agentengine.errors import LLMHTTPError, LLMRateLimitError, LLMStreamError
+from agentengine.errors import (
+    LLMHTTPError,
+    LLMRateLimitError,
+    LLMStreamError,
+    UsageLimitReachedError,
+)
 from agentengine.llm.openai_compat import OpenAICompatibleClient
 from agentengine.memory.message import Message
 
@@ -158,6 +163,25 @@ async def test_post_raises_structured_rate_limit_error():
     assert exc_info.value.error_code == "llm_rate_limited"
     assert exc_info.value.is_retryable is True
     assert exc_info.value.details["retry_after_seconds"] == 7.0
+
+
+async def test_post_maps_insufficient_quota_to_usage_limit() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={"error": {"message": "quota exhausted", "code": "insufficient_quota"}},
+            request=request,
+        )
+
+    client = _client_with_transport(handler, max_retries=1)
+    try:
+        with pytest.raises(UsageLimitReachedError) as exc_info:
+            await client.chat([Message.user("hello")])
+    finally:
+        await client.close()
+
+    assert exc_info.value.error_code == "llm_usage_limit_reached"
+    assert exc_info.value.is_retryable is False
 
 
 async def test_stream_retries_timeout_then_succeeds(monkeypatch):

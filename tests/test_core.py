@@ -2,13 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
+from typing import AsyncIterator
+
 import pytest
 
-from agentengine import AgentEngine, AgentPreset
+from agentengine import AgentEngine, AgentPreset, DEFAULT_AGENT_SYSTEM_PROMPT
 from agentengine.base.context import AgentContext
-from agentengine.llm.client import LLMResponse
+from agentengine.llm.client import LLMChunk, LLMResponse
+from agentengine.runtime.events import RunCancelled
 from mock_llm import MockLLMClient
 from examples.reference_app.services.agent_orchestration_service import AgentOrchestrationService
+
+
+class _HangingLLM:
+    async def chat(self, *args, **kwargs) -> LLMResponse:
+        return LLMResponse()
+
+    async def chat_stream(self, *args, **kwargs) -> AsyncIterator[LLMChunk]:
+        await asyncio.Event().wait()
+        yield LLMChunk()
 
 
 async def test_general_chat_runs():
@@ -76,6 +89,7 @@ async def test_public_engine_uses_explicit_presets_and_llm():
 
     assert result == "sdk response"
     assert llm.calls[0]["messages"][0]["role"] == "system"
+    assert DEFAULT_AGENT_SYSTEM_PROMPT in llm.calls[0]["messages"][0]["content"]
 
 
 async def test_public_engine_requires_explicit_llm():
@@ -83,3 +97,21 @@ async def test_public_engine_requires_explicit_llm():
 
     with pytest.raises(RuntimeError, match="No LLM client configured"):
         await engine.run(agent_name="chat", query="hello")
+
+
+async def test_public_engine_interrupt_cancels_active_run():
+    engine = AgentEngine(presets={"chat": AgentPreset(name="chat")})
+    context = AgentContext(request_id="interrupt-me", query="hello", llm=_HangingLLM())
+
+    task = asyncio.create_task(
+        engine.run(agent_name="chat", query="hello", context=context)
+    )
+    await asyncio.sleep(0)
+
+    assert engine.interrupt("interrupt-me", "user stopped") is True
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert context.extras["agent_state"] == "cancelled"
+    assert any(isinstance(event, RunCancelled) for event in context.extras["runtime_events"])
+    assert engine.interrupt("interrupt-me") is False

@@ -9,6 +9,7 @@ import pytest
 from agentengine.base.agent import AgentRun
 from agentengine.base.context import AgentContext
 from agentengine.hooks import (
+    AfterTurnPayload,
     HookEvent,
     HookManager,
     HookResult,
@@ -300,5 +301,62 @@ class TestPreAndPostToolUse:
         # PostToolUse never fires when PreToolUse aborts (tool didn't run)
         assert len(post.payloads) == 0
         # Run still completes (the model gets the abort reason in memory and
-        # decides what to do) — we expect RunCompleted, not RunFailed.
+        # decides what to do) - we expect RunCompleted, not RunFailed.
         assert any(isinstance(e, RunCompleted) for e in events)
+
+
+class TestAfterTurn:
+    async def test_after_turn_stop_ends_loop_normally(self) -> None:
+        from mock_llm import MockLLMClient
+        from agentengine.tools.collection import ToolCollection
+
+        manager = HookManager()
+        capture = _RecordingHook()
+        manager.register(HookEvent.AFTER_TURN, capture)
+
+        async def stop(payload: AfterTurnPayload) -> HookResult:
+            if payload.turn >= 1:
+                return HookResult.stop("enough")
+            return HookResult.success()
+
+        manager.register(HookEvent.AFTER_TURN, stop)
+
+        llm = MockLLMClient([
+            LLMResponse(
+                content="",
+                finish_reason="tool_calls",
+                tool_calls=[
+                    {
+                        "id": "tc_1",
+                        "type": "function",
+                        "function": {"name": "toy", "arguments": "{}"},
+                    }
+                ],
+            ),
+            LLMResponse(
+                content="should not be called",
+                finish_reason="stop",
+            ),
+        ])
+        context = AgentContext(
+            request_id="req-1",
+            query="hello",
+            llm=llm,
+            tool_collection=ToolCollection([_ToyTool()]),
+        )
+        agent = AgentRun(config=RunConfig(name="hook_test"), context=context)
+        events: list[RuntimeEvent] = []
+
+        await TurnRunner("session-1", hook_manager=manager).run(
+            agent=agent,
+            context=context,
+            query="invoke the toy",
+            on_event=events.append,
+        )
+
+        assert len(llm.calls) == 1
+        assert len(capture.payloads) == 1
+        assert isinstance(capture.payloads[0], AfterTurnPayload)
+        assert capture.payloads[0].has_tool_calls is True
+        completed = next(e for e in events if isinstance(e, RunCompleted))
+        assert completed.terminal_reason == "hook_stopped"

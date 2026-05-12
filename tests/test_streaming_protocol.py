@@ -12,8 +12,6 @@ on this ordering — regressions here will break the user-facing UI.
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 from agentengine.base.agent import AgentRun
 from agentengine.base.context import AgentContext
 from agentengine.llm.client import LLMResponse
@@ -35,10 +33,8 @@ from examples.reference_app.agents.general_chat.preset import PRESET as GENERAL_
 from mock_llm import MockLLMClient
 
 
-def _make_agent(context: AgentContext, *, max_steps: int | None = None) -> AgentRun:
+def _make_agent(context: AgentContext) -> AgentRun:
     config = GENERAL_CHAT_PRESET.to_run_config()
-    if max_steps is not None and max_steps != config.max_steps:
-        config = replace(config, max_steps=max_steps)
     return AgentRun(config=config, context=context)
 
 
@@ -158,7 +154,7 @@ class TestToolCallPath:
             LLMResponse(content="done", finish_reason="stop"),
         ])
         ctx, stream = await _build_context(llm=llm)
-        agent = _make_agent(ctx, max_steps=3)
+        agent = _make_agent(ctx)
 
         await _run_with_sse(agent, ctx, "use echo")
 
@@ -204,7 +200,7 @@ class TestToolCallPath:
             LLMResponse(content="recovered", finish_reason="stop"),
         ])
         ctx, stream = await _build_context(llm=llm)
-        agent = _make_agent(ctx, max_steps=3)
+        agent = _make_agent(ctx)
 
         await _run_with_sse(agent, ctx, "use missing")
 
@@ -244,7 +240,7 @@ class TestToolCallPath:
             ),
         ])
         ctx, stream = await _build_context(llm=llm)
-        agent = _make_agent(ctx, max_steps=5)
+        agent = _make_agent(ctx)
 
         result = await _run_with_sse(agent, ctx, "research with tools")
 

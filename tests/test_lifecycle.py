@@ -33,8 +33,8 @@ class _HangingLLM:
         yield LLMChunk()
 
 
-def _make_run(context: AgentContext, *, name: str = "lifecycle_test", max_steps: int = 10) -> AgentRun:
-    return AgentRun(config=RunConfig(name=name, max_steps=max_steps), context=context)
+def _make_run(context: AgentContext, *, name: str = "lifecycle_test") -> AgentRun:
+    return AgentRun(config=RunConfig(name=name), context=context)
 
 
 def _make_run_with_teardown(context: AgentContext) -> tuple[AgentRun, dict]:
