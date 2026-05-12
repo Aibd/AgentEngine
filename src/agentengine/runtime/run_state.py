@@ -22,9 +22,10 @@ class TerminalReason(str, Enum):
     TOOL_FAILED = "tool_failed"
     MODEL_FAILED = "model_failed"
     CONTEXT_EXCEEDED = "context_exceeded"
-    MAX_TURNS = "max_turns"
+    HOOK_STOPPED = "hook_stopped"
     RUNTIME_FAILED = "runtime_failed"
     QUOTA_EXCEEDED = "quota_exceeded"
+    USAGE_LIMIT_REACHED = "usage_limit_reached"
     CANCELLED = "cancelled"
 
 

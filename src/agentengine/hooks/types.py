@@ -19,6 +19,7 @@ class HookEvent(str, Enum):
 
     PRE_TOOL_USE = "PreToolUse"
     POST_TOOL_USE = "PostToolUse"
+    AFTER_TURN = "AfterTurn"
     SESSION_START = "SessionStart"
     USER_PROMPT_SUBMIT = "UserPromptSubmit"
     STOP = "Stop"
@@ -32,11 +33,14 @@ class HookOutcome(str, Enum):
       (used for e.g. logging hooks that don't want to abort the run)
     - ``FAIL_ABORT``: handler wants the in-progress operation aborted; the
       dispatcher stops calling subsequent handlers and signals the caller
+    - ``STOP``: handler wants the agent loop to end normally after the current
+      turn; dispatcher stops calling subsequent handlers but does not raise
     """
 
     SUCCESS = "success"
     FAIL_CONTINUE = "fail_continue"
     FAIL_ABORT = "fail_abort"
+    STOP = "stop"
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,9 +62,17 @@ class HookResult:
     def fail_abort(cls, reason: str = "") -> "HookResult":
         return cls(outcome=HookOutcome.FAIL_ABORT, reason=reason)
 
+    @classmethod
+    def stop(cls, reason: str = "") -> "HookResult":
+        return cls(outcome=HookOutcome.STOP, reason=reason)
+
     @property
     def should_abort(self) -> bool:
         return self.outcome is HookOutcome.FAIL_ABORT
+
+    @property
+    def should_stop(self) -> bool:
+        return self.outcome is HookOutcome.STOP
 
 
 def _utc_now() -> datetime:
@@ -106,6 +118,21 @@ class PostToolUsePayload(_BasePayload):
 
 
 @dataclass(frozen=True, slots=True)
+class AfterTurnPayload(_BasePayload):
+    """Fired after one think/act iteration completes.
+
+    Returning ``HookResult.stop()`` ends the loop normally before another LLM
+    call is made. This is the runtime-level safety valve for host-defined stop
+    conditions.
+    """
+
+    agent_name: str = ""
+    turn: int = 0
+    has_tool_calls: bool = False
+    final_answer: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class SessionStartPayload(_BasePayload):
     """Fired once at the start of a TurnRunner.run().
 
@@ -144,6 +171,7 @@ class StopPayload(_BasePayload):
 HookPayload = Union[
     PreToolUsePayload,
     PostToolUsePayload,
+    AfterTurnPayload,
     SessionStartPayload,
     UserPromptSubmitPayload,
     StopPayload,

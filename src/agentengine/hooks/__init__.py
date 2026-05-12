@@ -2,17 +2,21 @@
 
 Modeled after codex-rs `hooks/`, trimmed to fit the Python runtime:
 
-- 5 event types (PreToolUse, PostToolUse, SessionStart, UserPromptSubmit, Stop)
+- 6 event types (PreToolUse, PostToolUse, AfterTurn, SessionStart,
+  UserPromptSubmit, Stop)
 - handlers are async Python callables, not shell commands
 - per-event handlers run sequentially in registration order
 - a handler can return ``HookResult.fail_abort()`` to stop the chain and
   signal the dispatch site to abort the in-progress operation
+- a handler can return ``HookResult.stop()`` from ``AfterTurn`` to stop the
+  agent loop normally
 - exceptions from a handler default to ``FailedContinue`` so a buggy
   third-party hook can't kill the run
 """
 
 from agentengine.hooks.manager import HookManager, get_default_manager
 from agentengine.hooks.types import (
+    AfterTurnPayload,
     HookAbortError,
     HookEvent,
     HookFn,
@@ -32,6 +36,7 @@ __all__ = [
     "HookOutcome",
     "HookResult",
     "HookAbortError",
+    "AfterTurnPayload",
     "PreToolUsePayload",
     "PostToolUsePayload",
     "SessionStartPayload",

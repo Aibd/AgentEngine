@@ -31,14 +31,6 @@ class AgentRun:
     def name(self) -> str:
         return self.config.name
 
-    @property
-    def max_turns(self) -> int | None:
-        return self.config.effective_max_turns
-
-    @property
-    def max_steps(self) -> int | None:
-        return self.max_turns
-
     async def setup(self) -> None:
         # Initial messages are supplied by the caller. The runtime does not
         # assign special meaning to system prompts or agent declarations.

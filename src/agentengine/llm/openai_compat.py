@@ -24,6 +24,7 @@ from agentengine.errors import (
     LLMRateLimitError,
     LLMStreamError,
     LLMTimeoutError,
+    UsageLimitReachedError,
 )
 from agentengine.llm.client import LLMChunk, LLMResponse
 from agentengine.memory.message import Message
@@ -370,6 +371,13 @@ class OpenAICompatibleClient:
             message = f"{exc}; response body: {body}"
             retryable = self._is_retryable_status(resp.status_code)
             details = {"url": str(exc.request.url)}
+            provider_code = self._provider_error_code(body)
+            if provider_code in {"insufficient_quota", "usage_limit_reached"}:
+                raise UsageLimitReachedError(
+                    message,
+                    status_code=resp.status_code,
+                    details={**details, "body": body, "provider_code": provider_code},
+                ) from exc
             if resp.status_code == 429:
                 raise LLMRateLimitError(
                     message,
@@ -418,6 +426,20 @@ class OpenAICompatibleClient:
         if request is None:
             return {}
         return {"url": str(request.url)}
+
+    def _provider_error_code(self, body: str) -> str:
+        try:
+            data = json.loads(body)
+        except json.JSONDecodeError:
+            lowered = body.lower()
+            if "insufficient_quota" in lowered or "usage limit" in lowered:
+                return "usage_limit_reached"
+            return ""
+        raw_error = data.get("error")
+        if not isinstance(raw_error, dict):
+            return ""
+        code = raw_error.get("code") or raw_error.get("type")
+        return code if isinstance(code, str) else ""
 
     def _stream_provider_error(self, data: dict[str, Any]) -> LLMStreamError:
         raw_error = data.get("error")

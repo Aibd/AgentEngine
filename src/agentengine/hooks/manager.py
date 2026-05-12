@@ -126,6 +126,14 @@ class HookManager:
                     result.reason,
                 )
                 raise HookAbortError(event, handler_name, result.reason)
+            if result.outcome is HookOutcome.STOP:
+                logger.info(
+                    "hook_stopped event=%s handler=%s reason=%s",
+                    event.value,
+                    handler_name,
+                    result.reason,
+                )
+                break
         return results
 
     # -- Snapshot for diagnostics -------------------------------------------

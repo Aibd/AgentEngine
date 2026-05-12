@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import replace
 from typing import Any, Protocol, cast
 
 from agentengine.base.agent import AgentRun
@@ -21,6 +21,7 @@ from agentengine.persistence.port import PersistencePort
 from agentengine.preset import AgentPreset
 from agentengine.run_config import RunConfig
 from agentengine.runtime.events import RuntimeEvent
+from agentengine.runtime.cancellation import CancellationToken
 from agentengine.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS
 from agentengine.runtime.turn_runner import TurnRunner
 from agentengine.stream.printer import Printer
@@ -74,6 +75,7 @@ class AgentEngine:
         self._require_llm = require_llm
         self._max_query_chars = max_query_chars
         self._managed_llms: dict[int, LLMClient] = {}
+        self._active_runs: dict[str, tuple[CancellationToken, asyncio.Task[Any] | None]] = {}
         self._persistence = persistence
         self._lock_manager = lock_manager or InMemoryConversationLockManager()
         self._middleware = middleware
@@ -107,8 +109,12 @@ class AgentEngine:
 
         started_at = time.perf_counter()
         agent = AgentRun(config=config, context=context)
+        cancellation_token = CancellationToken()
+        task = asyncio.current_task()
+        self._active_runs[context.request_id] = (cancellation_token, task)
         context.extras["agent"] = agent
         context.extras["run_config"] = config
+        context.extras["cancellation_token"] = cancellation_token
         logger.info(
             "agent_run_start request_id=%s agent=%s conversation_id=%s",
             context.request_id,
@@ -131,12 +137,25 @@ class AgentEngine:
                     tool_timeout_seconds=tool_timeout_seconds,
                 )
         finally:
+            self._active_runs.pop(context.request_id, None)
             self._record_agent_finish(
                 agent=agent,
                 context=context,
                 started_at=started_at,
                 agent_name=agent_name,
             )
+
+    def interrupt(self, request_id: str, reason: str = "interrupted") -> bool:
+        """Request cancellation for an active run by request id."""
+
+        active = self._active_runs.get(request_id)
+        if active is None:
+            return False
+        token, task = active
+        token.cancel(reason)
+        if task is not None:
+            task.cancel()
+        return True
 
     def _resolve_config(
         self,
@@ -153,11 +172,10 @@ class AgentEngine:
             config = self._preset_to_config(preset)
 
         kwargs = agent_kwargs or {}
-        max_turns = kwargs.get("max_turns")
-        if max_turns is None:
-            max_turns = kwargs.get("max_steps")
-        if max_turns is not None and max_turns != config.effective_max_turns:
-            return replace(config, max_turns=int(max_turns), max_steps=None)
+        unsupported = {"max_turns", "max_steps"} & set(kwargs)
+        if unsupported:
+            names = ", ".join(sorted(unsupported))
+            raise TypeError(f"agent_kwargs no longer supports: {names}")
         return config
 
     @staticmethod

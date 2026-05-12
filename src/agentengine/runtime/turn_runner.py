@@ -8,7 +8,14 @@ from pathlib import Path
 
 from agentengine.base.agent import AgentRun
 from agentengine.base.context import AgentContext
-from agentengine.errors import LLMContextWindowError, LLMError, ToolExecutionError, error_to_dict
+from agentengine.errors import (
+    AgentCancelledError,
+    ContextWindowExceededError,
+    LLMError,
+    ToolExecutionError,
+    UsageLimitReachedError,
+    error_to_dict,
+)
 from agentengine.enterprise.approval import ApprovalDeniedError
 from agentengine.enterprise.middleware import MiddlewareChain
 from agentengine.enterprise.quota import QuotaExceededError
@@ -204,7 +211,7 @@ class TurnRunner:
                 )
             else:
                 result = await turn_fn(agent, context, query)
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, AgentCancelledError):
             terminal_status = "cancelled"
             state.mark_cancelled()
             await emit(
@@ -313,8 +320,10 @@ class TurnRunner:
 
     @staticmethod
     def _classify(error: BaseException) -> TerminalReason:
-        if isinstance(error, LLMContextWindowError):
+        if isinstance(error, ContextWindowExceededError):
             return TerminalReason.CONTEXT_EXCEEDED
+        if isinstance(error, UsageLimitReachedError):
+            return TerminalReason.USAGE_LIMIT_REACHED
         if isinstance(error, ToolExecutionError):
             return TerminalReason.TOOL_FAILED
         if isinstance(error, LLMError):

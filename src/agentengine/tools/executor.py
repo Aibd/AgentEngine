@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentengine.runtime.events import (
+    ApprovalRequired,
     RuntimeEvent,
     ToolCallCompleted,
     ToolCallFailed,
@@ -18,6 +19,7 @@ from agentengine.runtime.events import (
     ToolStreamEventEmitted,
 )
 from agentengine.tools.base import StreamingTool, Tool, ToolStreamEvent
+from agentengine.tools.policy import ExecPolicy, ExecPolicyAction
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +48,13 @@ class ToolExecutor:
         turn_id: str,
         on_event: EventCallback | None = None,
         timeout_seconds: float | None = None,
+        exec_policy: ExecPolicy | None = None,
     ) -> None:
         self.run_id = run_id
         self.turn_id = turn_id
         self.on_event = on_event
         self.timeout_seconds = timeout_seconds
+        self.exec_policy = exec_policy
 
     async def execute(
         self,
@@ -59,9 +63,13 @@ class ToolExecutor:
         *,
         tool_call_id: str | None = None,
     ) -> ToolExecutionResult:
+        call_id = tool_call_id or f"tc_{uuid.uuid4().hex[:10]}"
+        policy_result = await self._apply_policy(call_id, tool, arguments)
+        if policy_result is not None:
+            return policy_result
         if isinstance(tool, StreamingTool):
-            return await self._execute_streaming(tool, arguments, tool_call_id=tool_call_id)
-        return await self._execute_plain(tool, arguments, tool_call_id=tool_call_id)
+            return await self._execute_streaming(tool, arguments, tool_call_id=call_id)
+        return await self._execute_plain(tool, arguments, tool_call_id=call_id)
 
     # -- Plain (non-streaming) execution ----------------------------------
 
@@ -193,6 +201,47 @@ class ToolExecutor:
                 run_id=self.run_id, turn_id=self.turn_id,
                 tool_call_id=call_id, tool_name=tool_name, arguments=arguments,
             )
+        )
+
+    async def _apply_policy(
+        self,
+        call_id: str,
+        tool: Tool,
+        arguments: dict[str, Any],
+    ) -> ToolExecutionResult | None:
+        if self.exec_policy is None:
+            return None
+        decision = self.exec_policy.decide(tool.name, arguments)
+        if decision.allowed:
+            return None
+
+        reason = decision.reason or f"ExecPolicy {decision.action.value}"
+        await self._emit_started(call_id, tool.name, arguments)
+        if decision.action is ExecPolicyAction.ASK:
+            await self._emit(
+                ApprovalRequired(
+                    run_id=self.run_id,
+                    turn_id=self.turn_id,
+                    approval_id=f"apr_{call_id}",
+                    tool_name=tool.name,
+                    arguments=arguments,
+                    status="pending",
+                    reason=reason,
+                )
+            )
+            error_type = "ApprovalRequired"
+            message = f"Tool '{tool.name}' requires approval by ExecPolicy: {reason}"
+        else:
+            error_type = "ExecPolicyDenied"
+            message = f"Tool '{tool.name}' denied by ExecPolicy: {reason}"
+        await self._emit_failed(call_id, tool.name, error_type, message, 0.0)
+        return ToolExecutionResult(
+            tool_name=tool.name,
+            ok=False,
+            content=message,
+            error=message,
+            elapsed_seconds=0.0,
+            tool_call_id=call_id,
         )
 
     async def _emit_stream_event(

@@ -134,8 +134,17 @@ class LLMStreamError(LLMError):
     retryable = True
 
 
-class LLMContextWindowError(LLMError):
+class ContextWindowExceededError(LLMError):
     code = "llm_context_window_exceeded"
+    retryable = False
+
+
+class LLMContextWindowError(ContextWindowExceededError):
+    """Backward-compatible name for context-window failures."""
+
+
+class UsageLimitReachedError(LLMError):
+    code = "llm_usage_limit_reached"
     retryable = False
 
 

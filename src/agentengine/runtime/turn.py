@@ -20,12 +20,14 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, cast
 
 from agentengine.base.agent import AgentRun
 from agentengine.base.context import AgentContext
 from agentengine.base.state import AgentState
+from agentengine.errors import AgentCancelledError, ContextWindowExceededError
 from agentengine.hooks import (
+    AfterTurnPayload,
     HookAbortError,
     HookEvent,
     HookManager,
@@ -35,6 +37,8 @@ from agentengine.hooks import (
 )
 from agentengine.llm.client import LLMResponse
 from agentengine.memory.message import Message
+from agentengine.runtime.cancellation import CancellationToken
+from agentengine.runtime.compaction import Compactor, LLMSummaryCompactor
 from agentengine.runtime.events import (
     ReasoningDelta,
     RuntimeEvent,
@@ -46,6 +50,7 @@ from agentengine.runtime.events import (
     UsageReport,
 )
 from agentengine.tools.executor import ToolExecutor
+from agentengine.tools.policy import ExecPolicy
 from agentengine.enterprise.approval import ApprovalDeniedError, ApprovalGate
 from agentengine.enterprise.tenant import TenantContext
 from agentengine.enterprise.quota import QuotaExceededError, QuotaStore
@@ -89,12 +94,7 @@ async def run_turn(
         await agent.setup()
         agent.state = AgentState.RUNNING
 
-        logger.info(
-            "agent_run_start request_id=%s agent=%s max_turns=%s",
-            context.request_id,
-            agent.name,
-            agent.max_turns,
-        )
+        logger.info("agent_run_start request_id=%s agent=%s", context.request_id, agent.name)
 
         if context.persistence and context.conversation_id:
             await agent.memory.load_from_db(context.persistence, context.conversation_id)
@@ -117,8 +117,8 @@ async def run_turn(
             time.perf_counter() - started_at,
         )
         return result
-    except asyncio.CancelledError:
-        primary_error = asyncio.CancelledError()
+    except (asyncio.CancelledError, AgentCancelledError) as exc:
+        primary_error = exc
         agent.state = AgentState.CANCELLED
         logger.warning(
             "agent_run_cancelled request_id=%s agent=%s steps=%d elapsed=%.3fs",
@@ -230,12 +230,13 @@ async def _loop(
     prompt_tokens_total = 0
     completion_tokens_total = 0
     loop_started_at = time.perf_counter()
+    cancellation_token = _get_cancellation_token(context)
 
     while True:
-        if agent.max_turns is not None and agent.current_step >= agent.max_turns:
-            context.extras["terminal_reason"] = "max_turns"
-            break
+        if cancellation_token is not None:
+            cancellation_token.throw_if_cancelled()
 
+        await _maybe_compact(agent, context)
         agent.current_step += 1
         turn_started_at = time.perf_counter()
 
@@ -253,6 +254,8 @@ async def _loop(
         response = await _chat_streaming(
             context, messages, tools=tools, emit=emit, run_id=run_id, turn_id=turn_id
         )
+        if cancellation_token is not None:
+            cancellation_token.throw_if_cancelled()
 
         if response.usage:
             prompt_tokens_total += int(response.usage.get("prompt_tokens", 0) or 0)
@@ -271,6 +274,8 @@ async def _loop(
         turn_elapsed = time.perf_counter() - turn_started_at
 
         if has_tool_calls:
+            if cancellation_token is not None:
+                cancellation_token.throw_if_cancelled()
             await _execute_tool_calls(
                 agent,
                 context,
@@ -290,6 +295,20 @@ async def _loop(
                 elapsed_seconds=turn_elapsed,
             )
         )
+
+        should_stop = await _dispatch_after_turn(
+            hook_manager,
+            session_id=session_id,
+            run_id=run_id,
+            turn_id=turn_id,
+            cwd=cwd,
+            agent=agent,
+            has_tool_calls=has_tool_calls,
+            final_answer=final_answer,
+        )
+        if should_stop and has_tool_calls:
+            context.extras["terminal_reason"] = "hook_stopped"
+            break
 
         if not has_tool_calls:
             break
@@ -314,6 +333,83 @@ async def _loop(
         )
 
     return final_answer
+
+
+def _get_cancellation_token(context: AgentContext) -> CancellationToken | None:
+    token = context.extras.get("cancellation_token")
+    return token if isinstance(token, CancellationToken) else None
+
+
+async def _maybe_compact(agent: AgentRun, context: AgentContext) -> None:
+    threshold = agent.config.auto_compact_tokens
+    if threshold <= 0 or agent.memory.estimated_tokens() <= threshold:
+        return
+
+    compactor: Compactor | None = None
+    configured = context.extras.get("compactor") or agent.config.compactor
+    if configured is not None:
+        compactor = cast(Compactor, configured)
+    elif context.llm is not None:
+        compactor = LLMSummaryCompactor(
+            context.llm,
+            keep_recent=agent.config.compaction_keep_recent,
+        )
+
+    if compactor is None:
+        raise ContextWindowExceededError(
+            "context window exceeded and no compactor is configured",
+            details={"estimated_tokens": agent.memory.estimated_tokens(), "threshold": threshold},
+        )
+
+    try:
+        compacted = await compactor.compact(agent.memory.snapshot())
+    except ContextWindowExceededError:
+        raise
+    except Exception as exc:
+        raise ContextWindowExceededError(
+            f"auto-compaction failed: {exc}",
+            details={
+                "estimated_tokens": agent.memory.estimated_tokens(),
+                "threshold": threshold,
+                "cause_type": type(exc).__name__,
+            },
+        ) from exc
+
+    agent.memory.replace(compacted)
+    if agent.memory.estimated_tokens() > threshold:
+        raise ContextWindowExceededError(
+            "auto-compaction did not reduce history below the configured threshold",
+            details={"estimated_tokens": agent.memory.estimated_tokens(), "threshold": threshold},
+        )
+
+
+async def _dispatch_after_turn(
+    hook_manager: HookManager | None,
+    *,
+    session_id: str,
+    run_id: str,
+    turn_id: str,
+    cwd: str,
+    agent: AgentRun,
+    has_tool_calls: bool,
+    final_answer: str,
+) -> bool:
+    if hook_manager is None:
+        return False
+    results = await hook_manager.dispatch(
+        HookEvent.AFTER_TURN,
+        AfterTurnPayload(
+            session_id=session_id,
+            run_id=run_id,
+            turn_id=turn_id,
+            cwd=cwd,
+            agent_name=agent.name,
+            turn=agent.current_step,
+            has_tool_calls=has_tool_calls,
+            final_answer=final_answer,
+        ),
+    )
+    return any(result.should_stop for result in results)
 
 
 async def _chat_streaming(
@@ -435,6 +531,11 @@ async def _execute_tool_calls(
         turn_id=turn_id,
         on_event=emit,
         timeout_seconds=tool_timeout_seconds,
+        exec_policy=(
+            context.extras.get("exec_policy")
+            if isinstance(context.extras.get("exec_policy"), ExecPolicy)
+            else None
+        ),
     )
     hook_manager: HookManager | None = context.extras.get("hooks")
     cwd = str(context.extras.get("workspace_root") or "")

@@ -51,6 +51,11 @@ class Memory:
         with self._lock:
             self.messages.clear()
 
+    def replace(self, messages: Iterable[Message]) -> None:
+        with self._lock:
+            self.messages = list(messages)
+            self._trim()
+
     def snapshot(self) -> list[Message]:
         """Return a stable copy of the current messages.
 

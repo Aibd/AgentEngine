@@ -80,11 +80,7 @@ def otel_tracing_middleware() -> MiddlewareFn:
         _current_span.set(span)
 
         span.set_attribute("agentengine.agent_name", ctx.config.name)
-        max_turns = ctx.config.effective_max_turns
-        span.set_attribute(
-            "agentengine.max_turns",
-            max_turns if max_turns is not None else "unbounded",
-        )
+        span.set_attribute("agentengine.loop_limit", "unbounded")
         span.set_attribute("agentengine.query_length", len(ctx.query))
 
         started_at = time.perf_counter()
