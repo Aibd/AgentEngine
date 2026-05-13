@@ -6,7 +6,7 @@ from __future__ import annotations
 这个脚本演示一条接近真实业务接入的完整链路：
 1. 从 .env 或命令行参数读取 LLM 配置
 2. 创建 OpenAI 兼容的 LLM 客户端
-3. 声明一个自定义工具 OrderStatusTool
+3. 声明一个自定义工具 UserProfileTool
 4. 通过 AgentPreset 注册 Agent 的系统指令和启动钩子
 5. 使用 AgentEngine 创建流式上下文并运行 Agent
 6. 将会话消息和运行记录保存到 SQLite
@@ -25,6 +25,11 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 # examples 目录通常不是安装后的包路径。这里把项目根目录和 src 加入 sys.path，
 # 方便直接从源码仓库运行示例，而不需要先 pip install 当前项目。
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,46 +43,71 @@ from agentengine.llm.openai_compat import OpenAICompatibleClient  # noqa: E402
 from agentengine.persistence import SqlitePersistence  # noqa: E402
 
 
-class OrderStatusTool(Tool):
-    """示例工具：根据订单号查询一个写死的演示订单状态"""
+class UserProfileTool(Tool):
+    """示例工具：根据用户 ID 查询一个写死的演示用户资料"""
 
     # 工具名称会暴露给 LLM。模型需要通过这个名字发起 tool call。
-    name = "lookup_order_status"
+    name = "lookup_user_profile"
 
     # 工具描述会进入 OpenAI tools schema，直接影响模型什么时候选择调用它。
-    description = "Look up a demo order by order_id."
+    description = "根据 user_id 查询演示用户资料。"
 
-    # JSON Schema 定义工具参数。这里要求模型传入一个 order_id 字符串。
+    # JSON Schema 定义工具参数。这里要求模型传入一个 user_id 字符串。
     schema = {
         "type": "object",
         "properties": {
-            "order_id": {
+            "user_id": {
                 "type": "string",
-                "description": "Order id such as A-100 or B-200.",
+                "description": "用户 ID，例如 U-100 或 U-200。",
             }
         },
-        "required": ["order_id"],
+        "required": ["user_id"],
     }
 
     async def run(self, **kwargs: Any) -> str:
         """执行工具逻辑，返回值会作为 tool_result 回传给 LLM"""
 
         # LLM 传入的参数来自 schema，但真实业务里仍建议做类型转换和清洗。
-        order_id = str(kwargs.get("order_id", "")).strip().upper()
+        user_id = str(kwargs.get("user_id", "")).strip().upper()
 
         # 演示用的内存数据。真实项目里通常会在这里查询数据库、HTTP API 或内部 RPC。
-        orders = {
-            "A-100": "packed and waiting for carrier pickup",
-            "B-200": "out for delivery",
-            "C-300": "delivered yesterday",
+        profiles = {
+            "U-100": {
+                "name": "Ada Chen",
+                "email": "ada.chen@example.com",
+                "plan": "Pro",
+                "locale": "zh-CN",
+                "timezone": "Asia/Shanghai",
+                "preferences": ["流式响应", "简洁摘要"],
+            },
+            "U-200": {
+                "name": "Ben Wu",
+                "email": "ben.wu@example.com",
+                "plan": "Team",
+                "locale": "en-US",
+                "timezone": "America/Los_Angeles",
+                "preferences": ["详细解释", "周报"],
+            },
         }
-        return orders.get(order_id, f"no demo order found for {order_id or '<empty>'}")
+        profile = profiles.get(user_id)
+        if not profile:
+            return f"未找到演示用户资料：{user_id or '<empty>'}"
+
+        return (
+            f"用户ID={user_id}; "
+            f"姓名={profile['name']}; "
+            f"邮箱={profile['email']}; "
+            f"套餐={profile['plan']}; "
+            f"语言地区={profile['locale']}; "
+            f"时区={profile['timezone']}; "
+            f"偏好={', '.join(profile['preferences'])}"
+        )
 
 
 async def setup_tools(context: AgentContext) -> None:
     """AgentPreset.setup 钩子：每次 run 开始前，把本次运行可用的工具注册进去"""
 
-    context.tool_collection.add(OrderStatusTool())
+    context.tool_collection.add(UserProfileTool())
 
 
 def load_dotenv(path: Path) -> None:
@@ -102,22 +132,22 @@ def parse_args() -> argparse.Namespace:
     load_dotenv(ROOT / ".env")
 
     parser = argparse.ArgumentParser(
-        description="Run a complete AgentEngine example with streaming and persistence."
+        description="运行一个包含真实 LLM 调用、流式输出和 SQLite 持久化的完整 AgentEngine 示例。"
     )
     parser.add_argument(
         "--base-url",
         default=os.getenv("LLM_BASE_URL", "https://api.deepseek.com"),
-        help="OpenAI-compatible API host, for example https://api.deepseek.com",
+        help="OpenAI 兼容 API 地址，例如 https://api.deepseek.com",
     )
     parser.add_argument(
         "--model",
         default=os.getenv("LLM_MODEL", "deepseek-v4-pro"),
-        help="Model name sent in the chat completions payload.",
+        help="发送给 Chat Completions 接口的模型名称。",
     )
     parser.add_argument(
         "--api-key",
         default=os.getenv("LLM_API_KEY", ""),
-        help="Provider API key. Prefer LLM_API_KEY in .env for local runs.",
+        help="模型服务商 API Key。本地运行建议写在 .env 的 LLM_API_KEY 中。",
     )
 
     # timeout 和 max_retries 直接传给 OpenAICompatibleClient，
@@ -125,14 +155,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--max-retries", type=int, default=2)
 
-    # query 是本次用户输入。默认问题会诱导模型调用 lookup_order_status 工具。
+    # query 是本次用户输入。默认问题会诱导模型调用 lookup_user_profile 工具。
     parser.add_argument(
         "--query",
-        default="Where is order A-100? Use the order lookup tool if helpful.",
+        default="请先调用用户资料查询工具获取用户 U-100 的资料，然后总结查询结果。",
     )
 
     # agent-name 必须和 build_engine() 中注册到 presets 的 key 一致。
-    parser.add_argument("--agent-name", default="support_agent")
+    parser.add_argument("--agent-name", default="profile_agent")
 
     # conversation-id 非空时会启用会话历史加载、保存和会话锁。
     # 多次用同一个 conversation-id 运行，可以看到历史消息累积到 SQLite 中。
@@ -150,7 +180,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--show-thinking",
         action="store_true",
-        help="Print reasoning_content chunks when the provider emits them.",
+        help="当模型服务商返回 reasoning_content 时打印推理增量。",
     )
     return parser.parse_args()
 
@@ -159,7 +189,7 @@ def build_llm_client(args: argparse.Namespace) -> OpenAICompatibleClient:
     """根据命令行参数创建 OpenAI 兼容客户端"""
 
     if not args.api_key:
-        raise SystemExit("Missing API key. Set LLM_API_KEY or pass --api-key.")
+        raise SystemExit("缺少 API Key。请设置 LLM_API_KEY，或通过 --api-key 传入。")
 
     # OpenAICompatibleClient 只要求服务端兼容 OpenAI Chat Completions 风格接口。
     # base_url 可以指向 OpenAI、DeepSeek、企业代理网关或其他兼容服务。
@@ -182,11 +212,11 @@ def build_engine(persistence: SqlitePersistence, agent_name: str) -> AgentEngine
     # - max_messages / auto_compact_tokens：控制历史消息管理
     preset = AgentPreset(
         name=agent_name,
-        description="Demo support agent with one custom tool.",
+        description="带有一个自定义工具的用户资料演示 Agent。",
         instructions=(
-            "You are a concise support assistant. When the user asks about an "
-            "order, call lookup_order_status with the order id, then explain "
-            "the result in one or two sentences."
+            "你是一个简洁的用户资料助手。当用户询问用户资料时，"
+            "必须先使用用户 ID 调用 lookup_user_profile 工具，"
+            "然后用一到两句话总结查询结果。"
         ),
         max_messages=40,
         auto_compact_tokens=120_000,
@@ -218,28 +248,28 @@ def print_stream_frame(frame: dict[str, Any], *, show_thinking: bool) -> None:
     # usage：Token 用量
     # done / error：运行结束或失败
     if event == "start":
-        print(f"[start] agent={payload.get('agent')} request_id={payload.get('request_id')}")
+        print(f"[开始] agent={payload.get('agent')} request_id={payload.get('request_id')}")
     elif event == "step":
-        print(f"\n[step {payload.get('turn')}]")
+        print(f"\n[步骤 {payload.get('turn')}]")
     elif event == "thinking" and show_thinking:
         print(str(payload.get("delta", "")), end="", flush=True)
     elif event == "text":
         print(str(payload.get("delta", "")), end="", flush=True)
     elif event == "tool_call_start":
-        print(f"\n[tool] {payload.get('tool')}({payload.get('arguments')})")
+        print(f"\n[工具] {payload.get('tool')}({payload.get('arguments')})")
     elif event == "tool_result":
-        print(f"[tool result] {payload.get('result')}")
+        print(f"[工具结果] {payload.get('result')}")
     elif event == "usage":
         print(
-            "\n[usage] "
-            f"prompt={payload.get('prompt_tokens')} "
-            f"completion={payload.get('completion_tokens')} "
-            f"total={payload.get('total_tokens')}"
+            "\n[用量] "
+            f"输入={payload.get('prompt_tokens')} "
+            f"输出={payload.get('completion_tokens')} "
+            f"总计={payload.get('total_tokens')}"
         )
     elif event == "done":
-        print(f"\n[done] reason={payload.get('reason')}")
+        print(f"\n[完成] 原因={payload.get('reason')}")
     elif event == "error":
-        print(f"\n[error] {payload.get('code')}: {payload.get('message')}")
+        print(f"\n[错误] {payload.get('code')}: {payload.get('message')}")
 
 
 async def run_streaming_example(args: argparse.Namespace) -> None:
@@ -297,12 +327,12 @@ async def run_streaming_example(args: argparse.Namespace) -> None:
         messages = await persistence.load_messages(args.conversation_id)
         runs = await persistence.list_runs(args.conversation_id, limit=1)
 
-        print("\n\nFinal answer:")
+        print("\n\n最终回答:")
         print(final_answer)
-        print(f"\nPersisted SQLite DB: {args.db_path}")
-        print(f"Persisted messages: {len(messages)}")
+        print(f"\nSQLite 持久化数据库: {args.db_path}")
+        print(f"已持久化消息数: {len(messages)}")
         if runs:
-            print(f"Latest run id: {runs[0]['run_id']}")
+            print(f"最近一次运行 ID: {runs[0]['run_id']}")
     finally:
         # 释放底层资源。真实服务通常在应用 shutdown 钩子里统一关闭。
         await engine.close()

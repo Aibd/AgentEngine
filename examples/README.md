@@ -34,7 +34,7 @@ uv run python examples/full_sdk_example.py \
   --base-url https://api.deepseek.com/v1 \
   --model deepseek-chat \
   --api-key your_api_key_here \
-  --query "Where is order A-100?"
+  --query "请先调用用户资料查询工具获取用户 U-100 的资料，然后总结查询结果。"
 ```
 
 ## 运行 Web API 示例
