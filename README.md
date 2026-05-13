@@ -109,7 +109,7 @@ engine = AgentEngine(presets={
 # event_stream 是异步队列，实时推送事件帧
 context, event_stream = engine.create_streaming_context(
     request_id="req-001",
-    query="帮我查一下订单状态",
+    query="帮我总结一下用户资料",
     conversation_id="conv-001",
 )
 context.llm = llm_client  # 注入 LLM 客户端（见上方创建方式）
@@ -151,9 +151,6 @@ answer = await task  # 完整最终回答字符串
 ### CLI 聊天
 
 ```bash
-# 原始事件模式
-PYTHONIOENCODING=utf-8 uv run python scripts/chat.py general_chat "你好"
-
 # Rich 卡片模式
 PYTHONIOENCODING=utf-8 uv run python scripts/chat_pretty.py general_chat "你好"
 
@@ -343,7 +340,7 @@ context = AgentContext(
     query=query,
     llm=llm,
     tool_collection=ToolCollection([
-        OrderLookupTool(),   # 自定义工具实例
+        ProfileLookupTool(),  # 自定义工具实例
         ReadFileTool(),      # 内置工具也可以手动注入
     ]),
 )
