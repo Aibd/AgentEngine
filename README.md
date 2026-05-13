@@ -56,6 +56,17 @@ LLM_BASE_URL=https://api.deepseek.com/v1
 uv run --env-file .env pytest -q
 ```
 
+快速启动参考应用：
+
+```bash
+# Windows
+quick_start.cmd
+
+# macOS / Linux
+chmod +x quick_start.sh
+./quick_start.sh
+```
+
 ---
 
 ### 创建 LLM 客户端
@@ -150,14 +161,21 @@ PYTHONIOENCODING=utf-8 uv run python scripts/chat_pretty.py general_chat "你好
 PYTHONIOENCODING=utf-8 uv run python scripts/chat_pretty.py deep_research "分析架构" --show-reasoning expanded
 ```
 
-### Web 界面
+### 完整 SDK 示例
+
+```bash
+# 端到端 SDK 接入示例
+uv run --env-file .env python examples/full_sdk_example.py
+```
+
+### Web 示例
 
 ```bash
 # 启动后端
-uv run --env-file .env uvicorn examples.reference_app.services.web_api:app --host 127.0.0.1 --port 8000
+uv run --env-file .env uvicorn examples.services.web_api:app --host 127.0.0.1 --port 8000
 
 # 启动前端
-cd web && npm install && npm run dev   # http://localhost:5173
+cd examples/web && npm install && npm run dev   # http://localhost:5173
 ```
 
 ---
@@ -365,7 +383,7 @@ engine = AgentEngine(presets=presets, middleware=middleware)
 
 ## 注意事项
 
-- 不要 `import examples.reference_app` — 那是示范代码，不属于 SDK，需要就复制到你的代码库改造
+- 不要 `import examples` — 那是示范代码，不属于 SDK，需要就复制到你的代码库改造
 - 不要依赖 `agentengine.runtime.turn` 等内部模块 — 只用 `agentengine` 包根的公开导入
 - 不要在多副本生产环境用默认锁 — `InMemoryConversationLockManager` 只在单进程有效，必须换 Redis
 - 不要把 query 不脱敏直接进引擎 — PII 处理是业务系统责任
@@ -396,8 +414,8 @@ engine = AgentEngine(presets=presets, middleware=middleware)
 ```text
 src/agentengine/        核心 SDK，唯一发布包
 examples/               参考应用和示例脚本
+examples/web/           React + Vite 前端参考应用
 scripts/                CLI 聊天工具
-web/                    本地测试前端
 tests/                  pytest 测试
 ```
 

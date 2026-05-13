@@ -2,7 +2,7 @@
 
 **当前版本：v0.2.0**
 
-本文档列出 `agentengine` 包的全部公开对象及其完整 API 说明，遵循 [SemVer](https://semver.org/lang/zh-CN/) 语义化版本：v0.x 阶段 minor 版本允许破坏性改动（CHANGELOG 会标注），v1.0 之后破坏性改动只在 major 版本发生。
+本文档列出 `agentengine` 包的全部公开对象及其完整 API 说明，遵循 [SemVer](https://semver.org/lang/zh-CN/) 语义化版本：1.0.0 之前仍处于 0.y.z 阶段，minor 版本可能包含破坏性改动（CHANGELOG 会标注）；1.0.0 之后，破坏性改动只会出现在 major 版本
 
 
 ## 目录
@@ -91,7 +91,7 @@ from agentengine import (
 
 ### AgentEngine
 
-引擎的唯一入口 负责 Agent 预设管理、LLM 注入、运行调度、流式事件分发和中断控制。
+引擎的唯一入口，负责 Agent 预设管理、LLM 注入、运行调度、流式事件分发和中断控制
 
 ```python
 class AgentEngine:
@@ -99,32 +99,32 @@ class AgentEngine:
         self,
         *,
         presets: dict[str, AgentPreset | SupportsRunConfig] | None = None,
-        # Agent 预设注册表。key 为 agent_name，run() 时引用。
-        # 与 config_resolver 二选一，都提供则 presets 优先。
+        # Agent 预设注册表，key 为 agent_name，run() 时引用
+        # 与 config_resolver 二选一，都提供则 presets 优先
 
         config_resolver: Callable[[str], RunConfig] | None = None,
-        # 动态 RunConfig 解析器。每个 run() 调用时通过 agent_name 查询。
-        # 适合从数据库/配置中心动态加载配置的场景。
+        # 动态 RunConfig 解析器，每个 run() 调用时通过 agent_name 查询
+        # 适合从数据库/配置中心动态加载配置的场景
 
         llm_factory: Callable[[], LLMClient] | None = None,
-        # LLM 工厂回调。当 context.llm 为空时自动调用。
-        # 适合 Web 服务中按租户/用户动态创建 LLM 客户端。
+        # LLM 工厂回调，当 context.llm 为空时自动调用
+        # 适合 Web 服务中按租户/用户动态创建 LLM 客户端
 
         require_llm: bool = True,
-        # 是否要求 LLM 必须存在。False 时允许没有 LLM 也能运行（测试用）。
+        # 是否要求 LLM 必须存在，False 时允许没有 LLM 也能运行（测试用）
 
         max_query_chars: int = 20_000,
-        # 用户输入最大字符数。超长输入将被截断。
+        # 用户输入最大字符数，超长输入将被截断
 
         persistence: PersistencePort | None = None,
-        # 持久化实现。注入后引擎会在 conversation_id 非空时自动加载/保存消息。
+        # 持久化实现，注入后引擎会在 conversation_id 非空时自动加载/保存消息
 
         lock_manager: ConversationLockManager | None = None,
-        # 会话锁管理器。默认使用 InMemoryConversationLockManager（单进程）。
-        # 多副本部署必须注入 RedisConversationLockManager。
+        # 会话锁管理器，默认使用 InMemoryConversationLockManager（单进程）
+        # 多副本部署必须注入 RedisConversationLockManager
 
         middleware: MiddlewareChain | None = None,
-        # 企业中间件链。按需注入配额、审批、追踪、重试等横切关注点。
+        # 企业中间件链，按需注入配额、审批、追踪、重试等横切关注点
     ): ...
 
     # ── 核心方法 ──────────────────────────────────────────
@@ -133,28 +133,28 @@ class AgentEngine:
         self,
         *,
         agent_name: str,
-        # 要运行的 Agent 名称，对应 presets 中的 key。
+        # 要运行的 Agent 名称，对应 presets 中的 key
 
         query: str,
-        # 用户输入的问题/指令。
+        # 用户输入的问题/指令
 
         context: AgentContext | None = None,
-        # 运行时上下文。若提供，其中的 LLM、工具、持久化等会与引擎合并。
-        # 若不提供，引擎根据 request_id 创建默认上下文。
+        # 运行时上下文，若提供，其中的 LLM、工具、持久化等会与引擎合并
+        # 若不提供，引擎根据 request_id 创建默认上下文
 
         tool_timeout_seconds: float | None = 30.0,
-        # 全局工具执行超时（秒）。会被单个 Tool 的 timeout_seconds 覆盖。
+        # 全局工具执行超时（秒），会被单个 Tool 的 timeout_seconds 覆盖
 
         agent_kwargs: dict[str, Any] | None = None,
-        # 传递给 AgentPreset.setup 和 RunConfig 的额外参数。
+        # 传递给 AgentPreset.setup 和 RunConfig 的额外参数
 
         on_event: Callable[[RuntimeEvent], Awaitable[None]] | None = None,
-        # 事件回调。每次引擎产生事件时调用，用于旁路推送到 SSE/WebSocket。
-        # 返回的仍然是完整字符串结果。
+        # 事件回调，每次引擎产生事件时调用，用于旁路推送到 SSE/WebSocket
+        # 返回的仍然是完整字符串结果
 
     ) -> str:
         """
-        执行一次 Agent 运行。返回完整的最终回答字符串。
+        执行一次 Agent 运行，返回完整的最终回答字符串
 
         ReAct 循环没有内置步数上限，结束条件：
         1. 模型返回的响应不包含 tool_calls
@@ -168,32 +168,32 @@ class AgentEngine:
         self,
         *,
         request_id: str,
-        # 请求唯一标识。用于日志追踪和中断控制。
+        # 请求唯一标识，用于日志追踪和中断控制
 
         query: str,
-        # 用户输入的问题。
+        # 用户输入的问题
 
         conversation_id: str = "",
-        # 会话 ID。非空时启用历史加载和持久化保存。
+        # 会话 ID，非空时启用历史加载和持久化保存
 
     ) -> tuple[AgentContext, SseEventQueue]:
         """
-        创建流式上下文，返回 (context, event_stream)。
+        创建流式上下文，返回 (context, event_stream)
 
-        event_stream 是异步队列，通过 SseEventQueue 实时推送事件帧。
+        event_stream 是异步队列，通过 SseEventQueue 实时推送事件帧
         调用方用 async for frame in event_stream 消费，每个 frame 是
-        {"event": str, "data": dict} 结构。
+        {"event": str, "data": dict} 结构
 
         engine.run() 应在 asyncio.create_task() 中后台运行，
-        同时 event_stream 在前台被消费。
+        同时 event_stream 在前台被消费
         """
 
     def interrupt(self, request_id: str, reason: str = "interrupted") -> bool:
         """
-        取消正在运行的 Agent。
+        取消正在运行的 Agent
 
-        request_id 与 AgentContext 中的 request_id 对应。
-        返回 True 表示成功发送取消信号，False 表示未找到对应运行。
+        request_id 与 AgentContext 中的 request_id 对应
+        返回 True 表示成功发送取消信号，False 表示未找到对应运行
         """
 ```
 
@@ -203,49 +203,49 @@ class AgentEngine:
 
 ### AgentContext
 
-每次 `engine.run()` 的完整运行时参数容器。业务系统创建后注入引擎。
+每次 `engine.run()` 的完整运行时参数容器，业务系统创建后注入引擎
 
 ```python
 @dataclass
 class AgentContext:
     request_id: str
-    # 请求唯一标识。用于日志追踪、中断控制和事件关联。
+    # 请求唯一标识，用于日志追踪、中断控制和事件关联
 
     query: str
-    # 用户输入的原始问题。
+    # 用户输入的原始问题
 
     llm: LLMClient | None = None
-    # LLM 客户端实例。若不提供，引擎会尝试使用 llm_factory 回调创建。
-    # 必须实现 chat() 和 chat_stream() 两个异步方法。
+    # LLM 客户端实例，若不提供，引擎会尝试使用 llm_factory 回调创建
+    # 必须实现 chat() 和 chat_stream() 两个异步方法
 
     printer: Printer | None = None
-    # 可选的渲染器。用于自定义文本/推理增量和系统消息的渲染方式。
+    # 可选的渲染器，用于自定义文本/推理增量和系统消息的渲染方式
 
     tool_collection: ToolCollection = field(default_factory=ToolCollection)
-    # 工具注册表。Agent 可调用的工具集合。
-    # 通过 context.tool_collection.add(my_tool) 注册自定义工具。
+    # 工具注册表，Agent 可调用的工具集合
+    # 通过 context.tool_collection.add(my_tool) 注册自定义工具
 
     session_id: str = ""
-    # 可选的会话标识。与 conversation_id 的区别：session 可跨越多个 conversation。
+    # 可选的会话标识，与 conversation_id 的区别：session 可跨越多个 conversation
 
     conversation_id: str = ""
-    # 会话 ID。非空时引擎会在 run 前自动加载历史消息，run 后自动保存。
-    # 同一 conversation_id 的并发调用会被会话锁串行化。
+    # 会话 ID，非空时引擎会在 run 前自动加载历史消息，run 后自动保存
+    # 同一 conversation_id 的并发调用会被会话锁串行化
 
     user: Any = None
-    # 当前用户对象。由业务系统解析后注入，用于审计和安全控制。
-    # 类型不限，引擎不关心具体结构。
+    # 当前用户对象，由业务系统解析后注入，用于审计和安全控制
+    # 类型不限，引擎不关心具体结构
 
     db: Any = None
-    # 可选的数据库连接。允许工具直接访问业务数据库。
-    # 类型不限，业务系统自行管理。
+    # 可选的数据库连接，允许工具直接访问业务数据库
+    # 类型不限，业务系统自行管理
 
     persistence: PersistencePort | None = None
-    # 持久化实现。优先级高于引擎级别的 persistence。
-    # 适合每个请求使用不同持久化后端的场景。
+    # 持久化实现，优先级高于引擎级别的 persistence
+    # 适合每个请求使用不同持久化后端的场景
 
     extras: dict[str, Any] = field(default_factory=dict)
-    # 扩展字段。业务系统可注入任意额外数据（如 tenant 信息、trace context 等）。
+    # 扩展字段，业务系统可注入任意额外数据（如 tenant 信息、trace context 等）
     # 常用 key：
     #   "hooks"  → HookManager 实例
     #   "tenant" → TenantContext 实例
@@ -258,52 +258,52 @@ class AgentContext:
 
 ### AgentPreset
 
-业务系统声明 Agent 的入口。是一个不可变 dataclass，通过 `to_run_config()` 编译为 `RunConfig`。
+业务系统声明 Agent 的入口，是一个不可变 dataclass，通过 `to_run_config()` 编译为 `RunConfig`
 
 ```python
 @dataclass(frozen=True, slots=True)
 class AgentPreset:
     name: str
-    # Agent 名称。run() 时通过 agent_name 引用。
-    # 全局唯一，建议使用小写下划线命名（如 "customer_support"）。
+    # Agent 名称，run() 时通过 agent_name 引用
+    # 全局唯一，建议使用小写下划线命名（如 "customer_support"）
 
     description: str = ""
-    # Agent 的可读描述。用于 UI 展示和日志。
+    # Agent 的可读描述，用于 UI 展示和日志
 
     instructions: str = ""
-    # 系统提示词。引擎会自动追加 DEFAULT_AGENT_SYSTEM_PROMPT
-    # （"持续工作直到完成"的安全指令）。
+    # 系统提示词，引擎会自动追加 DEFAULT_AGENT_SYSTEM_PROMPT
+    # （"持续工作直到完成"的安全指令）
 
     max_messages: int = 0
-    # 消息历史上限。0 表示不限制。
-    # 超过后最早的非系统消息会被移除。
+    # 消息历史上限，0 表示不限制
+    # 超过后最早的非系统消息会被移除
 
     auto_compact_tokens: int = 0
-    # 自动压缩阈值。消息历史 token 数超过此值时触发自动压缩。
-    # 0 表示禁用压缩。建议值：120_000（为 API 上下文窗口留余量）。
+    # 自动压缩阈值，消息历史 token 数超过此值时触发自动压缩
+    # 0 表示禁用压缩，建议值：120_000（为 API 上下文窗口留余量）
 
     compaction_keep_recent: int = 8
-    # 压缩时保留最近多少条消息不被摘要。
-    # 值越大保留的上下文越完整，但压缩效果越差。
+    # 压缩时保留最近多少条消息不被摘要
+    # 值越大保留的上下文越完整，但压缩效果越差
 
     compactor: Compactor | None = None
-    # 自定义压缩器。不提供则使用 LLMSummaryCompactor。
+    # 自定义压缩器，不提供则使用 LLMSummaryCompactor
 
     setup: Callable[[AgentContext], Awaitable[None]] | None = None
-    # 启动钩子。在 run() 开始时调用，用于注册工具、初始化记忆等。
+    # 启动钩子，在 run() 开始时调用，用于注册工具、初始化记忆等
     # 签名：async def my_setup(context: AgentContext) -> None
 
     teardown: Callable[[AgentContext], Awaitable[None]] | None = None
-    # 清理钩子。在 run() 结束时调用，用于释放资源、记录日志等。
+    # 清理钩子，在 run() 结束时调用，用于释放资源、记录日志等
     # 签名：async def my_teardown(context: AgentContext) -> None
 
     extras: dict[str, object] = field(default_factory=dict)
-    # Agent 级别的扩展配置。传递到 RunConfig.extras。
+    # Agent 级别的扩展配置，传递到 RunConfig.extras
 ```
 
 ### RunConfig
 
-编译后的不可变运行配置。通常不直接创建，由 `AgentPreset.to_run_config()` 生成。
+编译后的不可变运行配置，通常不直接创建，由 `AgentPreset.to_run_config()` 生成
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -325,20 +325,20 @@ class RunConfig:
 
 ### Tool
 
-所有工具的抽象基类。业务系统继承此类实现自定义工具。
+所有工具的抽象基类，业务系统继承此类实现自定义工具
 
 ```python
 class Tool(ABC):
     name: str
-    # 工具名称。LLM 调用时通过此名称引用。
-    # 全局唯一（在同一 ToolCollection 内），建议使用小写下划线。
+    # 工具名称，LLM 调用时通过此名称引用
+    # 全局唯一（在同一 ToolCollection 内），建议使用小写下划线
 
     description: str
-    # 工具描述。告诉 LLM 这个工具什么时候应该被调用、能做什么。
-    # 影响 LLM 的工具选择质量，建议写清楚触发条件。
+    # 工具描述，告诉 LLM 这个工具什么时候应该被调用、能做什么
+    # 影响 LLM 的工具选择质量，建议写清楚触发条件
 
     schema: dict[str, Any]
-    # JSON Schema 格式的参数定义。
+    # JSON Schema 格式的参数定义
     # 示例：
     # {
     #     "type": "object",
@@ -349,41 +349,41 @@ class Tool(ABC):
     # }
 
     timeout_seconds: float = 30.0
-    # 单次执行超时（秒）。超时后工具调用被标记为失败。
+    # 单次执行超时（秒），超时后工具调用被标记为失败
 
     is_destructive: bool = False
-    # 是否破坏性工具。设为 True 后：
+    # 是否破坏性工具，设为 True 后：
     # 1. 引擎会在执行前发送 ApprovalRequired 事件
     # 2. ExecPolicy 可单独控制破坏性工具的审批流程
 
     max_result_chars: int = 50_000
-    # 结果最大字符数。超过后按 result_summary_strategy 截断。
+    # 结果最大字符数，超过后按 result_summary_strategy 截断
 
     result_summary_strategy: str = "truncate"
-    # 结果截断策略。可选 "truncate"（截断）、"summarize"（LLM 摘要）。
+    # 结果截断策略，可选 "truncate"（截断）、"summarize"（LLM 摘要）
 
     # ── 方法 ──────────────────────────────────────────────
 
     def to_openai_tool(self) -> dict[str, Any]:
-        """转为 OpenAI 兼容的工具定义。包含 type: function + name + description + parameters。"""
+        """转为 OpenAI 兼容的工具定义，包含 type: function + name + description + parameters"""
 
     @abstractmethod
     async def run(self, **kwargs) -> str:
-        """执行工具逻辑。参数由 LLM 根据 schema 传入。返回结果字符串。"""
+        """执行工具逻辑，参数由 LLM 根据 schema 传入，返回结果字符串"""
 ```
 
 ### StreamingTool
 
-支持逐步输出中间结果的工具。适用于长时间运行的工具（如搜索、代码生成等）。
+支持逐步输出中间结果的工具，适用于长时间运行的工具（如搜索、代码生成等）
 
 ```python
 class StreamingTool(Tool):
     async def run_stream(self, **kwargs) -> AsyncIterator[ToolStreamEvent]:
         """
-        逐步执行工具逻辑。子类必须实现此方法。
+        逐步执行工具逻辑，子类必须实现此方法
 
-        必须 yield 至少一个 is_final=True 的 ToolStreamEvent。
-        每个事件作为 ToolStreamEventEmitted 推送到客户端。
+        必须 yield 至少一个 is_final=True 的 ToolStreamEvent
+        每个事件作为 ToolStreamEventEmitted 推送到客户端
 
         示例：
             yield ToolStreamEvent(event_type="searching", data="搜索中...")
@@ -394,51 +394,51 @@ class StreamingTool(Tool):
         """
 
     async def run(self, **kwargs) -> str:
-        """默认实现：消费 run_stream() 并拼接所有事件数据。"""
+        """默认实现：消费 run_stream() 并拼接所有事件数据"""
 ```
 
 ### ToolStreamEvent
 
-流式工具的中间事件。
+流式工具的中间事件
 
 ```python
 @dataclass
 class ToolStreamEvent:
     event_type: str = "tool_thought"
-    # 事件类型。映射到下游 ToolStreamEventEmitted 的 event_type 字段。
+    # 事件类型，映射到下游 ToolStreamEventEmitted 的 event_type 字段
 
     data: Any
-    # 事件内容。可以是字符串、字典等任意类型。
+    # 事件内容，可以是字符串、字典等任意类型
 
     is_final: bool = False
-    # 是否为最终事件。True 表示工具执行完成，后续不再有新事件。
+    # 是否为最终事件，True 表示工具执行完成，后续不再有新事件
 ```
 
 ### ToolCollection
 
-工具注册表。线程安全。
+工具注册表，线程安全
 
 ```python
 class ToolCollection:
     def __init__(self, tools: list[Tool] | None = None): ...
-    # 创建集合，可选地预填充工具列表。
+    # 创建集合，可选地预填充工具列表
 
     def add(self, tool: Tool) -> None:
-        """注册工具。按 tool.name 去重（后注册的覆盖先注册的）。"""
+        """注册工具，按 tool.name 去重（后注册的覆盖先注册的）"""
 
     def get(self, name: str) -> Tool | None:
-        """按名称获取工具。不存在返回 None。"""
+        """按名称获取工具，不存在返回 None"""
 
     def require(self, name: str) -> Tool:
-        """按名称获取工具。不存在抛出 KeyError。"""
+        """按名称获取工具，不存在抛出 KeyError"""
 
     def to_openai_tools(self) -> list[dict[str, Any]]:
-        """将所有工具转为 OpenAI 兼容列表。"""
+        """将所有工具转为 OpenAI 兼容列表"""
 ```
 
 ### ExecPolicy
 
-工具执行前的安全策略引擎。通过前缀规则实现白名单/黑名单。
+工具执行前的安全策略引擎，通过前缀规则实现白名单/黑名单
 
 ```python
 class ExecPolicy:
@@ -452,10 +452,10 @@ class ExecPolicy:
         self, tool_name: str, arguments: dict[str, Any] | None = None
     ) -> ExecPolicyDecision:
         """
-        评估工具是否允许执行。
-        按 rules 顺序匹配，命中第一个规则后返回其决策。
-        未命中任何规则时返回 default 动作。
-        shell 类工具优先用 arguments["command"] 匹配，其余用 tool_name。
+        评估工具是否允许执行
+        按 rules 顺序匹配，命中第一个规则后返回其决策
+        未命中任何规则时返回 default 动作
+        shell 类工具优先用 arguments["command"] 匹配，其余用 tool_name
         """
 
 class ExecPolicyAction(enum.Enum):
@@ -470,7 +470,7 @@ class ExecPolicyRule:
     reason: str = ""                # 策略说明（出现在拒绝消息中）
 
     def matches(self, subject: str) -> bool:
-        """subject 是否以此前缀开头。"""
+        """subject 是否以此前缀开头"""
 ```
 
 ---
@@ -479,7 +479,7 @@ class ExecPolicyRule:
 
 ### LLMClient (Protocol)
 
-LLM 客户端协议。任何实现 `chat()` 和 `chat_stream()` 的对象均可注入。
+LLM 客户端协议，任何实现 `chat()` 和 `chat_stream()` 的对象均可注入
 
 ```python
 class LLMClient(Protocol):
@@ -491,7 +491,7 @@ class LLMClient(Protocol):
         stream: bool = False,
         **kwargs,
     ) -> LLMResponse:
-        """非流式对话。返回完整响应（包含 content、tool_calls、usage 等）。"""
+        """非流式对话，返回完整响应（包含 content、tool_calls、usage 等）"""
 
     async def chat_stream(
         self,
@@ -500,14 +500,14 @@ class LLMClient(Protocol):
         tools: list[dict[str, Any]] | None = None,
         **kwargs,
     ) -> AsyncIterator[LLMChunk]:
-        """流式对话。yield 增量 Token 片段。"""
+        """流式对话，yield 增量 Token 片段"""
 ```
 
-框架自带 `OpenAICompatibleClient` 实现，通过 `create_llm_from_env()` 从环境变量 `LLM_API_KEY` / `LLM_MODEL` / `LLM_BASE_URL` 创建。
+框架自带 `OpenAICompatibleClient` 实现，通过 `create_llm_from_env()` 从环境变量 `LLM_API_KEY` / `LLM_MODEL` / `LLM_BASE_URL` 创建
 
 ### LLMResponse
 
-非流式对话的完整响应。
+非流式对话的完整响应
 
 ```python
 @dataclass
@@ -522,7 +522,7 @@ class LLMResponse:
 
 ### LLMChunk
 
-流式对话的单个 Token 增量。
+流式对话的单个 Token 增量
 
 ```python
 @dataclass
@@ -540,7 +540,7 @@ class LLMChunk:
 
 ### PersistencePort (Protocol)
 
-可插拔的持久化接口。业务系统实现此协议接入任意存储后端（PostgreSQL、MySQL、MongoDB 等）。
+可插拔的持久化接口，业务系统实现此协议接入任意存储后端（PostgreSQL、MySQL、MongoDB 等）
 
 ```python
 @runtime_checkable
@@ -555,25 +555,25 @@ class PersistencePort(Protocol):
         reply_msg: Message,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        """保存一次 Agent 运行的最终结果。每次 engine.run() 结束时调用。"""
+        """保存一次 Agent 运行的最终结果，每次 engine.run() 结束时调用"""
 
     async def save_messages(
         self, conversation_id: str, messages: list[Message]
     ) -> None:
-        """批量保存会话消息。支持完整的消息历史覆盖写入。"""
+        """批量保存会话消息，支持完整的消息历史覆盖写入"""
 
     async def load_messages(
         self, conversation_id: str
     ) -> list[Message]:
-        """加载会话的全部消息，按时间升序排列。run() 开始时调用。"""
+        """加载会话的全部消息，按时间升序排列，run() 开始时调用"""
 
     async def save_artifact(
         self, run_id: str, artifact_type: str, data: dict[str, Any]
     ) -> None:
-        """保存工具生成的制品（如搜索结果、生成的文件等）。"""
+        """保存工具生成的制品（如搜索结果、生成的文件等）"""
 ```
 
-注入方式：`AgentEngine(persistence=my_persistence)` 或 `AgentContext.persistence = my_persistence`。两者同时注入时优先使用 context 级别的。
+注入方式：`AgentEngine(persistence=my_persistence)` 或 `AgentContext.persistence = my_persistence`，两者同时注入时优先使用 context 级别的
 
 ---
 
@@ -581,25 +581,25 @@ class PersistencePort(Protocol):
 
 ### ConversationLockManager (Protocol)
 
-会话级别的互斥锁协议。同一 `conversation_id` 的并发调用被串行化，防止消息写乱。
+会话级别的互斥锁协议，同一 `conversation_id` 的并发调用被串行化，防止消息写乱
 
 ```python
 @runtime_checkable
 class ConversationLockManager(Protocol):
     def acquire(self, conversation_id: str) -> AsyncContextManager[None]:
         """
-        获取会话锁。
+        获取会话锁
 
-        返回异步上下文管理器。在 async with lock.acquire("conv-123"): 块内
-        独占该会话的读写权限。
+        返回异步上下文管理器，在 async with lock.acquire("conv-123"): 块内
+        独占该会话的读写权限
 
-        conversation_id 为空字符串时不加锁（bypass 模式）。
+        conversation_id 为空字符串时不加锁（bypass 模式）
         """
 ```
 
 ### InMemoryConversationLockManager
 
-单进程内存锁实现（默认）。基于 `asyncio.Lock`，懒惰创建，引用计数回收。
+单进程内存锁实现（默认），基于 `asyncio.Lock`，懒惰创建，引用计数回收
 
 ```python
 class InMemoryConversationLockManager:
@@ -608,19 +608,19 @@ class InMemoryConversationLockManager:
 
     @property
     def active_lock_count(self) -> int:
-        """当前活跃锁数量（测试用）。"""
+        """当前活跃锁数量（测试用）"""
 ```
 
 ### RedisConversationLockManager
 
-Redis 分布式锁实现。多副本部署必需。
+Redis 分布式锁实现，多副本部署必需
 
 ```python
 class RedisConversationLockManager:
     def __init__(self, redis_client: Any):
         """
-        redis_client 需支持 execute_command() 方法。
-        使用 SET NX PX 获取锁，compare-and-delete Lua 脚本释放锁。
+        redis_client 需支持 execute_command() 方法
+        使用 SET NX PX 获取锁，compare-and-delete Lua 脚本释放锁
         """
 
     def acquire(self, conversation_id: str) -> AsyncContextManager[None]: ...
@@ -630,7 +630,7 @@ class RedisConversationLockManager:
 
 ## 8. 运行时事件
 
-所有事件继承自 `RuntimeEvent`，通过 `to_dict()` 获取稳定的序列化形状。业务系统用这些事件构建 SSE、WebSocket 或审计日志。
+所有事件继承自 `RuntimeEvent`，通过 `to_dict()` 获取稳定的序列化形状，业务系统用这些事件构建 SSE、WebSocket 或审计日志
 
 ### RuntimeEvent (基类)
 
@@ -643,7 +643,7 @@ class RuntimeEvent:
 
     def to_dict(self) -> dict[str, Any]:
         """
-        转为稳定的传输字典。形状：
+        转为稳定的传输字典，形状：
         {
             "event": self.type,
             "data": { ... }  # 子类特有字段
@@ -707,7 +707,7 @@ async for frame in event_stream:
 
 ## 9. 错误系统
 
-所有引擎异常继承自 `AgentEngineError`，提供结构化错误信息。
+所有引擎异常继承自 `AgentEngineError`，提供结构化错误信息
 
 ### 错误层次结构
 
@@ -746,8 +746,8 @@ class ErrorInfo:
 ```python
 def error_to_dict(error: BaseException) -> dict[str, Any]:
     """
-    将任意异常转为可序列化的字典。
-    AgentEngineError 子类 → 完整的 ErrorInfo 格式。
+    将任意异常转为可序列化的字典
+    AgentEngineError 子类 → 完整的 ErrorInfo 格式
     其他异常 → {"code": "unexpected_error", "message": str(error), ...}
     """
 ```
@@ -756,7 +756,7 @@ def error_to_dict(error: BaseException) -> dict[str, Any]:
 
 ## 10. Hook 系统
 
-Hook 是 Agent 生命周期的拦截点。通过 `HookManager` 注册处理器，影响运行行为。
+Hook 是 Agent 生命周期的拦截点，通过 `HookManager` 注册处理器，影响运行行为
 
 ### HookEvent（拦截点）
 
@@ -801,7 +801,7 @@ class HookManager:
     def register(
         self, event: HookEvent, handler: HookFn, *, name: str | None = None
     ) -> None:
-        """注册钩子处理器。按注册顺序依次执行。"""
+        """注册钩子处理器，按注册顺序依次执行"""
 
     def on(self, event: HookEvent, *, name: str | None = None):
         """装饰器方式注册钩子：
@@ -814,9 +814,9 @@ class HookManager:
     def count(self, event: HookEvent) -> int: ...
     async def dispatch(self, event: HookEvent, payload) -> None: ...
         """
-        按注册顺序执行所有匹配处理器。
-        FAIL_ABORT → 停止调度，抛出 HookAbortError。
-        STOP → 停止调度，不抛异常。
+        按注册顺序执行所有匹配处理器
+        FAIL_ABORT → 停止调度，抛出 HookAbortError
+        STOP → 停止调度，不抛异常
         """
 ```
 
@@ -837,7 +837,7 @@ class HookManager:
 
 ## 11. 企业中间件
 
-`agentengine.enterprise` 包提供可选的横切关注点。所有中间件默认关闭，按需启用。
+`agentengine.enterprise` 包提供可选的横切关注点，所有中间件默认关闭，按需启用
 
 ### MiddlewareChain
 
@@ -845,8 +845,8 @@ class HookManager:
 class MiddlewareChain:
     def __init__(self, middlewares: list[MiddlewareFn]):
         """
-        创建中间件链。middlewares 按洋葱模型执行：
-        外层先执行前置逻辑，内层先执行后置逻辑。
+        创建中间件链，middlewares 按洋葱模型执行：
+        外层先执行前置逻辑，内层先执行后置逻辑
         """
 
     async def run(
@@ -856,7 +856,7 @@ class MiddlewareChain:
         query: str,
         inner_turn_fn,
     ) -> Any:
-        """执行中间件链 + 内核 turn 函数。"""
+        """执行中间件链 + 内核 turn 函数"""
 ```
 
 ### 可用中间件工厂
@@ -897,7 +897,7 @@ engine = AgentEngine(presets=presets, middleware=chain)
 
 ### CancellationToken
 
-协程协作式取消信号。
+协程协作式取消信号
 
 ```python
 class CancellationToken:
@@ -905,33 +905,33 @@ class CancellationToken:
 
     @property
     def is_cancelled(self) -> bool:
-        """是否已取消。"""
+        """是否已取消"""
 
     def cancel(self, reason: str = "cancelled") -> None:
-        """触发取消。设置事件并存储原因。"""
+        """触发取消，设置事件并存储原因"""
 
     async def wait(self) -> None:
-        """阻塞等待直到取消。"""
+        """阻塞等待直到取消"""
 
     def throw_if_cancelled(self) -> None:
-        """如果已取消，抛出 AgentCancelledError。"""
+        """如果已取消，抛出 AgentCancelledError"""
 ```
 
-通过 `AgentEngine.interrupt(request_id)` 触发取消，内部 CancellationToken 被设置。
+通过 `AgentEngine.interrupt(request_id)` 触发取消，内部 CancellationToken 被设置
 
 ### Compactor (Protocol)
 
-消息历史压缩协议。
+消息历史压缩协议
 
 ```python
 class Compactor(Protocol):
     async def compact(self, messages: list[Message]) -> list[Message]:
-        """压缩消息列表。返回压缩后的消息。"""
+        """压缩消息列表，返回压缩后的消息"""
 ```
 
 ### LLMSummaryCompactor
 
-基于 LLM 的历史摘要压缩器。默认实现。
+基于 LLM 的历史摘要压缩器，默认实现
 
 ```python
 class LLMSummaryCompactor:
@@ -940,13 +940,13 @@ class LLMSummaryCompactor:
         llm: LLMClient,
         *,
         keep_recent: int = 8,
-        # 保留最近 N 条消息不被摘要。
+        # 保留最近 N 条消息不被摘要
 
         max_input_chars: int = 60_000,
-        # 输入转录用最大字符数。
+        # 输入转录用最大字符数
 
         summary_prompt: str = "默认摘要提示词",
-        # 指导 LLM 如何摘要的系统提示词。
+        # 指导 LLM 如何摘要的系统提示词
     ): ...
 
     async def compact(self, messages: list[Message]) -> list[Message]:
@@ -965,7 +965,7 @@ class LLMSummaryCompactor:
 
 ### AgentState (Enum)
 
-Agent 运行的生命周期状态。
+Agent 运行的生命周期状态
 
 ```python
 class AgentState(enum.Enum):
@@ -978,7 +978,7 @@ class AgentState(enum.Enum):
 
 ### AgentRun
 
-单次 Agent 运行的运行时容器。持有配置、上下文、记忆和状态。
+单次 Agent 运行的运行时容器，持有配置、上下文、记忆和状态
 
 ```python
 @dataclass
@@ -999,7 +999,7 @@ DEFAULT_AGENT_SYSTEM_PROMPT: str
 # "You are an AI assistant. Continue working until the task is complete."
 ```
 
-此常量通过 `_compose_system_prompt()` 拼接到 `AgentPreset.instructions` 之后。如果 `instructions` 为非空字符串，结果为 `"{instructions}\n\n{DEFAULT_AGENT_SYSTEM_PROMPT}"`；否则直接返回默认指令。
+此常量通过 `_compose_system_prompt()` 拼接到 `AgentPreset.instructions` 之后，如果 `instructions` 为非空字符串，结果为 `"{instructions}\n\n{DEFAULT_AGENT_SYSTEM_PROMPT}"`；否则直接返回默认指令
 
 ---
 
@@ -1007,27 +1007,27 @@ DEFAULT_AGENT_SYSTEM_PROMPT: str
 
 ### SseEventQueue
 
-`create_streaming_context()` 返回的异步队列。线程安全，支持多生产者单消费者。
+`create_streaming_context()` 返回的异步队列，线程安全，支持多生产者单消费者
 
 ```python
 class SseEventQueue:
     async def put(self, frame: SseFrame) -> None:
-        """放入原始帧。若队列已关闭则忽略。"""
+        """放入原始帧，若队列已关闭则忽略"""
 
     async def put_event(self, event: str, data: Any) -> None:
-        """放入结构化事件帧。frame = {"event": event, "data": data}"""
+        """放入结构化事件帧，frame = {"event": event, "data": data}"""
 
     async def put_comment(self, comment: str) -> None:
-        """放入 SSE 注释帧。"""
+        """放入 SSE 注释帧"""
 
     async def close(self) -> None:
         """
-        关闭队列。放入 None 哨兵通知消费者停止迭代。
-        已关闭的队列会忽略后续 put 调用。
+        关闭队列，放入 None 哨兵通知消费者停止迭代
+        已关闭的队列会忽略后续 put 调用
         """
 
     async def __aiter__(self) -> AsyncIterator[SseFrame]:
-        """异步迭代。遇到 None 哨兵时结束。"""
+        """异步迭代，遇到 None 哨兵时结束"""
 ```
 
 ### 流式消费模式
@@ -1068,7 +1068,7 @@ answer = await engine.run(
 
 ## 15. 注意事项
 
-- **不要** import `examples.reference_app` — 示范代码不属于 SDK，需要就复制到业务代码库改造
+- **不要** import `examples` — 示范代码不属于 SDK，需要就复制到业务代码库改造
 - **不要** 依赖 `agentengine.runtime.turn`、`agentengine.runtime.turn_runner`、`agentengine.base.context` 等内部模块 — 只用 `from agentengine import ...` 包根导入
 - **不要** 在多副本生产环境用默认锁 — `InMemoryConversationLockManager` 只在单进程有效，必须换 Redis
 - **不要** 把未脱敏的 query 直接入引擎 — PII 处理是业务系统责任
