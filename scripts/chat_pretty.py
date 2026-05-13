@@ -24,12 +24,13 @@ for path in (ROOT, SRC, SCRIPTS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+from agentengine import AgentEngine  # noqa: E402
 from agentengine.llm.env import create_llm_from_env  # noqa: E402
 
 from rich.console import Console  # noqa: E402
 
 from renderers.rich_renderer import ReasoningMode, RichRenderer  # noqa: E402
-from examples.services import AgentOrchestrationService  # noqa: E402
+from examples.agents import REGISTRY as AGENT_REGISTRY  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -77,8 +78,11 @@ async def run() -> int:
         console.print(f"[bold red]✗ Failed to create LLM client:[/bold red] {exc}")
         return 2
 
-    service = AgentOrchestrationService()
-    context, stream = service.create_streaming_context(
+    engine = AgentEngine(
+        presets=AGENT_REGISTRY,
+        llm_factory=lambda: create_llm_from_env(required=True),
+    )
+    context, stream = engine.create_streaming_context(
         request_id=args.request_id,
         query=query,
         conversation_id=args.conversation_id,
@@ -93,7 +97,7 @@ async def run() -> int:
 
     async def _runner() -> None:
         try:
-            await service.run(
+            await engine.run(
                 agent_name=args.agent_name,
                 query=query,
                 context=context,
