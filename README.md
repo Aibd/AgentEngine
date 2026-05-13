@@ -421,3 +421,11 @@ tests/                  pytest 测试
 ```bash
 uv run --env-file .env pytest
 ```
+
+---
+
+## 文档
+
+- [0.2 版本说明](docs/release-0.2.md)
+- [AgentEngine 集成说明](docs/agent-integration.md)
+- [公开 API](PUBLIC_API.md)
