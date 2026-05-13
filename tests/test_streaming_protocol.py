@@ -29,7 +29,7 @@ from agentengine.stream.sse_queue import SseEventQueue
 from agentengine.stream.sse_sink import SseSink
 from agentengine.tools.base import Tool
 from agentengine.tools.collection import ToolCollection
-from examples.reference_app.agents.general_chat.preset import PRESET as GENERAL_CHAT_PRESET
+from examples.agents.general_chat.preset import PRESET as GENERAL_CHAT_PRESET
 from mock_llm import MockLLMClient
 
 

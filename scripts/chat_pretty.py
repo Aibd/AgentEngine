@@ -29,7 +29,7 @@ from agentengine.llm.env import create_llm_from_env  # noqa: E402
 from rich.console import Console  # noqa: E402
 
 from renderers.rich_renderer import ReasoningMode, RichRenderer  # noqa: E402
-from examples.reference_app.services import AgentOrchestrationService  # noqa: E402
+from examples.services import AgentOrchestrationService  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:

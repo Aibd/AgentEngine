@@ -1,8 +1,8 @@
-"""Reference-app compatibility wrapper around the public SDK engine.
+"""Example compatibility wrapper around the public SDK engine.
 
 New integrations should import ``agentengine.AgentEngine`` directly and pass
 their own presets plus LLM configuration. This module remains for the local
-CLI/Web reference app and older tests.
+CLI/Web examples and older tests.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import cast
 
-from examples.reference_app.agents import REGISTRY as AGENT_REGISTRY
+from examples.agents import REGISTRY as AGENT_REGISTRY
 from agentengine.engine import AgentEngine, DEFAULT_MAX_QUERY_CHARS, PresetLike
 from agentengine.concurrency import ConversationLockManager
 from agentengine.enterprise.middleware import MiddlewareChain
@@ -24,7 +24,7 @@ def _default_llm_factory() -> LLMClient | None:
 
 
 class AgentOrchestrationService(AgentEngine):
-    """Reference application service.
+    """Example application service.
 
     This preserves the old defaults: bundled example presets are registered
     automatically and the LLM may be read from environment variables. The core

@@ -11,9 +11,8 @@
 !.claude/launch.json
 logs/
 data/
-web/node_modules/
-web/dist/
+examples/web/node_modules/
+examples/web/dist/
 
 # Coverage
 .coverage
-

@@ -243,7 +243,7 @@ class TestServiceIntegration:
     async def test_second_call_sees_first_conversation_history(self, db_path: str) -> None:
         from agentengine.llm.interfaces import LLMResponse
         from mock_llm import MockLLMClient
-        from examples.reference_app.services.agent_orchestration_service import AgentOrchestrationService
+        from examples.services.agent_orchestration_service import AgentOrchestrationService
 
         store = SqlitePersistence(db_path)
 
@@ -309,7 +309,7 @@ class TestServiceIntegration:
     async def test_service_without_persistence_still_works(self) -> None:
         from agentengine.llm.interfaces import LLMResponse
         from mock_llm import MockLLMClient
-        from examples.reference_app.services.agent_orchestration_service import AgentOrchestrationService
+        from examples.services.agent_orchestration_service import AgentOrchestrationService
 
         llm = MockLLMClient([LLMResponse(content="ok", finish_reason="stop")])
         service = AgentOrchestrationService(llm_factory=lambda: llm)

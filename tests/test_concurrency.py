@@ -35,7 +35,7 @@ from agentengine.concurrency import (
 from agentengine.llm.interfaces import LLMChunk, LLMResponse
 from agentengine.persistence import SqlitePersistence
 from mock_llm import MockLLMClient
-from examples.reference_app.services.agent_orchestration_service import AgentOrchestrationService
+from examples.services.agent_orchestration_service import AgentOrchestrationService
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
-"""Reference-app preset import.
+"""Example preset import.
 
 The public declaration lives in ``agentengine.preset``. This module is kept so
-the reference app can keep its local imports concise.
+the examples can keep their local imports concise.
 """
 
 from agentengine.preset import AgentPreset

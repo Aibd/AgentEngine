@@ -46,7 +46,7 @@ filterwarnings = [
 
 [tool.mypy]
 python_version = "3.11"
-files = ["src", "examples/reference_app"]
+files = ["src", "examples/agents", "examples/services"]
 mypy_path = "src"
 explicit_package_bases = true
 strict = true

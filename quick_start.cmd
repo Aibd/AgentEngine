@@ -48,9 +48,9 @@ timeout /t 1 /nobreak >nul
 
 :: --- Start backend + frontend ---
 echo [3/3] Starting services...
-start "AgentEngine Backend" cmd /c "uv run --env-file .env uvicorn --app-dir src services.web_api:app --host 127.0.0.1 --port 8000 --log-level warning"
-if exist "web\package.json" (
-    start "AgentEngine Frontend" cmd /c "cd web && npm run dev"
+start "AgentEngine Backend" cmd /c "uv run --env-file .env uvicorn examples.services.web_api:app --host 127.0.0.1 --port 8000 --log-level warning"
+if exist "examples\web\package.json" (
+    start "AgentEngine Frontend" cmd /c "cd examples\web && if not exist node_modules npm install && npm run dev"
 )
 
 echo.
@@ -64,7 +64,7 @@ echo.
 :: --- Quick smoke test ---
 echo Running smoke test...
 timeout /t 3 /nobreak >nul
-PYTHONIOENCODING=utf-8 py scripts\chat.py general_chat "你好"
+PYTHONIOENCODING=utf-8 py scripts\chat.py general_chat "hello"
 
 echo.
 pause

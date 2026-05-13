@@ -1,4 +1,4 @@
-from examples.reference_app.services.agent_orchestration_service import (
+from examples.services.agent_orchestration_service import (
     AgentOrchestrationService,
 )
 

@@ -22,7 +22,7 @@ from agentengine.base.context import AgentContext  # noqa: E402
 from agentengine.llm.env import create_llm_from_env  # noqa: E402
 from agentengine.stream.printer import Printer  # noqa: E402
 from agentengine.stream.sse_queue import SseEventQueue  # noqa: E402
-from examples.reference_app.services import AgentOrchestrationService  # noqa: E402
+from examples.services import AgentOrchestrationService  # noqa: E402
 
 
 def _load_dotenv(path: Path) -> None:

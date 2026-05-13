@@ -14,7 +14,7 @@ from agentengine.run_config import RunConfig
 from agentengine.tools.base import Tool
 from agentengine.tools.collection import ToolCollection
 from mock_llm import MockLLMClient
-from examples.reference_app.services.agent_orchestration_service import AgentOrchestrationService
+from examples.services.agent_orchestration_service import AgentOrchestrationService
 
 
 class _EchoTool(Tool):

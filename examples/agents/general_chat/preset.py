@@ -1,4 +1,4 @@
-from examples.reference_app.agents.preset import AgentPreset
+from examples.agents.preset import AgentPreset
 
 PRESET = AgentPreset(
     name="general_chat",
