@@ -106,6 +106,6 @@ echo
 
 echo "Running smoke test..."
 sleep 3
-if ! PYTHONIOENCODING=utf-8 sh -c "$PY_RUN scripts/chat.py general_chat hello"; then
+if ! PYTHONIOENCODING=utf-8 sh -c "$PY_RUN scripts/chat_pretty.py general_chat hello"; then
   echo "Smoke test failed. Check .env and logs/backend.log."
 fi
