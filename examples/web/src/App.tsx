@@ -45,25 +45,30 @@ type ChatSession = {
   title: string;
   query: string;
   turns: ChatTurn[];
+  isRunning: boolean;
 };
 
 export function App() {
-  const [isRunning, setIsRunning] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [capabilities, setCapabilities] = useState<CapabilitySummary | null>(null);
   const [sessions, setSessions] = useState<ChatSession[]>([
     createChatSession("welcome", "新会话", samplePrompts[0]),
   ]);
   const [activeSessionId, setActiveSessionId] = useState("welcome");
-  const stopRef = useRef<null | (() => void)>(null);
+  const stopMapRef = useRef<Map<string, () => void>>(new Map());
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? sessions[0],
     [activeSessionId, sessions],
   );
   const query = activeSession.query;
+  const isRunning = activeSession.isRunning;
 
   useEffect(() => {
-    return () => stopRef.current?.();
+    const stops = stopMapRef.current;
+    return () => {
+      stops.forEach((stop) => stop());
+      stops.clear();
+    };
   }, []);
 
   useEffect(() => {
@@ -72,6 +77,21 @@ export function App() {
       .catch(() => setCapabilities(null));
   }, []);
 
+  function setSessionRunning(sessionId: string, running: boolean) {
+    setSessions((current) =>
+      updateSession(current, sessionId, (session) => ({ ...session, isRunning: running })),
+    );
+  }
+
+  function stopSession(sessionId: string) {
+    const stop = stopMapRef.current.get(sessionId);
+    if (stop) {
+      stop();
+      stopMapRef.current.delete(sessionId);
+    }
+    setSessionRunning(sessionId, false);
+  }
+
   function startRun(nextQuery = query) {
     const cleaned = nextQuery.trim();
     if (!cleaned) {
@@ -79,12 +99,17 @@ export function App() {
     }
     const runSessionId = activeSessionId;
     const turnId = crypto.randomUUID();
-    stopRef.current?.();
+    const existingStop = stopMapRef.current.get(runSessionId);
+    if (existingStop) {
+      existingStop();
+      stopMapRef.current.delete(runSessionId);
+    }
     setSessions((current) =>
       updateSession(current, runSessionId, (session) => ({
         ...session,
         title: titleFromQuery(cleaned),
         query: "",
+        isRunning: true,
         turns: [
           ...session.turns,
           {
@@ -95,8 +120,7 @@ export function App() {
         ],
       })),
     );
-    setIsRunning(true);
-    stopRef.current = runAgentTrace(
+    const stop = runAgentTrace(
       cleaned,
       (event) => {
         setSessions((current) =>
@@ -108,19 +132,22 @@ export function App() {
           })),
         );
         if (event.event === "done" || event.event === "error") {
-          setIsRunning(false);
+          stopMapRef.current.delete(runSessionId);
+          setSessionRunning(runSessionId, false);
         }
       },
-      () => setIsRunning(false),
+      () => {
+        stopMapRef.current.delete(runSessionId);
+        setSessionRunning(runSessionId, false);
+      },
       "deep_research",
       runSessionId,
     );
+    stopMapRef.current.set(runSessionId, stop);
   }
 
   function stopRun() {
-    stopRef.current?.();
-    stopRef.current = null;
-    setIsRunning(false);
+    stopSession(activeSessionId);
   }
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -133,14 +160,12 @@ export function App() {
   }
 
   function newSession() {
-    stopRun();
     const id = crypto.randomUUID();
     setSessions((current) => [createChatSession(id, "新会话"), ...current]);
     setActiveSessionId(id);
   }
 
   function selectSession(id: string) {
-    stopRun();
     setActiveSessionId(id);
   }
 
@@ -575,6 +600,7 @@ function createChatSession(id: string, title: string, query = ""): ChatSession {
     title,
     query,
     turns: [],
+    isRunning: false,
   };
 }
 
