@@ -1,4 +1,6 @@
 import type {
+  ArtifactBlock,
+  ArtifactTrace,
   RunTrace,
   SseEvent,
   StepTrace,
@@ -18,6 +20,7 @@ export function createEmptyTrace(): RunTrace {
     steps: [],
     todos: [],
     pendingQuestions: [],
+    artifacts: [],
   };
 }
 
@@ -39,6 +42,8 @@ export function reduceTraceEvent(trace: RunTrace, event: SseEvent): RunTrace {
         errorPayload: undefined,
         todos: [],
         pendingQuestions: [],
+        artifacts: [],
+        activeArtifactId: undefined,
       };
     case "step":
       return {
@@ -103,6 +108,58 @@ export function reduceTraceEvent(trace: RunTrace, event: SseEvent): RunTrace {
         ...trace,
         pendingQuestions: [...trace.pendingQuestions, parseQuestion(data)],
       };
+    case "artifact_start": {
+      const artifact = createArtifact(data);
+      return {
+        ...trace,
+        status: "running",
+        artifacts: upsertArtifact(trace.artifacts, artifact),
+        activeArtifactId: artifact.id,
+      };
+    }
+    case "artifact_section_started":
+      return updateArtifact(trace, data, (artifact) => ({
+        ...artifact,
+        currentSection: stringValue(data.name),
+      }));
+    case "artifact_block_added":
+      return updateArtifact(trace, data, (artifact) => ({
+        ...artifact,
+        blocks: [...artifact.blocks, data as unknown as ArtifactBlock],
+      }));
+    case "artifact_chart_ready":
+      return updateArtifact(trace, data, (artifact) => {
+        const chartId = stringValue(data.chart_id);
+        if (!chartId) {
+          return artifact;
+        }
+        return {
+          ...artifact,
+          charts: {
+            ...artifact.charts,
+            [chartId]: {
+              url: stringValue(data.preview_url),
+              title: stringValue(data.title),
+            },
+          },
+        };
+      });
+    case "artifact_ready":
+      return updateArtifact(trace, data, (artifact) => ({
+        ...artifact,
+        status: "ready",
+      }), "completed");
+    case "artifact_export_ready":
+      return updateArtifact(trace, data, (artifact) => ({
+        ...artifact,
+        exports: stringRecord(data.exports),
+      }));
+    case "artifact_error":
+      return updateArtifact(trace, data, (artifact) => ({
+        ...artifact,
+        status: "failed",
+        error: stringValue(data.message) || "Artifact generation failed",
+      }), "failed");
     default:
       return trace;
   }
@@ -248,4 +305,65 @@ function parseQuestion(data: Record<string, unknown>): UserQuestion {
     options,
     multiple: Boolean(data.multiple),
   };
+}
+
+function createArtifact(data: Record<string, unknown>): ArtifactTrace {
+  const id = stringValue(data.artifact_id) || stringValue(data.id) || crypto.randomUUID();
+  const reportId = stringValue(data.report_id) || id;
+  const rawType = stringValue(data.type);
+  const type =
+    rawType === "html" || rawType === "dashboard" || rawType === "financial_report"
+      ? rawType
+      : "financial_report";
+  return {
+    id,
+    reportId,
+    type,
+    title: stringValue(data.title) || "Financial report",
+    status: "streaming",
+    blocks: [],
+    charts: {},
+  };
+}
+
+function updateArtifact(
+  trace: RunTrace,
+  data: Record<string, unknown>,
+  updater: (artifact: ArtifactTrace) => ArtifactTrace,
+  status?: RunTrace["status"],
+): RunTrace {
+  const id = stringValue(data.artifact_id) || stringValue(data.report_id) || trace.activeArtifactId;
+  if (!id) {
+    return trace;
+  }
+  let found = false;
+  const artifacts = trace.artifacts.map((artifact) => {
+    if (artifact.id !== id && artifact.reportId !== id) {
+      return artifact;
+    }
+    found = true;
+    return updater(artifact);
+  });
+  return found ? { ...trace, artifacts, activeArtifactId: id, status: status ?? trace.status } : trace;
+}
+
+function upsertArtifact(artifacts: ArtifactTrace[], next: ArtifactTrace): ArtifactTrace[] {
+  const index = artifacts.findIndex((artifact) => artifact.id === next.id);
+  if (index === -1) {
+    return [...artifacts, next];
+  }
+  return artifacts.map((artifact, i) => (i === index ? { ...artifact, ...next } : artifact));
+}
+
+function stringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const out: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (typeof raw === "string") {
+      out[key] = raw;
+    }
+  }
+  return out;
 }
