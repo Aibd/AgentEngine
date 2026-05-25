@@ -14,7 +14,14 @@ export type ResponseType =
   | "search_result"
   | "final_result"
   | "todos_updated"
-  | "user_question_asked";
+  | "user_question_asked"
+  | "artifact_start"
+  | "artifact_section_started"
+  | "artifact_block_added"
+  | "artifact_chart_ready"
+  | "artifact_ready"
+  | "artifact_export_ready"
+  | "artifact_error";
 
 export type TodoStatus = "pending" | "in_progress" | "completed";
 
@@ -29,6 +36,81 @@ export type UserQuestion = {
   question: string;
   options: string[];
   multiple: boolean;
+};
+
+export type ArtifactBlockType =
+  | "heading"
+  | "paragraph"
+  | "table"
+  | "chart"
+  | "kpi"
+  | "callout"
+  | "page_break";
+
+export type ArtifactKpi = {
+  label: string;
+  value: string;
+  delta?: string;
+  trend?: "up" | "down" | "flat";
+};
+
+export type ArtifactChart = {
+  kind?: string;
+  title?: string;
+  x?: string[];
+  series?: { name: string; data: Array<number | null> }[];
+  y_format?: "currency" | "percent" | "number";
+};
+
+export type ArtifactBlock = {
+  type: ArtifactBlockType;
+  level?: number;
+  text?: string;
+  headers?: string[];
+  rows?: Array<Array<string | number | null>>;
+  chart_id?: string;
+  chart?: ArtifactChart;
+  kpis?: ArtifactKpi[];
+  style?: Record<string, unknown>;
+};
+
+export type ArtifactTrace = {
+  id: string;
+  reportId: string;
+  type: "financial_report" | "html" | "dashboard";
+  title: string;
+  status: "streaming" | "ready" | "failed";
+  currentSection?: string;
+  blocks: ArtifactBlock[];
+  charts: Record<string, { url?: string; title?: string }>;
+  exports?: Record<string, string>;
+  error?: string;
+};
+
+export type ParsedSheetPreview = {
+  name: string;
+  headers: string[];
+  rows: string[][];
+  row_count: number;
+  column_count: number;
+};
+
+export type ParsedReportFile = {
+  file_id: string;
+  filename: string;
+  extension: string;
+  size_bytes: number;
+  sheets: ParsedSheetPreview[];
+  text_preview: string;
+  page_count: number;
+  warnings: string[];
+};
+
+export type ReportFileSummary = {
+  id: string;
+  filename: string;
+  size_bytes: number;
+  parsed: ParsedReportFile;
 };
 
 export type SseEvent = {
@@ -84,6 +166,8 @@ export type RunTrace = {
   errorPayload?: ErrorPayload;
   todos: TodoItem[];
   pendingQuestions: UserQuestion[];
+  artifacts: ArtifactTrace[];
+  activeArtifactId?: string;
 };
 
 export type CapabilityItem = {
