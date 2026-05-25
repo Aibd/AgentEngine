@@ -8,9 +8,9 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response, StreamingResponse
 
 from examples.agents import REGISTRY as AGENT_REGISTRY
 from agentengine.concurrency import InMemoryConversationLockManager
@@ -31,11 +31,18 @@ from agentengine.errors import error_to_dict
 from agentengine.persistence import SqlitePersistence
 from agentengine.skills.loader import SkillLoader
 from agentengine.tools.builtin import build_default_tools, ReadFileTool, SkillTool
+from examples.services.reporting.file_store import ReportFileStore
 from examples.services.agent_orchestration_service import AgentOrchestrationService
+from examples.services.reporting.docx_renderer import DOCX_MEDIA_TYPE, render_docx
+from examples.services.reporting.html_renderer import render_html
+from examples.services.reporting.jobs import ReportJobStore, stream_report_artifact
+from examples.services.reporting.markdown_renderer import render_markdown
+from examples.services.reporting.pdf_renderer import PdfRendererUnavailable, render_pdf
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = REPO_ROOT / "data" / "chatbot.db"
+DEFAULT_UPLOAD_ROOT = REPO_ROOT / "data" / "uploads"
 
 
 def _load_dotenv(path: Path) -> None:
@@ -62,6 +69,8 @@ PERSISTENCE = SqlitePersistence(DEFAULT_DB_PATH)
 LOCK_MANAGER = InMemoryConversationLockManager()
 QUOTA_STORE = QuotaStore()
 APPROVAL_GATE = ApprovalGate(timeout_seconds=float(os.getenv("APPROVAL_TIMEOUT_SECONDS", "300")))
+REPORT_STORE = ReportJobStore()
+REPORT_FILE_STORE = ReportFileStore(DEFAULT_UPLOAD_ROOT)
 
 app = FastAPI(title="AgentEngine Web API")
 app.add_middleware(
@@ -137,6 +146,158 @@ async def conversation_messages(
     messages = await PERSISTENCE.load_messages(scoped_conversation_id)
     visible = [m for m in messages if m.get("role") != "system"]
     return {"conversation_id": conversation_id, "messages": visible}
+
+
+@app.post("/api/report-files")
+async def upload_report_file(
+    request: Request,
+    filename: str = Query(..., min_length=1),
+    conversation_id: str = Query("web-conversation", min_length=1),
+    tenant_id: str = Query("default", min_length=1),
+) -> dict[str, Any]:
+    data = await request.body()
+    try:
+        record = await REPORT_FILE_STORE.save_bytes(
+            data=data,
+            filename=filename,
+            tenant_id=tenant_id,
+            conversation_id=_scoped_conversation_id(conversation_id, tenant_id),
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if "unsupported file extension" in message:
+            raise HTTPException(status_code=415, detail=message) from exc
+        if "50MB" in message:
+            raise HTTPException(status_code=413, detail=message) from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+    return record.snapshot()
+
+
+@app.get("/api/report-files/{file_id}")
+async def report_file_snapshot(file_id: str) -> dict[str, Any]:
+    record = REPORT_FILE_STORE.get(file_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="report file not found")
+    return record.snapshot()
+
+
+@app.post("/api/reports")
+async def create_report(body: dict[str, Any]) -> dict[str, Any]:
+    """Create a financial-report artifact job.
+
+    The artifact stream is model-first when LLM_* is configured: selected skill
+    prompt + user intent + uploaded file context produce report blocks. The
+    deterministic report remains the offline fallback for local demos/tests.
+    """
+    conversation_id = str(body.get("conversation_id") or "web-conversation").strip()
+    title = str(body.get("title") or "财务分析报告").strip()
+    intent = str(body.get("intent") or body.get("query") or "").strip()
+    skill = str(body.get("skill") or "data_analysis").strip() or "data_analysis"
+    file_ids = [str(item) for item in body.get("file_ids") or [] if str(item).strip()]
+    if not conversation_id:
+        raise HTTPException(status_code=400, detail="conversation_id is required")
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+    scoped_conversation_id = _scoped_conversation_id(
+        conversation_id,
+        str(body.get("tenant_id") or "default"),
+    )
+    files = (
+        REPORT_FILE_STORE.get_many(file_ids)
+        if file_ids
+        else REPORT_FILE_STORE.list_by_conversation(scoped_conversation_id)
+    )
+    missing = sorted(set(file_ids) - {record.id for record in files})
+    if missing:
+        raise HTTPException(status_code=404, detail={"missing_file_ids": missing})
+    job = REPORT_STORE.create(
+        conversation_id=conversation_id,
+        title=title,
+        intent=intent,
+        skill=skill,
+        files=files,
+    )
+    return job.snapshot()
+
+
+@app.get("/api/reports/{report_id}")
+async def report_snapshot(report_id: str) -> dict[str, Any]:
+    job = REPORT_STORE.get(report_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="report not found")
+    return job.snapshot()
+
+
+@app.get("/api/reports/{report_id}/stream")
+async def report_stream(report_id: str) -> StreamingResponse:
+    job = REPORT_STORE.get(report_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="report not found")
+    request_id = f"report-{uuid.uuid4().hex[:12]}"
+
+    async def events() -> AsyncIterator[str]:
+        async for frame in stream_report_artifact(job=job, request_id=request_id):
+            yield _format_sse_frame(frame)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "X-Streaming-Protocol": "agent-core.sse.v2",
+            "X-Request-ID": request_id,
+            "X-Conversation-ID": job.conversation_id,
+        },
+    )
+
+
+@app.get("/api/reports/{report_id}/charts/{chart_id}.svg")
+async def report_chart_svg(report_id: str, chart_id: str) -> Response:
+    job = REPORT_STORE.get(report_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="report not found")
+    svg = job.chart_assets.get(chart_id)
+    if svg is None:
+        raise HTTPException(status_code=404, detail="chart not found")
+    return Response(svg, media_type="image/svg+xml; charset=utf-8")
+
+
+@app.get("/api/reports/{report_id}/exports/{export_format}")
+async def report_export(report_id: str, export_format: str) -> Response:
+    job = REPORT_STORE.get(report_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="report not found")
+    if export_format == "md":
+        return PlainTextResponse(
+            render_markdown(job.ir),
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{report_id}.md"'},
+        )
+    if export_format == "html":
+        return HTMLResponse(
+            render_html(job.ir, chart_assets=job.chart_assets),
+            media_type="text/html; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{report_id}.html"'},
+        )
+    if export_format == "docx":
+        return Response(
+            render_docx(job.ir, chart_assets=job.chart_assets),
+            media_type=DOCX_MEDIA_TYPE,
+            headers={"Content-Disposition": f'attachment; filename="{report_id}.docx"'},
+        )
+    if export_format == "pdf":
+        html = render_html(job.ir, chart_assets=job.chart_assets)
+        try:
+            pdf = render_pdf(html)
+        except PdfRendererUnavailable as exc:
+            raise HTTPException(status_code=501, detail=str(exc)) from exc
+        return Response(
+            pdf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{report_id}.pdf"'},
+        )
+    raise HTTPException(status_code=501, detail=f"{export_format} export is not implemented yet")
 
 
 @app.get("/api/runs/stream")
