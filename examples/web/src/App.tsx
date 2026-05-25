@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -10,16 +10,24 @@ import {
   Loader2,
   PanelLeftClose,
   Plus,
-  Send,
   Sparkles,
   Wrench,
 } from "lucide-react";
+import { ArtifactPanel } from "./components/ArtifactPanel";
+import {
+  Composer,
+  detectFileKind,
+  type ComposerFile,
+  type ComposerSkill,
+  type ThinkingMode,
+} from "./components/Composer";
 import { createEmptyTrace, reduceTraceEvent } from "./traceReducer";
-import { fetchCapabilities, runAgentTrace } from "./traceTransport";
+import { fetchCapabilities, runAgentTrace, runReportTrace, uploadReportFile } from "./traceTransport";
 import { translateError } from "./friendlyErrors";
 import type {
   CapabilitySummary,
   ErrorPayload,
+  ReportFileSummary,
   RunTrace,
   StepTrace,
   TodoItem,
@@ -51,8 +59,21 @@ type ChatSession = {
 export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [capabilities, setCapabilities] = useState<CapabilitySummary | null>(null);
+  const [closedArtifactId, setClosedArtifactId] = useState<string | null>(null);
+  const [reportFiles, setReportFiles] = useState<ReportFileSummary[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<Record<string, string>>({});
+  const [selectedSkill, setSelectedSkill] = useState<ComposerSkill>("chat");
+  const [thinkingMode, setThinkingMode] = useState<ThinkingMode>(() => {
+    const saved = localStorage.getItem("thinkingMode");
+    return saved === "fast" || saved === "auto" ? saved : "fast";
+  });
+  useEffect(() => {
+    localStorage.setItem("thinkingMode", thinkingMode);
+  }, [thinkingMode]);
+  const [composerUploading, setComposerUploading] = useState(false);
+  const [composerUploadError, setComposerUploadError] = useState("");
   const [sessions, setSessions] = useState<ChatSession[]>([
-    createChatSession("welcome", "新会话", samplePrompts[0]),
+    createChatSession("welcome", "新会话"),
   ]);
   const [activeSessionId, setActiveSessionId] = useState("welcome");
   const stopMapRef = useRef<Map<string, () => void>>(new Map());
@@ -62,6 +83,24 @@ export function App() {
   );
   const query = activeSession.query;
   const isRunning = activeSession.isRunning;
+  const activeArtifact = useMemo(() => {
+    const artifacts = activeSession.turns.flatMap((turn) => turn.trace.artifacts);
+    return artifacts.at(-1);
+  }, [activeSession.turns]);
+  const artifactHasOutput = Boolean(
+    activeArtifact
+      && (
+        activeArtifact.blocks.length > 0
+        || activeArtifact.status !== "streaming"
+        || Object.keys(activeArtifact.exports ?? {}).length > 0
+      ),
+  );
+  const visibleArtifact = activeArtifact?.id === closedArtifactId || !artifactHasOutput ? null : activeArtifact;
+  const appClassName = [
+    "app-layout",
+    sidebarOpen ? "" : "sidebar-collapsed",
+    visibleArtifact ? "has-artifact" : "",
+  ].filter(Boolean).join(" ");
 
   useEffect(() => {
     const stops = stopMapRef.current;
@@ -69,6 +108,13 @@ export function App() {
       stops.forEach((stop) => stop());
       stops.clear();
     };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      Object.values(imagePreviews).forEach((url) => URL.revokeObjectURL(url));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -97,6 +143,7 @@ export function App() {
     if (!cleaned) {
       return;
     }
+    const effectiveQuery = withUploadedFileContext(cleaned, reportFiles);
     const runSessionId = activeSessionId;
     const turnId = crypto.randomUUID();
     const existingStop = stopMapRef.current.get(runSessionId);
@@ -121,7 +168,7 @@ export function App() {
       })),
     );
     const stop = runAgentTrace(
-      cleaned,
+      effectiveQuery,
       (event) => {
         setSessions((current) =>
           updateSession(current, runSessionId, (session) => ({
@@ -146,14 +193,133 @@ export function App() {
     stopMapRef.current.set(runSessionId, stop);
   }
 
+  function startReportDemo(nextIntent = query) {
+    const cleanedIntent = nextIntent.trim();
+    const runSessionId = activeSessionId;
+    const turnId = crypto.randomUUID();
+    const fileIds = reportFiles.map((file) => file.id);
+    const title = reportFiles.length ? "财务分析报告" : "财务分析报告 Demo";
+    const intent = cleanedIntent || (reportFiles.length
+      ? "基于已上传的财务文件生成结构化报告预览。"
+      : "生成一个用于验证 artifact 分屏、报告 IR 和 Markdown 导出的财务报告演示。");
+    const existingStop = stopMapRef.current.get(runSessionId);
+    if (existingStop) {
+      existingStop();
+      stopMapRef.current.delete(runSessionId);
+    }
+    setClosedArtifactId(null);
+    setSessions((current) =>
+      updateSession(current, runSessionId, (session) => ({
+        ...session,
+        title,
+        query: "",
+        isRunning: true,
+        turns: [
+          ...session.turns,
+          {
+            id: turnId,
+            submittedQuery: cleanedIntent || title,
+            trace: createEmptyTrace(),
+          },
+        ],
+      })),
+    );
+    const stop = runReportTrace(
+      title,
+      intent,
+      fileIds,
+      selectedSkill,
+      (event) => {
+        setSessions((current) =>
+          updateSession(current, runSessionId, (session) => ({
+            ...session,
+            turns: session.turns.map((turn) =>
+              turn.id === turnId ? { ...turn, trace: reduceTraceEvent(turn.trace, event) } : turn,
+            ),
+          })),
+        );
+        if (event.event === "artifact_ready" || event.event === "artifact_error" || event.event === "error") {
+          stopMapRef.current.delete(runSessionId);
+          setSessionRunning(runSessionId, false);
+        }
+      },
+      () => {
+        stopMapRef.current.delete(runSessionId);
+        setSessionRunning(runSessionId, false);
+      },
+      runSessionId,
+    );
+    stopMapRef.current.set(runSessionId, stop);
+  }
+
+  async function uploadFilesFromComposer(files: FileList | File[]) {
+    const selectedFiles = Array.from(files).filter((file) => file.name.trim());
+    if (!selectedFiles.length) {
+      return;
+    }
+    setComposerUploading(true);
+    setComposerUploadError("");
+    const localPreviews: Array<{ filename: string; url: string }> = [];
+    for (const file of selectedFiles) {
+      if (file.type.startsWith("image/")) {
+        localPreviews.push({ filename: file.name, url: URL.createObjectURL(file) });
+      }
+    }
+    try {
+      const uploaded = await Promise.all(
+        selectedFiles.map((file) => uploadReportFile(file, activeSessionId)),
+      );
+      setReportFiles((current) => [...current, ...uploaded]);
+      if (localPreviews.length) {
+        setImagePreviews((current) => {
+          const next = { ...current };
+          uploaded.forEach((record) => {
+            const match = localPreviews.find((preview) => preview.filename === record.filename);
+            if (match) {
+              next[record.id] = match.url;
+            }
+          });
+          return next;
+        });
+      }
+      const hasSheet = uploaded.some((file) =>
+        file.filename.toLowerCase().endsWith(".csv") || file.filename.toLowerCase().endsWith(".xlsx"),
+      );
+      if (hasSheet) {
+        setSelectedSkill("data_analysis");
+      }
+    } catch (err) {
+      localPreviews.forEach((preview) => URL.revokeObjectURL(preview.url));
+      setComposerUploadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setComposerUploading(false);
+    }
+  }
+
+  function removeComposerFile(id: string) {
+    setReportFiles((current) => current.filter((file) => file.id !== id));
+    setImagePreviews((current) => {
+      if (!current[id]) {
+        return current;
+      }
+      URL.revokeObjectURL(current[id]);
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+  }
+
   function stopRun() {
     stopSession(activeSessionId);
   }
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function submitFromComposer() {
     if (isRunning) {
       stopRun();
+      return;
+    }
+    if (selectedSkill === "data_analysis") {
+      startReportDemo(query);
       return;
     }
     startRun();
@@ -178,8 +344,44 @@ export function App() {
     );
   }
 
+  const canSubmit = selectedSkill === "data_analysis"
+    ? Boolean(query.trim() || reportFiles.length)
+    : Boolean(query.trim());
+
+  const composerFiles = useMemo<ComposerFile[]>(
+    () =>
+      reportFiles.map((file) => ({
+        id: file.id,
+        filename: file.filename,
+        size_bytes: file.size_bytes,
+        kind: detectFileKind(file.filename),
+        previewUrl: imagePreviews[file.id],
+      })),
+    [reportFiles, imagePreviews],
+  );
+
+  const composerProps = {
+    query,
+    onQueryChange: updateActiveQuery,
+    onSubmit: submitFromComposer,
+    isRunning,
+    onStop: stopRun,
+    skill: selectedSkill,
+    onSkillChange: setSelectedSkill,
+    thinkingMode,
+    onThinkingModeChange: setThinkingMode,
+    files: composerFiles,
+    onAttach: (files: FileList | File[]) => {
+      void uploadFilesFromComposer(files);
+    },
+    onRemoveFile: removeComposerFile,
+    uploading: composerUploading,
+    uploadError: composerUploadError,
+    canSubmit,
+  };
+
   return (
-    <main className={sidebarOpen ? "app-layout" : "app-layout sidebar-collapsed"}>
+    <main className={appClassName}>
       <aside className="sidebar" aria-label="会话历史">
         <div className="sidebar-top">
           <button className="sidebar-icon" type="button" onClick={() => setSidebarOpen(false)} title="收起侧栏">
@@ -216,6 +418,7 @@ export function App() {
           {activeSession.turns.length === 0 ? (
             <EmptyChat
               capabilities={capabilities}
+              composer={<Composer variant="center" {...composerProps} />}
               onPick={(prompt) => {
                 updateActiveQuery(prompt);
                 startRun(prompt);
@@ -226,24 +429,19 @@ export function App() {
           )}
         </section>
 
-        <form className="composer" onSubmit={onSubmit}>
-          <input
-            value={query}
-            onChange={(event) => updateActiveQuery(event.target.value)}
-            placeholder="输入请求，按 Enter 发送"
-            disabled={isRunning}
-          />
-          <button
-            className={isRunning ? "composer-action is-running" : "composer-action"}
-            type={isRunning ? "button" : "submit"}
-            onClick={isRunning ? stopRun : undefined}
-            disabled={!isRunning && !query.trim()}
-            title={isRunning ? "Stop" : "Send"}
-          >
-            {isRunning ? <Loader2 className="spin" size={19} /> : <Send size={19} />}
-          </button>
-        </form>
+        {activeSession.turns.length > 0 ? (
+          <div className="composer-dock">
+            <Composer variant="docked" {...composerProps} />
+          </div>
+        ) : null}
       </section>
+
+      {visibleArtifact ? (
+        <ArtifactPanel
+          artifact={visibleArtifact}
+          onClose={() => setClosedArtifactId(visibleArtifact.id)}
+        />
+      ) : null}
     </main>
   );
 }
@@ -499,9 +697,11 @@ function QuestionPrompt({ question }: { question: UserQuestion }) {
 
 function EmptyChat({
   capabilities,
+  composer,
   onPick,
 }: {
   capabilities: CapabilitySummary | null;
+  composer: ReactNode;
   onPick: (prompt: string) => void;
 }) {
   return (
@@ -511,6 +711,7 @@ function EmptyChat({
       </div>
       <h1>AgentEngine</h1>
       <CapabilityStats capabilities={capabilities} />
+      <div className="empty-composer">{composer}</div>
       <div className="prompt-grid">
         {samplePrompts.map((prompt) => (
           <button key={prompt} type="button" onClick={() => onPick(prompt)}>
@@ -612,6 +813,32 @@ function updateSession(
   return sessions.map((session) => (
     session.id === id ? updater(session) : session
   ));
+}
+
+function withUploadedFileContext(query: string, files: ReportFileSummary[]): string {
+  if (!files.length) {
+    return query;
+  }
+  const fileContext = files.map((file, index) => {
+    const parsed = file.parsed;
+    const firstSheet = parsed.sheets[0];
+    const sheetPreview = firstSheet
+      ? [
+          `sheet=${firstSheet.name}`,
+          `headers=${firstSheet.headers.join(", ")}`,
+          `rows=${firstSheet.rows.slice(0, 5).map((row) => row.join(" | ")).join("; ")}`,
+        ].join("; ")
+      : "";
+    const textPreview = parsed.text_preview ? `text=${parsed.text_preview.slice(0, 1500)}` : "";
+    return [
+      `#${index + 1} ${file.filename}`,
+      `type=${parsed.extension}`,
+      `size=${file.size_bytes}`,
+      sheetPreview,
+      textPreview,
+    ].filter(Boolean).join("\n");
+  }).join("\n\n");
+  return `${query}\n\nUploaded file context from this conversation:\n${fileContext}`;
 }
 
 function titleFromQuery(query: string): string {
