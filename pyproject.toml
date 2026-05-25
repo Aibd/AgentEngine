@@ -13,6 +13,19 @@ web = [
   "fastapi>=0.115.0",
   "uvicorn[standard]>=0.30.0"
 ]
+report = [
+  "pydantic>=2.0",
+  "python-multipart>=0.0.9",
+  "pandas>=2.2",
+  "openpyxl>=3.1",
+  "pyarrow>=17.0",
+  "pdfplumber>=0.11",
+  "chardet>=5.2",
+  "duckdb>=1.1",
+  "matplotlib>=3.9",
+  "Pillow>=10",
+  "python-docx>=1.1"
+]
 dev = [
   "fastapi>=0.115.0",
   "mypy>=1.10.0",
