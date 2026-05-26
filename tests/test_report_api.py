@@ -1,21 +1,37 @@
 from __future__ import annotations
 
 import json
+import html
 from collections.abc import AsyncIterator
 
 import httpx
 import pytest
 
+from agentengine.llm.interfaces import LLMChunk
 from examples.services import web_api
+from examples.services.reporting import jobs
 
 
 pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture(autouse=True)
-def _disable_report_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+def _fake_report_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.setattr(jobs, "create_llm_from_env", lambda required=False: _FakeReportLLM())
+
+
+class _FakeReportLLM:
+    async def chat_stream(self, messages, **kwargs):  # type: ignore[no-untyped-def]
+        body = html.escape(messages[1].content)
+        content = f"<!doctype html><html><head><title>Report</title></head><body><pre>{body}</pre></body></html>"
+        midpoint = max(1, len(content) // 2)
+        yield LLMChunk(content=content[:midpoint])
+        yield LLMChunk(content=content[midpoint:], finish_reason="stop")
+
+    async def close(self) -> None:
+        return None
 
 
 async def _consume_sse(response: httpx.Response) -> AsyncIterator[dict]:
@@ -71,8 +87,7 @@ async def test_report_stream_emits_artifact_sequence_and_snapshot() -> None:
     assert "tool_result" in event_types
     assert "step_end" in event_types
     assert "artifact_start" in event_types
-    assert "artifact_section_started" in event_types
-    assert "artifact_block_added" in event_types
+    assert "artifact_html_delta" in event_types
     assert "artifact_ready" in event_types
     assert event_types[-1] == "artifact_export_ready"
 
@@ -84,14 +99,15 @@ async def test_report_stream_emits_artifact_sequence_and_snapshot() -> None:
     assert snapshot.status_code == 200
     body = snapshot.json()
     assert body["status"] == "ready"
-    assert len(body["ir"]["sections"]) >= 6
+    assert body["html_length"] > 0
+    assert "财务分析报告 Demo" in body["html"]
     assert body["exports"]["md"].endswith("/exports/md")
     assert body["exports"]["html"].endswith("/exports/html")
     assert body["exports"]["pdf"].endswith("/exports/pdf")
-    assert body["exports"]["docx"].endswith("/exports/docx")
+    assert body["exports"]["word"].endswith("/exports/word")
 
     assert exported.status_code == 200
-    assert "# 财务分析报告 Demo" in exported.text
+    assert "财务分析报告 Demo" in exported.text
 
 
 async def test_report_export_rejects_unknown_format() -> None:
@@ -130,22 +146,15 @@ async def test_upload_csv_and_generate_report_from_file() -> None:
             events = [evt async for evt in _consume_sse(response)]
 
         snapshot = await client.get(f"/api/reports/{report_id}")
-        chart_ids = snapshot.json()["chart_ids"]
-        chart = await client.get(f"/api/reports/{report_id}/charts/{chart_ids[0]}.svg")
 
     assert uploaded.json()["parsed"]["sheets"][0]["headers"] == ["period", "revenue", "net_income"]
     assert created.status_code == 200
     assert created.json()["file_ids"] == [file_id]
-    assert chart.status_code == 200
-    assert "<svg" in chart.text
-    assert any(evt["event"] == "artifact_chart_ready" for evt in events)
-    assert any(evt["event"] == "artifact_block_added" for evt in events)
-    assert any(
-        evt["event"] == "artifact_block_added"
-        and evt["data"].get("type") == "table"
-        and evt["data"].get("headers") == ["period", "revenue", "net_income"]
-        for evt in events
-    )
+    assert snapshot.status_code == 200
+    assert "period" in snapshot.json()["html"]
+    assert "revenue" in snapshot.json()["html"]
+    assert any(evt["event"] == "artifact_html_delta" for evt in events)
+    assert not any(evt["event"] == "artifact_block_added" for evt in events)
 
 
 async def test_report_uses_previous_conversation_uploads_when_file_ids_omitted() -> None:

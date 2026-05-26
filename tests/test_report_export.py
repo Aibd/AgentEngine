@@ -1,21 +1,37 @@
 from __future__ import annotations
 
-import zipfile
+import html
 from io import BytesIO
 
+from docx import Document
 import httpx
 import pytest
 
+from agentengine.llm.interfaces import LLMChunk
 from examples.services import web_api
+from examples.services.reporting import jobs
+from examples.services.reporting.pdf_renderer import prepare_print_html
 
 
 pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture(autouse=True)
-def _disable_report_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+def _fake_report_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.setattr(jobs, "create_llm_from_env", lambda required=False: _FakeReportLLM())
+
+
+class _FakeReportLLM:
+    async def chat_stream(self, messages, **kwargs):  # type: ignore[no-untyped-def]
+        body = html.escape(messages[1].content)
+        content = f"<!doctype html><html><head><title>Report</title></head><body><pre>{body}</pre></body></html>"
+        yield LLMChunk(content=content[: max(1, len(content) // 2)])
+        yield LLMChunk(content=content[max(1, len(content) // 2) :], finish_reason="stop")
+
+    async def close(self) -> None:
+        return None
 
 
 async def _complete_demo_report(client: httpx.AsyncClient, *, title: str = "Export Ready Report") -> str:
@@ -29,7 +45,7 @@ async def _complete_demo_report(client: httpx.AsyncClient, *, title: str = "Expo
     return report_id
 
 
-async def test_html_export_is_standalone_and_inlines_chart_svg() -> None:
+async def test_html_export_is_standalone() -> None:
     transport = httpx.ASGITransport(app=web_api.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver", timeout=10.0) as client:
         report_id = await _complete_demo_report(client)
@@ -39,32 +55,23 @@ async def test_html_export_is_standalone_and_inlines_chart_svg() -> None:
     assert response.headers["content-type"].startswith("text/html")
     assert response.headers["content-disposition"] == f'attachment; filename="{report_id}.html"'
     assert "<!doctype html>" in response.text
-    assert "@page" in response.text
-    assert "<svg" in response.text
     assert "Export Ready Report" in response.text
 
 
-async def test_docx_export_is_valid_openxml_package() -> None:
+async def test_word_export_returns_native_docx() -> None:
     transport = httpx.ASGITransport(app=web_api.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver", timeout=10.0) as client:
         report_id = await _complete_demo_report(client, title="Word Export Report")
-        response = await client.get(f"/api/reports/{report_id}/exports/docx")
+        response = await client.get(f"/api/reports/{report_id}/exports/word")
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith(
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
     assert response.headers["content-disposition"] == f'attachment; filename="{report_id}.docx"'
-    with zipfile.ZipFile(BytesIO(response.content)) as package:
-        names = set(package.namelist())
-        document = package.read("word/document.xml").decode("utf-8")
-        rels = package.read("word/_rels/document.xml.rels").decode("utf-8")
-    assert "[Content_Types].xml" in names
-    assert "word/styles.xml" in names
-    assert "word/media/chart_1.svg" in names
-    assert "Word Export Report" in document
-    assert "image/svg+xml" in package_content_types(response.content)
-    assert "media/chart_1.svg" in rels
+    assert response.content.startswith(b"PK")
+    document = Document(BytesIO(response.content))
+    assert "Word Export Report" in "\n".join(paragraph.text for paragraph in document.paragraphs)
 
 
 async def test_pdf_export_returns_browser_pdf_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -87,6 +94,15 @@ async def test_pdf_export_returns_browser_pdf_bytes(monkeypatch: pytest.MonkeyPa
     assert "PDF Export Report" in seen["html"]
 
 
+async def test_pdf_print_html_injects_pagination_css() -> None:
+    prepared = prepare_print_html("<!doctype html><html><head><title>x</title></head><body><section>Body</section></body></html>")
+
+    assert "agentengine-export-print-css" in prepared
+    assert "@page" in prepared
+    assert "break-inside: avoid" in prepared
+    assert "table-header-group" in prepared
+
+
 async def test_pdf_export_reports_missing_renderer(monkeypatch: pytest.MonkeyPatch) -> None:
     def unavailable(_: str) -> bytes:
         raise web_api.PdfRendererUnavailable("missing browser")
@@ -94,13 +110,17 @@ async def test_pdf_export_reports_missing_renderer(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(web_api, "render_pdf", unavailable)
     transport = httpx.ASGITransport(app=web_api.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver", timeout=10.0) as client:
-        created = await client.post("/api/reports", json={"title": "Report"})
-        response = await client.get(f"/api/reports/{created.json()['id']}/exports/pdf")
+        report_id = await _complete_demo_report(client, title="Report")
+        response = await client.get(f"/api/reports/{report_id}/exports/pdf")
 
     assert response.status_code == 501
     assert response.json()["detail"] == "missing browser"
 
 
-def package_content_types(content: bytes) -> str:
-    with zipfile.ZipFile(BytesIO(content)) as package:
-        return package.read("[Content_Types].xml").decode("utf-8")
+async def test_export_before_html_is_ready_returns_conflict() -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver", timeout=10.0) as client:
+        created = await client.post("/api/reports", json={"title": "Report"})
+        response = await client.get(f"/api/reports/{created.json()['id']}/exports/html")
+
+    assert response.status_code == 409

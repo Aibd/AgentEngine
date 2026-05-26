@@ -1,47 +1,34 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
-from agentengine.llm.interfaces import LLMResponse
+from agentengine.llm.interfaces import LLMChunk
 from examples.services.reporting import jobs
-from examples.services.reporting.jobs import ReportJobStore, parse_model_report_blocks, stream_report_artifact
+from examples.services.reporting.jobs import ReportJobStore, extract_model_html, stream_report_artifact
 
 
-def test_parse_model_report_blocks_accepts_json_object_and_chart() -> None:
+def test_extract_model_html_accepts_fenced_html_and_strips_script() -> None:
     content = """
-    ```json
-    {
-      "blocks": [
-        {"type": "heading", "level": 1, "text": "自定义财务报告"},
-        {"type": "paragraph", "text": "收入增长来自上传文件中的 revenue 字段。"},
-        {
-          "type": "chart",
-          "text": "收入趋势",
-          "chart": {
-            "kind": "line",
-            "title": "收入趋势",
-            "x": ["2023Q1", "2024Q1"],
-            "series": [{"name": "revenue", "data": [698, 805]}],
-            "y_format": "currency"
-          }
-        }
-      ]
-    }
+    ```html
+    <!doctype html>
+    <html><head><title>Report</title></head><body><h1>Report</h1><script>alert(1)</script></body></html>
     ```
     """
 
-    blocks = parse_model_report_blocks(content)
+    output = extract_model_html(content, title="Report")
 
-    assert [block.type for block in blocks] == ["heading", "paragraph", "chart"]
-    assert blocks[0].text == "自定义财务报告"
-    assert blocks[2].chart_id
-    assert blocks[2].chart is not None
-    assert blocks[2].chart.series[0].data == [698, 805]
+    assert "<h1>Report</h1>" in output
+    assert "<script" not in output.lower()
 
 
-def test_parse_model_report_blocks_rejects_non_blocks_payload() -> None:
-    with pytest.raises(ValueError, match="blocks array"):
-        parse_model_report_blocks('{"message":"not a report"}')
+def test_extract_model_html_wraps_body_fragment() -> None:
+    output = extract_model_html("<section><h1>Fragment</h1></section>", title="Wrapped")
+
+    assert "<!doctype html>" in output
+    assert "<title>Wrapped</title>" in output
+    assert "<section><h1>Fragment</h1></section>" in output
 
 
 def test_report_job_store_preserves_selected_skill() -> None:
@@ -50,7 +37,7 @@ def test_report_job_store_preserves_selected_skill() -> None:
     job = store.create(
         conversation_id="conv",
         title="Report",
-        intent="根据文件生成收入质量分析",
+        intent="analyze uploaded files",
         skill="data_analysis",
     )
 
@@ -59,13 +46,12 @@ def test_report_job_store_preserves_selected_skill() -> None:
 
 
 @pytest.mark.asyncio
-async def test_report_stream_uses_llm_blocks_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_report_stream_uses_llm_html_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeLLM:
-        async def chat(self, messages, **kwargs):  # type: ignore[no-untyped-def]
+        async def chat_stream(self, messages, **kwargs):  # type: ignore[no-untyped-def]
             assert "Uploaded file context" in messages[1].content
-            return LLMResponse(
-                content='{"blocks":[{"type":"heading","level":1,"text":"模型定制报告"},{"type":"paragraph","text":"按用户提示生成。"}]}'
-            )
+            yield LLMChunk(content="<!doctype html><html><head><title>Custom</title></head><body>")
+            yield LLMChunk(content="<h1>Streamed HTML Report</h1></body></html>", finish_reason="stop")
 
         async def close(self) -> None:
             return None
@@ -75,12 +61,82 @@ async def test_report_stream_uses_llm_blocks_when_configured(monkeypatch: pytest
     job = store.create(
         conversation_id="conv",
         title="Custom",
-        intent="只输出经营现金流质量分析",
+        intent="generate a custom report",
         skill="data_analysis",
     )
 
     events = [event async for event in stream_report_artifact(job=job, request_id="report-test")]
 
-    block_events = [event for event in events if event["event"] == "artifact_block_added"]
-    assert block_events[0]["data"]["text"] == "模型定制报告"
-    assert block_events[1]["data"]["text"] == "按用户提示生成。"
+    html_events = [event for event in events if event["event"] == "artifact_html_delta"]
+    assert len(html_events) >= 2
+    assert "Streamed HTML Report" in "".join(event["data"]["delta"] for event in html_events)
+    assert any(event["data"].get("replace") is True for event in html_events) is False
+    assert not any(event["event"] == "artifact_block_added" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_report_stream_normalizes_streamed_markdown_fence(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeLLM:
+        async def chat_stream(self, messages, **kwargs):  # type: ignore[no-untyped-def]
+            yield LLMChunk(content="```html\n<!doctype html><html><body>")
+            yield LLMChunk(content="<h1>Fenced</h1></body></html>\n```", finish_reason="stop")
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(jobs, "create_llm_from_env", lambda required=False: FakeLLM())
+    job = ReportJobStore().create(conversation_id="conv", title="Fenced", intent="generate", skill="data_analysis")
+
+    events = [event async for event in stream_report_artifact(job=job, request_id="report-test")]
+
+    replacements = [
+        event for event in events
+        if event["event"] == "artifact_html_delta" and event["data"].get("replace") is True
+    ]
+    assert replacements
+    assert job.html.startswith("<!doctype html>")
+
+
+@pytest.mark.asyncio
+async def test_report_stream_replays_after_client_disconnect(monkeypatch: pytest.MonkeyPatch) -> None:
+    class SlowLLM:
+        async def chat_stream(self, messages, **kwargs):  # type: ignore[no-untyped-def]
+            yield LLMChunk(content="<!doctype html><html><body>")
+            await asyncio.sleep(0.01)
+            yield LLMChunk(content="<h1>Completed after disconnect</h1></body></html>", finish_reason="stop")
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(jobs, "create_llm_from_env", lambda required=False: SlowLLM())
+    job = ReportJobStore().create(conversation_id="conv", title="Reconnect", intent="generate", skill="data_analysis")
+
+    first_stream = stream_report_artifact(job=job, request_id="first-request")
+    async for event in first_stream:
+        if event["event"] == "artifact_html_delta":
+            break
+    await first_stream.aclose()
+
+    assert job.generation_task is not None
+    await asyncio.wait_for(job.generation_task, timeout=1)
+    replayed = [event async for event in stream_report_artifact(job=job, request_id="reconnect-request")]
+
+    assert job.status == "ready"
+    assert replayed[0]["event"] == "start"
+    assert all(event["data"]["request_id"] == "reconnect-request" for event in replayed)
+    assert "Completed after disconnect" in "".join(
+        event["data"].get("delta", "") for event in replayed if event["event"] == "artifact_html_delta"
+    )
+
+
+@pytest.mark.asyncio
+async def test_report_stream_fails_when_llm_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(jobs, "create_llm_from_env", lambda required=False: None)
+    store = ReportJobStore()
+    job = store.create(conversation_id="conv", title="Missing LLM", intent="generate", skill="data_analysis")
+
+    events = [event async for event in stream_report_artifact(job=job, request_id="report-test")]
+
+    assert job.status == "failed"
+    assert any(event["event"] == "artifact_error" for event in events)
+    assert not any(event["event"] == "artifact_html_delta" for event in events)
