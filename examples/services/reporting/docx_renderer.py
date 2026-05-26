@@ -1,283 +1,325 @@
 from __future__ import annotations
 
-import io
-import zipfile
+import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from html import escape
+from html.parser import HTMLParser
+from io import BytesIO
+from typing import Any
 
-from examples.services.reporting.charts import render_svg
-from examples.services.reporting.models import ChartSpec, ReportBlock, ReportData
+from docx import Document  # type: ignore[import-untyped]
+from docx.enum.text import WD_BREAK  # type: ignore[import-untyped]
+from docx.oxml import OxmlElement  # type: ignore[import-untyped]
+from docx.oxml.ns import qn  # type: ignore[import-untyped]
+from docx.shared import Inches, Pt  # type: ignore[import-untyped]
 
 
-DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-
-
-def render_docx(report: ReportData, *, chart_assets: dict[str, str] | None = None) -> bytes:
-    builder = _DocxBuilder(chart_assets=chart_assets or {})
-    body = [
-        _paragraph(report.meta.title, style="Title"),
-        *([_paragraph(report.meta.period, style="Subtitle")] if report.meta.period else []),
-    ]
-    for block in report.sections:
-        body.extend(builder.render_block(block))
-    if report.appendix:
-        body.append(_paragraph("Appendix", style="Heading2"))
-        for block in report.appendix:
-            body.extend(builder.render_block(block))
-    document = _document_xml("".join(body))
-    return builder.package(report=report, document_xml=document)
+BLOCK_TAGS = {
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "div",
+    "figure",
+    "footer",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "header",
+    "li",
+    "main",
+    "nav",
+    "ol",
+    "p",
+    "pre",
+    "section",
+    "table",
+    "ul",
+}
+SKIP_TAGS = {"script", "style", "meta", "link", "head", "title"}
+INLINE_BOLD = {"b", "strong", "th"}
+INLINE_ITALIC = {"i", "em", "cite"}
 
 
 @dataclass(slots=True)
-class _DocxBuilder:
-    chart_assets: dict[str, str]
-    image_rels: list[tuple[str, str]] = field(default_factory=list)
-    media: dict[str, str] = field(default_factory=dict)
-
-    def render_block(self, block: ReportBlock) -> list[str]:
-        if block.type == "heading":
-            level = max(1, min(block.level or 2, 3))
-            return [_paragraph(block.text or "", style=f"Heading{level}")]
-        if block.type == "paragraph":
-            return [_paragraph(block.text or "")]
-        if block.type == "callout":
-            return [_paragraph(block.text or "", style="Quote")]
-        if block.type == "kpi":
-            rows = [["Metric", "Value", "Delta", "Trend"]]
-            for item in block.kpis or []:
-                rows.append([item.label, item.value, item.delta, item.trend])
-            return [_table(rows, header=True)]
-        if block.type == "table":
-            return [_table([block.headers or [], *(block.rows or [])], header=bool(block.headers))]
-        if block.type == "chart":
-            return self._chart(block)
-        if block.type == "page_break":
-            return [_paragraph("", page_break=True)]
-        return []
-
-    def _chart(self, block: ReportBlock) -> list[str]:
-        svg = ""
-        if block.chart_id and block.chart_id in self.chart_assets:
-            svg = self.chart_assets[block.chart_id]
-        elif block.chart is not None:
-            svg = render_svg(block.chart)
-        caption = block.text or (block.chart.title if block.chart else "Chart")
-        output = [_paragraph(caption, style="Caption")]
-        if svg:
-            rel_id = f"rId{len(self.image_rels) + 1}"
-            media_name = f"media/chart_{len(self.image_rels) + 1}.svg"
-            self.image_rels.append((rel_id, media_name))
-            self.media[media_name] = svg
-            output.append(_svg_drawing(rel_id, caption))
-        if block.chart is not None:
-            output.append(_chart_data_table(block.chart))
-        return output
-
-    def package(self, *, report: ReportData, document_xml: str) -> bytes:
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as package:
-            package.writestr("[Content_Types].xml", _content_types(has_svg=bool(self.media)))
-            package.writestr("_rels/.rels", _root_rels())
-            package.writestr("docProps/core.xml", _core_props(report.meta.title))
-            package.writestr("docProps/app.xml", _app_props())
-            package.writestr("word/document.xml", document_xml)
-            package.writestr("word/styles.xml", _styles_xml())
-            package.writestr("word/settings.xml", _settings_xml())
-            package.writestr("word/_rels/document.xml.rels", _document_rels(self.image_rels))
-            for name, content in self.media.items():
-                package.writestr(f"word/{name}", content.encode("utf-8"))
-        return buffer.getvalue()
+class TextNode:
+    text: str
 
 
-def _document_xml(body: str) -> str:
-    return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-  xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
-  xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
-  xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
-  <w:body>
-    {body}
-    <w:sectPr>
-      <w:pgSz w:w="11906" w:h="16838"/>
-      <w:pgMar w:top="1134" w:right="992" w:bottom="1134" w:left="992" w:header="708" w:footer="708" w:gutter="0"/>
-    </w:sectPr>
-  </w:body>
-</w:document>"""
+@dataclass(slots=True)
+class ElementNode:
+    tag: str
+    attrs: dict[str, str] = field(default_factory=dict)
+    children: list["ElementNode | TextNode"] = field(default_factory=list)
 
 
-def _paragraph(text: str, *, style: str = "Normal", page_break: bool = False) -> str:
-    break_xml = "<w:br w:type=\"page\"/>" if page_break else ""
-    text_xml = f"<w:t xml:space=\"preserve\">{_xml_text(text)}</w:t>" if text else ""
-    return f"""<w:p>
-  <w:pPr><w:pStyle w:val="{style}"/></w:pPr>
-  <w:r>{break_xml}{text_xml}</w:r>
-</w:p>"""
+class _DocumentParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.root = ElementNode("document")
+        self._stack: list[ElementNode] = [self.root]
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        node = ElementNode(tag.lower(), {key.lower(): value or "" for key, value in attrs})
+        self._stack[-1].children.append(node)
+        if tag.lower() not in {"br", "hr", "img", "input", "meta", "link"}:
+            self._stack.append(node)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        for index in range(len(self._stack) - 1, 0, -1):
+            if self._stack[index].tag == tag:
+                del self._stack[index:]
+                return
+
+    def handle_data(self, data: str) -> None:
+        if data:
+            self._stack[-1].children.append(TextNode(data))
 
 
-def _table(rows: list[list[object]], *, header: bool) -> str:
+def render_docx(report_html: str) -> bytes:
+    """Render report HTML into a native DOCX document.
+
+    This intentionally avoids the old Word-compatible HTML download path.
+    Returning a real Office Open XML package prevents Word from guessing the
+    wrong encoding and gives tables/headings native Word structure.
+    """
+
+    document = Document()
+    _configure_document(document)
+    root = _parse(report_html)
+    body = _first(root, "body") or root
+    title = _document_title(root)
+    if title and not _contains_tag(body, "h1"):
+        document.add_heading(title, level=1)
+
+    rendered_any = False
+    for child in body.children:
+        rendered_any = _render_block(document, child) or rendered_any
+
+    if not rendered_any:
+        document.add_paragraph(_collect_text(body) or "Report")
+
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
+def _parse(report_html: str) -> ElementNode:
+    parser = _DocumentParser()
+    parser.feed(report_html)
+    parser.close()
+    return parser.root
+
+
+def _configure_document(document: Any) -> None:
+    section = document.sections[0]
+    section.top_margin = Inches(0.72)
+    section.bottom_margin = Inches(0.72)
+    section.left_margin = Inches(0.68)
+    section.right_margin = Inches(0.68)
+
+    styles = document.styles
+    normal = styles["Normal"]
+    normal.font.name = "Microsoft YaHei"
+    normal.font.size = Pt(10.5)
+    normal._element.rPr.rFonts.set(qn("w:eastAsia"), "Microsoft YaHei")
+
+    for style_name in ("Heading 1", "Heading 2", "Heading 3"):
+        style = styles[style_name]
+        style.font.name = "Microsoft YaHei"
+        style._element.rPr.rFonts.set(qn("w:eastAsia"), "Microsoft YaHei")
+    styles["Heading 1"].font.size = Pt(20)
+    styles["Heading 2"].font.size = Pt(15)
+    styles["Heading 3"].font.size = Pt(12.5)
+
+
+def _render_block(document: Any, node: ElementNode | TextNode) -> bool:
+    if isinstance(node, TextNode):
+        text = _collapse(node.text)
+        if text:
+            document.add_paragraph(text)
+            return True
+        return False
+
+    if node.tag in SKIP_TAGS:
+        return False
+    if node.tag in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+        text = _collect_text(node)
+        if not text:
+            return False
+        level = min(max(int(node.tag[1]), 1), 3)
+        document.add_heading(text, level=level)
+        return True
+    if node.tag == "p":
+        paragraph = document.add_paragraph()
+        _render_inline(paragraph, node.children)
+        return bool(paragraph.text.strip())
+    if node.tag == "br":
+        document.add_paragraph()
+        return True
+    if node.tag == "hr":
+        paragraph = document.add_paragraph()
+        paragraph.add_run("─" * 36)
+        return True
+    if node.tag == "pre":
+        paragraph = document.add_paragraph()
+        run = paragraph.add_run(_raw_text(node).strip())
+        run.font.name = "Consolas"
+        run.font.size = Pt(9)
+        return bool(paragraph.text.strip())
+    if node.tag == "blockquote":
+        paragraph = document.add_paragraph()
+        paragraph.paragraph_format.left_indent = Inches(0.24)
+        _render_inline(paragraph, node.children)
+        return bool(paragraph.text.strip())
+    if node.tag == "ul":
+        return _render_list(document, node, style="List Bullet")
+    if node.tag == "ol":
+        return _render_list(document, node, style="List Number")
+    if node.tag == "table":
+        return _render_table(document, node)
+    if node.tag in {"img", "svg", "canvas"}:
+        paragraph = document.add_paragraph()
+        paragraph.add_run("[Chart or image available in the HTML/PDF export]")
+        return True
+    if node.tag == "li":
+        paragraph = document.add_paragraph(style="List Bullet")
+        _render_inline(paragraph, node.children)
+        return bool(paragraph.text.strip())
+
+    child_blocks = [child for child in node.children if isinstance(child, ElementNode) and child.tag in BLOCK_TAGS]
+    if child_blocks:
+        rendered = False
+        for child in node.children:
+            rendered = _render_block(document, child) or rendered
+        return rendered
+
+    text = _collect_text(node)
+    if text:
+        document.add_paragraph(text)
+        return True
+    return False
+
+
+def _render_list(document: Any, node: ElementNode, *, style: str) -> bool:
+    rendered = False
+    for child in node.children:
+        if isinstance(child, ElementNode) and child.tag == "li":
+            paragraph = document.add_paragraph(style=style)
+            _render_inline(paragraph, child.children)
+            rendered = bool(paragraph.text.strip()) or rendered
+    return rendered
+
+
+def _render_table(document: Any, node: ElementNode) -> bool:
+    rows = []
+    header_flags = []
+    for row_node in _descendants(node, "tr"):
+        cells = [cell for cell in row_node.children if isinstance(cell, ElementNode) and cell.tag in {"td", "th"}]
+        if not cells:
+            cells = [cell for cell in _descendants(row_node, "td")] + [cell for cell in _descendants(row_node, "th")]
+        if cells:
+            rows.append([_collect_text(cell) for cell in cells])
+            header_flags.append(any(cell.tag == "th" for cell in cells))
+
     if not rows:
-        return ""
-    width = max(len(row) for row in rows)
-    normalized = [[row[index] if index < len(row) else "" for index in range(width)] for row in rows]
-    table_rows = []
-    for row_index, row in enumerate(normalized):
-        cells = []
-        for cell in row:
-            shade = '<w:shd w:fill="EAF1F8"/>' if header and row_index == 0 else ""
-            cells.append(
-                f"""<w:tc>
-  <w:tcPr><w:tcW w:w="{max(1200, 9000 // width)}" w:type="dxa"/>{shade}</w:tcPr>
-  {_paragraph("" if cell is None else str(cell))}
-</w:tc>"""
-            )
-        table_rows.append(f"<w:tr>{''.join(cells)}</w:tr>")
-    return f"""<w:tbl>
-  <w:tblPr>
-    <w:tblW w:w="0" w:type="auto"/>
-    <w:tblBorders>
-      <w:top w:val="single" w:sz="4" w:color="D9E2EC"/>
-      <w:left w:val="single" w:sz="4" w:color="D9E2EC"/>
-      <w:bottom w:val="single" w:sz="4" w:color="D9E2EC"/>
-      <w:right w:val="single" w:sz="4" w:color="D9E2EC"/>
-      <w:insideH w:val="single" w:sz="4" w:color="D9E2EC"/>
-      <w:insideV w:val="single" w:sz="4" w:color="D9E2EC"/>
-    </w:tblBorders>
-  </w:tblPr>
-  {''.join(table_rows)}
-</w:tbl>"""
+        return False
+
+    column_count = max(len(row) for row in rows)
+    table = document.add_table(rows=len(rows), cols=column_count)
+    table.style = "Table Grid"
+    table.autofit = True
+
+    for row_index, row in enumerate(rows):
+        word_row = table.rows[row_index]
+        if row_index == 0 and header_flags[row_index]:
+            _repeat_table_header(word_row)
+        for column_index in range(column_count):
+            cell = word_row.cells[column_index]
+            cell.text = row[column_index] if column_index < len(row) else ""
+            if row_index == 0 and header_flags[row_index]:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.bold = True
+    document.add_paragraph()
+    return True
 
 
-def _chart_data_table(chart: ChartSpec) -> str:
-    rows: list[list[object]] = [["Period", *[series.name for series in chart.series]]]
-    for index, label in enumerate(chart.x):
-        rows.append([label, *[_series_value(series.data, index) for series in chart.series]])
-    return _table(rows, header=True)
+def _render_inline(paragraph: Any, children: list[ElementNode | TextNode], *, bold: bool = False, italic: bool = False) -> None:
+    for child in children:
+        if isinstance(child, TextNode):
+            text = _collapse(child.text)
+            if text:
+                run = paragraph.add_run(text)
+                run.bold = bold
+                run.italic = italic
+            continue
+        if child.tag in SKIP_TAGS:
+            continue
+        if child.tag == "br":
+            paragraph.add_run().add_break(WD_BREAK.LINE)
+            continue
+        if child.tag in BLOCK_TAGS and child.tag not in {"span", "a", "strong", "b", "em", "i", "code"}:
+            text = _collect_text(child)
+            if text:
+                run = paragraph.add_run(text)
+                run.bold = bold or child.tag in INLINE_BOLD
+                run.italic = italic or child.tag in INLINE_ITALIC
+            continue
+        next_bold = bold or child.tag in INLINE_BOLD
+        next_italic = italic or child.tag in INLINE_ITALIC
+        _render_inline(paragraph, child.children, bold=next_bold, italic=next_italic)
 
 
-def _series_value(values: list[float | int | None], index: int) -> str:
-    if index >= len(values) or values[index] is None:
-        return ""
-    return str(values[index])
+def _first(node: ElementNode, tag: str) -> ElementNode | None:
+    for child in node.children:
+        if isinstance(child, ElementNode):
+            if child.tag == tag:
+                return child
+            found = _first(child, tag)
+            if found is not None:
+                return found
+    return None
 
 
-def _svg_drawing(rel_id: str, alt_text: str) -> str:
-    cx = 5486400
-    cy = 3291840
-    return f"""<w:p>
-  <w:pPr><w:jc w:val="center"/></w:pPr>
-  <w:r>
-    <w:drawing>
-      <wp:inline distT="0" distB="0" distL="0" distR="0">
-        <wp:extent cx="{cx}" cy="{cy}"/>
-        <wp:docPr id="1" name="Chart" descr="{_xml_attr(alt_text)}"/>
-        <a:graphic>
-          <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
-            <pic:pic>
-              <pic:nvPicPr>
-                <pic:cNvPr id="0" name="Chart"/>
-                <pic:cNvPicPr/>
-              </pic:nvPicPr>
-              <pic:blipFill>
-                <a:blip r:embed="{rel_id}"/>
-                <a:stretch><a:fillRect/></a:stretch>
-              </pic:blipFill>
-              <pic:spPr>
-                <a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm>
-                <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
-              </pic:spPr>
-            </pic:pic>
-          </a:graphicData>
-        </a:graphic>
-      </wp:inline>
-    </w:drawing>
-  </w:r>
-</w:p>"""
+def _descendants(node: ElementNode, tag: str) -> list[ElementNode]:
+    found: list[ElementNode] = []
+    for child in node.children:
+        if isinstance(child, ElementNode):
+            if child.tag == tag:
+                found.append(child)
+            found.extend(_descendants(child, tag))
+    return found
 
 
-def _content_types(*, has_svg: bool) -> str:
-    svg_type = '<Default Extension="svg" ContentType="image/svg+xml"/>' if has_svg else ""
-    return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  {svg_type}
-  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
-  <Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>
-  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
-  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
-</Types>"""
+def _contains_tag(node: ElementNode, tag: str) -> bool:
+    return _first(node, tag) is not None
 
 
-def _root_rels() -> str:
-    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
-  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
-</Relationships>"""
+def _document_title(root: ElementNode) -> str:
+    title = _first(root, "title")
+    return _collect_text(title) if title is not None else ""
 
 
-def _document_rels(image_rels: list[tuple[str, str]]) -> str:
-    relationships = [
-        '<Relationship Id="rStyle" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>',
-        '<Relationship Id="rSettings" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/>',
-    ]
-    relationships.extend(
-        f'<Relationship Id="{rel_id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="{target}"/>'
-        for rel_id, target in image_rels
-    )
-    return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  {''.join(relationships)}
-</Relationships>"""
+def _collect_text(node: ElementNode | TextNode) -> str:
+    return _collapse(_raw_text(node))
 
 
-def _styles_xml() -> str:
-    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:rFonts w:ascii="Arial" w:eastAsia="Microsoft YaHei"/><w:sz w:val="22"/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:after="280"/></w:pPr><w:rPr><w:b/><w:color w:val="0F172A"/><w:sz w:val="44"/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Subtitle"/><w:basedOn w:val="Normal"/><w:rPr><w:color w:val="64748B"/><w:sz w:val="24"/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="Heading 1"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="360" w:after="160"/></w:pPr><w:rPr><w:b/><w:color w:val="0F172A"/><w:sz w:val="36"/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="Heading 2"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="300" w:after="140"/></w:pPr><w:rPr><w:b/><w:color w:val="1D4ED8"/><w:sz w:val="30"/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="Heading 3"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="240" w:after="120"/></w:pPr><w:rPr><w:b/><w:color w:val="334155"/><w:sz w:val="26"/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/><w:basedOn w:val="Normal"/><w:pPr><w:ind w:left="240"/><w:spacing w:before="120" w:after="120"/></w:pPr><w:rPr><w:color w:val="0F172A"/><w:i/></w:rPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Caption"><w:name w:val="Caption"/><w:basedOn w:val="Normal"/><w:pPr><w:jc w:val="center"/><w:spacing w:before="160" w:after="80"/></w:pPr><w:rPr><w:color w:val="64748B"/><w:sz w:val="20"/></w:rPr></w:style>
-</w:styles>"""
+def _raw_text(node: ElementNode | TextNode) -> str:
+    if isinstance(node, TextNode):
+        return node.text
+    return "".join(_raw_text(child) for child in node.children if not (isinstance(child, ElementNode) and child.tag in SKIP_TAGS))
 
 
-def _settings_xml() -> str:
-    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:zoom w:percent="100"/>
-</w:settings>"""
+def _collapse(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
 
 
-def _core_props(title: str) -> str:
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <dc:title>{_xml_text(title)}</dc:title>
-  <dc:creator>AgentEngine</dc:creator>
-  <cp:lastModifiedBy>AgentEngine</cp:lastModifiedBy>
-  <dcterms:created xsi:type="dcterms:W3CDTF">{now}</dcterms:created>
-  <dcterms:modified xsi:type="dcterms:W3CDTF">{now}</dcterms:modified>
-</cp:coreProperties>"""
-
-
-def _app_props() -> str:
-    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-  <Application>AgentEngine</Application>
-</Properties>"""
-
-
-def _xml_text(value: str) -> str:
-    return escape(value, quote=False)
-
-
-def _xml_attr(value: str) -> str:
-    return escape(value, quote=True)
+def _repeat_table_header(row: Any) -> None:
+    tr_pr = row._tr.get_or_add_trPr()
+    tbl_header = OxmlElement("w:tblHeader")
+    tbl_header.set(qn("w:val"), "true")
+    tr_pr.append(tbl_header)
