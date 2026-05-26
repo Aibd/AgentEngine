@@ -1,5 +1,4 @@
 import type {
-  ArtifactBlock,
   ArtifactTrace,
   RunTrace,
   SseEvent,
@@ -122,10 +121,10 @@ export function reduceTraceEvent(trace: RunTrace, event: SseEvent): RunTrace {
         ...artifact,
         currentSection: stringValue(data.name),
       }));
-    case "artifact_block_added":
+    case "artifact_html_delta":
       return updateArtifact(trace, data, (artifact) => ({
         ...artifact,
-        blocks: [...artifact.blocks, data as unknown as ArtifactBlock],
+        html: data.replace === true ? stringValue(data.delta) : artifact.html + stringValue(data.delta),
       }));
     case "artifact_chart_ready":
       return updateArtifact(trace, data, (artifact) => {
@@ -321,7 +320,7 @@ function createArtifact(data: Record<string, unknown>): ArtifactTrace {
     type,
     title: stringValue(data.title) || "Financial report",
     status: "streaming",
-    blocks: [],
+    html: stringValue(data.html),
     charts: {},
   };
 }

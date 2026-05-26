@@ -17,7 +17,7 @@ export type ResponseType =
   | "user_question_asked"
   | "artifact_start"
   | "artifact_section_started"
-  | "artifact_block_added"
+  | "artifact_html_delta"
   | "artifact_chart_ready"
   | "artifact_ready"
   | "artifact_export_ready"
@@ -38,42 +38,6 @@ export type UserQuestion = {
   multiple: boolean;
 };
 
-export type ArtifactBlockType =
-  | "heading"
-  | "paragraph"
-  | "table"
-  | "chart"
-  | "kpi"
-  | "callout"
-  | "page_break";
-
-export type ArtifactKpi = {
-  label: string;
-  value: string;
-  delta?: string;
-  trend?: "up" | "down" | "flat";
-};
-
-export type ArtifactChart = {
-  kind?: string;
-  title?: string;
-  x?: string[];
-  series?: { name: string; data: Array<number | null> }[];
-  y_format?: "currency" | "percent" | "number";
-};
-
-export type ArtifactBlock = {
-  type: ArtifactBlockType;
-  level?: number;
-  text?: string;
-  headers?: string[];
-  rows?: Array<Array<string | number | null>>;
-  chart_id?: string;
-  chart?: ArtifactChart;
-  kpis?: ArtifactKpi[];
-  style?: Record<string, unknown>;
-};
-
 export type ArtifactTrace = {
   id: string;
   reportId: string;
@@ -81,7 +45,7 @@ export type ArtifactTrace = {
   title: string;
   status: "streaming" | "ready" | "failed";
   currentSection?: string;
-  blocks: ArtifactBlock[];
+  html: string;
   charts: Record<string, { url?: string; title?: string }>;
   exports?: Record<string, string>;
   error?: string;
