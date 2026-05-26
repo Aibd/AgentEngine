@@ -22,12 +22,14 @@ const EVENT_TYPES: ResponseType[] = [
   "user_question_asked",
   "artifact_start",
   "artifact_section_started",
-  "artifact_block_added",
+  "artifact_html_delta",
   "artifact_chart_ready",
   "artifact_ready",
   "artifact_export_ready",
   "artifact_error",
 ];
+
+const REPORT_STREAM_MAX_RECONNECTS = 20;
 
 export function runAgentTrace(
   query: string,
@@ -129,7 +131,7 @@ async function consumeSse(
   url: string,
   signal: AbortSignal,
   onEvent: TraceHandler,
-): Promise<void> {
+): Promise<boolean> {
   const response = await fetch(url, {
     headers: { Accept: "text/event-stream" },
     signal,
@@ -141,6 +143,7 @@ async function consumeSse(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let sawTerminalEvent = false;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -154,9 +157,13 @@ async function consumeSse(
       const parsed = parseSsePart(part);
       if (parsed) {
         onEvent(parsed);
+        if (isTerminalEvent(parsed)) {
+          sawTerminalEvent = true;
+        }
       }
     }
   }
+  return sawTerminalEvent;
 }
 
 async function createAndStreamReport(
@@ -187,7 +194,81 @@ async function createAndStreamReport(
   if (!report.id) {
     throw new Error("create report response did not include id");
   }
-  await consumeSse(`/api/reports/${encodeURIComponent(report.id)}/stream`, signal, onEvent);
+  await consumeReportSseWithReconnect(report.id, signal, onEvent);
+}
+
+async function consumeReportSseWithReconnect(
+  reportId: string,
+  signal: AbortSignal,
+  onEvent: TraceHandler,
+): Promise<void> {
+  const streamUrl = `/api/reports/${encodeURIComponent(reportId)}/stream`;
+  let attempts = 0;
+
+  while (!signal.aborted) {
+    try {
+      const sawTerminalEvent = await consumeSse(streamUrl, signal, onEvent);
+      if (sawTerminalEvent || signal.aborted) {
+        return;
+      }
+      throw new Error("report stream ended before completion");
+    } catch (error) {
+      if (signal.aborted) {
+        return;
+      }
+      attempts += 1;
+      if (attempts > REPORT_STREAM_MAX_RECONNECTS) {
+        throw error;
+      }
+      await waitForReconnect(attempts, signal);
+    }
+  }
+}
+
+async function waitForReconnect(attempt: number, signal: AbortSignal): Promise<void> {
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+    await waitUntilVisible(signal);
+  }
+  const delayMs = Math.min(5000, 400 * attempt);
+  await sleep(delayMs, signal);
+}
+
+function waitUntilVisible(signal: AbortSignal): Promise<void> {
+  if (typeof document === "undefined" || document.visibilityState !== "hidden") {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      signal.removeEventListener("abort", handleAbort);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "hidden") {
+        cleanup();
+        resolve();
+      }
+    };
+    const handleAbort = () => {
+      cleanup();
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    signal.addEventListener("abort", handleAbort, { once: true });
+  });
+}
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      signal.removeEventListener("abort", handleAbort);
+      resolve();
+    }, ms);
+    const handleAbort = () => {
+      window.clearTimeout(timeout);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", handleAbort, { once: true });
+  });
 }
 
 function parseSsePart(part: string): SseEvent | null {
@@ -233,4 +314,12 @@ function createErrorEvent(error: unknown): SseEvent {
 
 function isResponseType(value: string): value is ResponseType {
   return EVENT_TYPES.includes(value as ResponseType);
+}
+
+function isTerminalEvent(event: SseEvent): boolean {
+  return event.event === "done"
+    || event.event === "final_result"
+    || event.event === "error"
+    || event.event === "artifact_ready"
+    || event.event === "artifact_error";
 }
