@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -33,10 +34,8 @@ from agentengine.skills.loader import SkillLoader
 from agentengine.tools.builtin import build_default_tools, ReadFileTool, SkillTool
 from examples.services.reporting.file_store import ReportFileStore
 from examples.services.agent_orchestration_service import AgentOrchestrationService
-from examples.services.reporting.docx_renderer import DOCX_MEDIA_TYPE, render_docx
-from examples.services.reporting.html_renderer import render_html
+from examples.services.reporting.docx_renderer import render_docx
 from examples.services.reporting.jobs import ReportJobStore, stream_report_artifact
-from examples.services.reporting.markdown_renderer import render_markdown
 from examples.services.reporting.pdf_renderer import PdfRendererUnavailable, render_pdf
 
 
@@ -183,11 +182,11 @@ async def report_file_snapshot(file_id: str) -> dict[str, Any]:
 
 @app.post("/api/reports")
 async def create_report(body: dict[str, Any]) -> dict[str, Any]:
-    """Create a financial-report artifact job.
+    """Create an HTML report artifact job.
 
-    The artifact stream is model-first when LLM_* is configured: selected skill
-    prompt + user intent + uploaded file context produce report blocks. The
-    deterministic report remains the offline fallback for local demos/tests.
+    The artifact stream requires a configured LLM. The selected skill prompt,
+    user intent, and uploaded file context produce a standalone HTML artifact
+    through the model streaming API.
     """
     conversation_id = str(body.get("conversation_id") or "web-conversation").strip()
     title = str(body.get("title") or "财务分析报告").strip()
@@ -268,28 +267,33 @@ async def report_export(report_id: str, export_format: str) -> Response:
     job = REPORT_STORE.get(report_id)
     if job is None:
         raise HTTPException(status_code=404, detail="report not found")
+    if export_format not in {"md", "html", "word", "doc", "docx", "pdf"}:
+        raise HTTPException(status_code=501, detail=f"{export_format} export is not implemented yet")
+    if not job.html:
+        raise HTTPException(status_code=409, detail=job.error or "report HTML is not ready")
+    report_html = job.html
     if export_format == "md":
         return PlainTextResponse(
-            render_markdown(job.ir),
+            _html_to_text(report_html),
             media_type="text/markdown; charset=utf-8",
             headers={"Content-Disposition": f'attachment; filename="{report_id}.md"'},
         )
     if export_format == "html":
         return HTMLResponse(
-            render_html(job.ir, chart_assets=job.chart_assets),
+            report_html,
             media_type="text/html; charset=utf-8",
             headers={"Content-Disposition": f'attachment; filename="{report_id}.html"'},
         )
-    if export_format == "docx":
+    if export_format in {"word", "doc", "docx"}:
+        docx = render_docx(report_html)
         return Response(
-            render_docx(job.ir, chart_assets=job.chart_assets),
-            media_type=DOCX_MEDIA_TYPE,
+            docx,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             headers={"Content-Disposition": f'attachment; filename="{report_id}.docx"'},
         )
     if export_format == "pdf":
-        html = render_html(job.ir, chart_assets=job.chart_assets)
         try:
-            pdf = render_pdf(html)
+            pdf = render_pdf(report_html)
         except PdfRendererUnavailable as exc:
             raise HTTPException(status_code=501, detail=str(exc)) from exc
         return Response(
@@ -411,6 +415,14 @@ def _format_sse_frame(frame: dict[str, Any]) -> str:
     event = str(frame.get("event", "message"))
     data = json.dumps(frame.get("data", {}), ensure_ascii=False)
     return f"event: {event}\ndata: {data}\n\n"
+
+
+def _html_to_text(value: str) -> str:
+    text = re.sub(r"<style\b[^>]*>.*?</style>", "", value, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<script\b[^>]*>.*?</script>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip() + "\n"
 
 
 def _build_enterprise_middleware() -> MiddlewareChain:
