@@ -5,10 +5,8 @@ from examples.services.reporting.jobs import (
     ReportJobStore,
     stream_report_artifact,
 )
-from examples.services.reporting.models import ReportData
 
 __all__ = [
-    "ReportData",
     "ReportJob",
     "ReportJobStore",
     "stream_report_artifact",
