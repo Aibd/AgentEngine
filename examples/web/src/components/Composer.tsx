@@ -184,6 +184,7 @@ export function Composer(props: ComposerProps) {
   const className = [
     "composer-shell",
     variant === "center" ? "composer-center" : "composer-docked",
+    skill !== "chat" ? "has-active-skill" : "",
     dragActive ? "is-dragging" : "",
     isRunning ? "is-running" : "",
   ]
@@ -221,14 +222,14 @@ export function Composer(props: ComposerProps) {
         </div>
       ) : null}
 
-      <div className="composer-controls-row">
+      <div className="composer-input-row">
         <button
           className={menuOpen ? "composer-plus is-open" : "composer-plus"}
           type="button"
           onClick={() => setMenuOpen((value) => !value)}
           disabled={isRunning || uploading}
-          title="添加文件或选择技能"
-          aria-label="添加文件或选择技能"
+          title="Add files or choose a skill"
+          aria-label="Add files or choose a skill"
         >
           {uploading ? <Loader2 className="spin" size={18} /> : <Plus size={18} />}
         </button>

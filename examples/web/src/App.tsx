@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -6,11 +6,14 @@ import {
   ChevronRight,
   CircleAlert,
   Clock3,
+  FileText,
   Menu,
   Loader2,
   PanelLeftClose,
   Plus,
   Sparkles,
+  Trash2,
+  X,
   Wrench,
 } from "lucide-react";
 import { ArtifactPanel } from "./components/ArtifactPanel";
@@ -34,6 +37,7 @@ import type {
   ToolTrace,
   UsageSummary,
   UserQuestion,
+  ArtifactTrace,
 } from "./types";
 
 const samplePrompts = [
@@ -45,6 +49,7 @@ const samplePrompts = [
 type ChatTurn = {
   id: string;
   submittedQuery: string;
+  files: ReportFileSummary[];
   trace: RunTrace;
 };
 
@@ -56,11 +61,19 @@ type ChatSession = {
   isRunning: boolean;
 };
 
+const ARTIFACT_WIDTH_MIN = 480;
+const ARTIFACT_WIDTH_MAX = 1040;
+const ARTIFACT_WIDTH_DEFAULT = 720;
+const CHAT_SESSIONS_STORAGE_KEY = "agentengine.web.sessions.v1";
+const ACTIVE_SESSION_STORAGE_KEY = "agentengine.web.activeSessionId.v1";
+const MAX_PERSISTED_SESSIONS = 30;
+
 export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [capabilities, setCapabilities] = useState<CapabilitySummary | null>(null);
   const [closedArtifactId, setClosedArtifactId] = useState<string | null>(null);
   const [reportFiles, setReportFiles] = useState<ReportFileSummary[]>([]);
+  const [previewFile, setPreviewFile] = useState<ReportFileSummary | null>(null);
   const [imagePreviews, setImagePreviews] = useState<Record<string, string>>({});
   const [selectedSkill, setSelectedSkill] = useState<ComposerSkill>("chat");
   const [thinkingMode, setThinkingMode] = useState<ThinkingMode>(() => {
@@ -72,10 +85,9 @@ export function App() {
   }, [thinkingMode]);
   const [composerUploading, setComposerUploading] = useState(false);
   const [composerUploadError, setComposerUploadError] = useState("");
-  const [sessions, setSessions] = useState<ChatSession[]>([
-    createChatSession("welcome", "新会话"),
-  ]);
-  const [activeSessionId, setActiveSessionId] = useState("welcome");
+  const [artifactWidth, setArtifactWidth] = useState(getStoredArtifactWidth);
+  const [sessions, setSessions] = useState<ChatSession[]>(loadPersistedSessions);
+  const [activeSessionId, setActiveSessionId] = useState(() => loadPersistedActiveSessionId(sessions));
   const stopMapRef = useRef<Map<string, () => void>>(new Map());
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? sessions[0],
@@ -90,17 +102,26 @@ export function App() {
   const artifactHasOutput = Boolean(
     activeArtifact
       && (
-        activeArtifact.blocks.length > 0
+        activeArtifact.html.trim().length > 0
         || activeArtifact.status !== "streaming"
         || Object.keys(activeArtifact.exports ?? {}).length > 0
+        || activeArtifact.error
       ),
   );
-  const visibleArtifact = activeArtifact?.id === closedArtifactId || !artifactHasOutput ? null : activeArtifact;
+  const visibleArtifact = previewFile
+    ? null
+    : activeArtifact?.id === closedArtifactId || !artifactHasOutput
+      ? null
+      : activeArtifact;
+  const hasRightPanel = Boolean(visibleArtifact || previewFile);
   const appClassName = [
     "app-layout",
     sidebarOpen ? "" : "sidebar-collapsed",
-    visibleArtifact ? "has-artifact" : "",
+    hasRightPanel ? "has-artifact" : "",
   ].filter(Boolean).join(" ");
+  const appStyle = hasRightPanel
+    ? ({ "--artifact-width": `${artifactWidth}px` } as CSSProperties)
+    : undefined;
 
   useEffect(() => {
     const stops = stopMapRef.current;
@@ -123,6 +144,21 @@ export function App() {
       .catch(() => setCapabilities(null));
   }, []);
 
+  useEffect(() => {
+    localStorage.setItem("artifactWidth", String(artifactWidth));
+  }, [artifactWidth]);
+
+  useEffect(() => {
+    persistSessions(sessions, activeSessionId);
+  }, [sessions, activeSessionId]);
+
+  useEffect(() => {
+    if (sessions.some((session) => session.id === activeSessionId)) {
+      return;
+    }
+    setActiveSessionId(sessions[0]?.id ?? "welcome");
+  }, [sessions, activeSessionId]);
+
   function setSessionRunning(sessionId: string, running: boolean) {
     setSessions((current) =>
       updateSession(current, sessionId, (session) => ({ ...session, isRunning: running })),
@@ -143,7 +179,8 @@ export function App() {
     if (!cleaned) {
       return;
     }
-    const effectiveQuery = withUploadedFileContext(cleaned, reportFiles);
+    const attachedFiles = reportFiles;
+    const effectiveQuery = withUploadedFileContext(cleaned, attachedFiles);
     const runSessionId = activeSessionId;
     const turnId = crypto.randomUUID();
     const existingStop = stopMapRef.current.get(runSessionId);
@@ -162,11 +199,15 @@ export function App() {
           {
             id: turnId,
             submittedQuery: cleaned,
+            files: attachedFiles,
             trace: createEmptyTrace(),
           },
         ],
       })),
     );
+    setReportFiles([]);
+    setComposerUploadError("");
+    setPreviewFile(null);
     const stop = runAgentTrace(
       effectiveQuery,
       (event) => {
@@ -197,9 +238,10 @@ export function App() {
     const cleanedIntent = nextIntent.trim();
     const runSessionId = activeSessionId;
     const turnId = crypto.randomUUID();
-    const fileIds = reportFiles.map((file) => file.id);
-    const title = reportFiles.length ? "财务分析报告" : "财务分析报告 Demo";
-    const intent = cleanedIntent || (reportFiles.length
+    const attachedFiles = reportFiles;
+    const fileIds = attachedFiles.map((file) => file.id);
+    const title = attachedFiles.length ? "财务分析报告" : "财务分析报告 Demo";
+    const intent = cleanedIntent || (attachedFiles.length
       ? "基于已上传的财务文件生成结构化报告预览。"
       : "生成一个用于验证 artifact 分屏、报告 IR 和 Markdown 导出的财务报告演示。");
     const existingStop = stopMapRef.current.get(runSessionId);
@@ -208,6 +250,7 @@ export function App() {
       stopMapRef.current.delete(runSessionId);
     }
     setClosedArtifactId(null);
+    setPreviewFile(null);
     setSessions((current) =>
       updateSession(current, runSessionId, (session) => ({
         ...session,
@@ -219,11 +262,14 @@ export function App() {
           {
             id: turnId,
             submittedQuery: cleanedIntent || title,
+            files: attachedFiles,
             trace: createEmptyTrace(),
           },
         ],
       })),
     );
+    setReportFiles([]);
+    setComposerUploadError("");
     const stop = runReportTrace(
       title,
       intent,
@@ -282,12 +328,6 @@ export function App() {
           return next;
         });
       }
-      const hasSheet = uploaded.some((file) =>
-        file.filename.toLowerCase().endsWith(".csv") || file.filename.toLowerCase().endsWith(".xlsx"),
-      );
-      if (hasSheet) {
-        setSelectedSkill("data_analysis");
-      }
     } catch (err) {
       localPreviews.forEach((preview) => URL.revokeObjectURL(preview.url));
       setComposerUploadError(err instanceof Error ? err.message : String(err));
@@ -329,10 +369,43 @@ export function App() {
     const id = crypto.randomUUID();
     setSessions((current) => [createChatSession(id, "新会话"), ...current]);
     setActiveSessionId(id);
+    setSelectedSkill("chat");
+    setReportFiles([]);
+    setComposerUploadError("");
+    setPreviewFile(null);
+    setClosedArtifactId(null);
   }
 
   function selectSession(id: string) {
     setActiveSessionId(id);
+    setPreviewFile(null);
+    setClosedArtifactId(null);
+  }
+
+  function deleteSession(id: string) {
+    const stop = stopMapRef.current.get(id);
+    if (stop) {
+      stop();
+      stopMapRef.current.delete(id);
+    }
+    const deleteIndex = sessions.findIndex((session) => session.id === id);
+    const remainingSessions = sessions.filter((session) => session.id !== id);
+    const nextSessions = remainingSessions.length
+      ? remainingSessions
+      : [createChatSession(crypto.randomUUID(), "新会话")];
+    const nextActiveSessionId = activeSessionId === id
+      ? nextSessions[Math.max(0, Math.min(deleteIndex, nextSessions.length - 1))].id
+      : activeSessionId;
+
+    setSessions(nextSessions);
+    setActiveSessionId(nextActiveSessionId);
+    if (activeSessionId === id) {
+      setSelectedSkill("chat");
+      setReportFiles([]);
+      setComposerUploadError("");
+      setPreviewFile(null);
+      setClosedArtifactId(null);
+    }
   }
 
   function updateActiveQuery(value: string) {
@@ -342,6 +415,27 @@ export function App() {
         query: value,
       })),
     );
+  }
+
+  function startArtifactResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = artifactWidth;
+    document.body.classList.add("is-resizing-artifact");
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const delta = startX - moveEvent.clientX;
+      setArtifactWidth(clampArtifactWidth(startWidth + delta, sidebarOpen));
+    };
+
+    const handlePointerUp = () => {
+      document.body.classList.remove("is-resizing-artifact");
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp, { once: true });
   }
 
   const canSubmit = selectedSkill === "data_analysis"
@@ -381,7 +475,7 @@ export function App() {
   };
 
   return (
-    <main className={appClassName}>
+    <main className={appClassName} style={appStyle}>
       <aside className="sidebar" aria-label="会话历史">
         <div className="sidebar-top">
           <button className="sidebar-icon" type="button" onClick={() => setSidebarOpen(false)} title="收起侧栏">
@@ -394,14 +488,28 @@ export function App() {
         </div>
         <div className="history-list">
           {sessions.map((session) => (
-            <button
+            <div
               key={session.id}
               className={session.id === activeSessionId ? "history-item is-active" : "history-item"}
-              type="button"
-              onClick={() => selectSession(session.id)}
             >
-              {session.title}
-            </button>
+              <button
+                className="history-title"
+                type="button"
+                onClick={() => selectSession(session.id)}
+                title={session.title}
+              >
+                {session.title}
+              </button>
+              <button
+                className="history-delete"
+                type="button"
+                onClick={() => deleteSession(session.id)}
+                title="删除会话"
+                aria-label={`删除会话 ${session.title}`}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
           ))}
         </div>
         <CapabilityPanel capabilities={capabilities} />
@@ -425,7 +533,15 @@ export function App() {
               }}
             />
           ) : (
-            <Conversation turns={activeSession.turns} isRunning={isRunning} />
+            <Conversation
+              turns={activeSession.turns}
+              isRunning={isRunning}
+              onOpenArtifact={() => {
+                setPreviewFile(null);
+                setClosedArtifactId(null);
+              }}
+              onPreviewFile={setPreviewFile}
+            />
           )}
         </section>
 
@@ -436,17 +552,57 @@ export function App() {
         ) : null}
       </section>
 
-      {visibleArtifact ? (
-        <ArtifactPanel
-          artifact={visibleArtifact}
-          onClose={() => setClosedArtifactId(visibleArtifact.id)}
-        />
+      {hasRightPanel ? (
+        <>
+          <button
+            className="artifact-resizer"
+            type="button"
+            aria-label="调整报告预览宽度"
+            title="拖动调整报告预览宽度"
+            onPointerDown={startArtifactResize}
+          />
+          {previewFile ? (
+            <FilePreviewPanel
+              file={previewFile}
+              previewUrl={imagePreviews[previewFile.id]}
+              onClose={() => setPreviewFile(null)}
+            />
+          ) : visibleArtifact ? (
+            <ArtifactPanel
+              artifact={visibleArtifact}
+              onClose={() => setClosedArtifactId(visibleArtifact.id)}
+            />
+          ) : null}
+        </>
       ) : null}
     </main>
   );
 }
 
-function Conversation({ turns, isRunning }: { turns: ChatTurn[]; isRunning: boolean }) {
+function clampArtifactWidth(value: number, sidebarVisible = true) {
+  const reservedWidth = sidebarVisible ? 628 : 368;
+  const viewportMax = typeof window === "undefined"
+    ? ARTIFACT_WIDTH_MAX
+    : Math.max(ARTIFACT_WIDTH_MIN, window.innerWidth - reservedWidth);
+  return Math.min(Math.max(value, ARTIFACT_WIDTH_MIN), Math.min(ARTIFACT_WIDTH_MAX, viewportMax));
+}
+
+function getStoredArtifactWidth() {
+  const stored = Number(localStorage.getItem("artifactWidth"));
+  return clampArtifactWidth(Number.isFinite(stored) && stored > 0 ? stored : ARTIFACT_WIDTH_DEFAULT);
+}
+
+function Conversation({
+  turns,
+  isRunning,
+  onOpenArtifact,
+  onPreviewFile,
+}: {
+  turns: ChatTurn[];
+  isRunning: boolean;
+  onOpenArtifact: () => void;
+  onPreviewFile: (file: ReportFileSummary) => void;
+}) {
   const lastTurnId = turns.at(-1)?.id;
   return (
     <div className="conversation">
@@ -455,7 +611,10 @@ function Conversation({ turns, isRunning }: { turns: ChatTurn[]; isRunning: bool
           key={turn.id}
           trace={turn.trace}
           submittedQuery={turn.submittedQuery}
+          files={turn.files}
           isRunning={isRunning && turn.id === lastTurnId}
+          onOpenArtifact={onOpenArtifact}
+          onPreviewFile={onPreviewFile}
         />
       ))}
     </div>
@@ -465,18 +624,27 @@ function Conversation({ turns, isRunning }: { turns: ChatTurn[]; isRunning: bool
 function ConversationTurn({
   trace,
   submittedQuery,
+  files,
   isRunning,
+  onOpenArtifact,
+  onPreviewFile,
 }: {
   trace: RunTrace;
   submittedQuery: string;
+  files: ReportFileSummary[];
   isRunning: boolean;
+  onOpenArtifact: () => void;
+  onPreviewFile: (file: ReportFileSummary) => void;
 }) {
   const hasStreamedText = trace.steps.some((step) => step.text.join("").trim().length > 0);
 
   return (
     <section className="conversation-turn">
       <article className="message-row user-row">
-        <div className="user-bubble">{submittedQuery || trace.query}</div>
+        <div className="user-message">
+          <div className="user-bubble">{submittedQuery || trace.query}</div>
+          {files.length ? <MessageFileList files={files} onPreview={onPreviewFile} /> : null}
+        </div>
       </article>
 
       <article className="message-row assistant-row">
@@ -491,6 +659,13 @@ function ConversationTurn({
           {trace.todos.length ? <TodoChecklist todos={trace.todos} /> : null}
           {trace.pendingQuestions.map((question) => (
             <QuestionPrompt key={question.questionId} question={question} />
+          ))}
+          {trace.artifacts.map((artifact) => (
+            <ArtifactCard
+              key={artifact.id}
+              artifact={artifact}
+              onOpen={onOpenArtifact}
+            />
           ))}
 
           {isRunning ? (
@@ -508,6 +683,184 @@ function ConversationTurn({
         </div>
       </article>
     </section>
+  );
+}
+
+function MessageFileList({
+  files,
+  onPreview,
+}: {
+  files: ReportFileSummary[];
+  onPreview: (file: ReportFileSummary) => void;
+}) {
+  return (
+    <div className="message-file-list" aria-label="Submitted files">
+      {files.map((file) => (
+        <button
+          className="message-file-chip"
+          key={file.id}
+          type="button"
+          onClick={() => onPreview(file)}
+          title={file.filename}
+        >
+          <FileText size={16} />
+          <span>
+            <strong>{file.filename}</strong>
+            <em>{fileKindLabel(file)}</em>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function FilePreviewPanel({
+  file,
+  previewUrl,
+  onClose,
+}: {
+  file: ReportFileSummary;
+  previewUrl?: string;
+  onClose: () => void;
+}) {
+  const parsed = file.parsed;
+  const firstSheet = parsed.sheets[0];
+
+  return (
+    <aside className="artifact-panel file-preview-panel" aria-label="File preview">
+      <header className="artifact-header">
+        <div className="artifact-title">
+          <FileText size={18} />
+          <div>
+            <strong>{file.filename}</strong>
+            <span>{fileKindLabel(file)}</span>
+          </div>
+        </div>
+        <button className="artifact-icon-button" type="button" title="Close preview" onClick={onClose}>
+          <X size={17} />
+        </button>
+      </header>
+
+      <div className="file-preview-scroll">
+        <section className="file-preview-meta" aria-label="File metadata">
+          <span>
+            <strong>Type</strong>
+            {parsed.extension || "unknown"}
+          </span>
+          <span>
+            <strong>Size</strong>
+            {formatBytes(file.size_bytes)}
+          </span>
+          {parsed.page_count ? (
+            <span>
+              <strong>Pages</strong>
+              {parsed.page_count}
+            </span>
+          ) : null}
+          {parsed.sheets.length ? (
+            <span>
+              <strong>Sheets</strong>
+              {parsed.sheets.length}
+            </span>
+          ) : null}
+        </section>
+
+        {previewUrl ? (
+          <section className="file-preview-section">
+            <h2>Image Preview</h2>
+            <div className="file-preview-image-wrap">
+              <img src={previewUrl} alt={file.filename} />
+            </div>
+          </section>
+        ) : null}
+
+        {parsed.text_preview ? (
+          <section className="file-preview-section">
+            <h2>Text Preview</h2>
+            <pre className="file-preview-text">{parsed.text_preview}</pre>
+          </section>
+        ) : null}
+
+        {firstSheet ? <FileSheetPreview sheet={firstSheet} /> : null}
+
+        {parsed.warnings.length ? (
+          <section className="file-preview-section">
+            <h2>Warnings</h2>
+            <ul className="file-preview-warnings">
+              {parsed.warnings.map((warning, index) => (
+                <li key={`${warning}-${index}`}>{warning}</li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {!previewUrl && !parsed.text_preview && !firstSheet ? (
+          <div className="file-preview-empty">
+            <FileText size={24} />
+            <span>No parsed preview is available for this file.</span>
+          </div>
+        ) : null}
+      </div>
+    </aside>
+  );
+}
+
+function FileSheetPreview({ sheet }: { sheet: ReportFileSummary["parsed"]["sheets"][number] }) {
+  const rows = sheet.rows.slice(0, 20);
+
+  return (
+    <section className="file-preview-section">
+      <div className="file-preview-section-head">
+        <h2>{sheet.name}</h2>
+        <span>
+          {sheet.row_count} rows / {sheet.column_count} columns
+        </span>
+      </div>
+      <div className="file-preview-table-wrap">
+        <table className="file-preview-sheet">
+          <thead>
+            <tr>
+              {sheet.headers.map((header, index) => (
+                <th key={`${header}-${index}`}>{header || `Column ${index + 1}`}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, rowIndex) => (
+              <tr key={`row-${rowIndex}`}>
+                {sheet.headers.map((_, columnIndex) => (
+                  <td key={`cell-${rowIndex}-${columnIndex}`}>{row[columnIndex] ?? ""}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function ArtifactCard({ artifact, onOpen }: { artifact: ArtifactTrace; onOpen: () => void }) {
+  const exportCount = Object.keys(artifact.exports ?? {}).length;
+  const subtitle = artifact.status === "ready"
+    ? `已生成 HTML 报告，${exportCount} 个导出入口`
+    : artifact.currentSection
+      ? `正在输出：${artifact.currentSection}`
+      : `正在渲染 HTML${artifact.html ? `（${artifact.html.length} 字符）` : ""}`;
+
+  return (
+    <button className="artifact-card" type="button" onClick={onOpen}>
+      <span className="artifact-card-icon">
+        <FileText size={18} />
+      </span>
+      <span className="artifact-card-body">
+        <strong>{artifact.title}</strong>
+        <span>{subtitle}</span>
+      </span>
+      <span className={`artifact-card-status ${artifact.status}`}>
+        {artifact.status === "ready" ? "Ready" : artifact.status === "failed" ? "Failed" : "Streaming"}
+      </span>
+    </button>
   );
 }
 
@@ -795,6 +1148,115 @@ function formatSeconds(value?: number): string {
   return `${value.toFixed(2)}s`;
 }
 
+function loadPersistedSessions(): ChatSession[] {
+  try {
+    const raw = localStorage.getItem(CHAT_SESSIONS_STORAGE_KEY);
+    if (!raw) {
+      return [createChatSession("welcome", "新会话")];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [createChatSession("welcome", "新会话")];
+    }
+    const restored = parsed
+      .map((value, index) => normalizePersistedSession(value, index))
+      .filter((session): session is ChatSession => Boolean(session));
+    return restored.length ? restored : [createChatSession("welcome", "新会话")];
+  } catch {
+    return [createChatSession("welcome", "新会话")];
+  }
+}
+
+function loadPersistedActiveSessionId(sessions: ChatSession[]): string {
+  try {
+    const saved = localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
+    if (saved && sessions.some((session) => session.id === saved)) {
+      return saved;
+    }
+  } catch {
+    // Ignore storage read failures and fall back to the first restored session.
+  }
+  return sessions[0]?.id ?? "welcome";
+}
+
+function persistSessions(sessions: ChatSession[], activeSessionId: string) {
+  try {
+    localStorage.setItem(
+      CHAT_SESSIONS_STORAGE_KEY,
+      JSON.stringify(sessions.slice(0, MAX_PERSISTED_SESSIONS).map(prepareSessionForStorage)),
+    );
+    if (sessions.some((session) => session.id === activeSessionId)) {
+      localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, activeSessionId);
+    }
+  } catch (error) {
+    console.warn("Failed to persist chat sessions", error);
+  }
+}
+
+function prepareSessionForStorage(session: ChatSession): ChatSession {
+  return {
+    ...session,
+    isRunning: false,
+  };
+}
+
+function normalizePersistedSession(value: unknown, index: number): ChatSession | null {
+  if (!isStorageRecord(value)) {
+    return null;
+  }
+  const turns = Array.isArray(value.turns)
+    ? value.turns
+        .map((turn) => normalizePersistedTurn(turn))
+        .filter((turn): turn is ChatTurn => Boolean(turn))
+    : [];
+  return {
+    id: stringStorageValue(value.id) || `session-${index}`,
+    title: stringStorageValue(value.title) || "新会话",
+    query: stringStorageValue(value.query),
+    turns,
+    isRunning: false,
+  };
+}
+
+function normalizePersistedTurn(value: unknown): ChatTurn | null {
+  if (!isStorageRecord(value)) {
+    return null;
+  }
+  const trace = isStorageRecord(value.trace)
+    ? normalizePersistedTrace(value.trace)
+    : createEmptyTrace();
+  return {
+    id: stringStorageValue(value.id) || crypto.randomUUID(),
+    submittedQuery: stringStorageValue(value.submittedQuery),
+    files: Array.isArray(value.files) ? (value.files as ReportFileSummary[]) : [],
+    trace,
+  };
+}
+
+function normalizePersistedTrace(value: Record<string, unknown>): RunTrace {
+  const trace = {
+    ...createEmptyTrace(),
+    ...(value as Partial<RunTrace>),
+  };
+  trace.steps = Array.isArray(trace.steps) ? trace.steps : [];
+  trace.todos = Array.isArray(trace.todos) ? trace.todos : [];
+  trace.pendingQuestions = Array.isArray(trace.pendingQuestions) ? trace.pendingQuestions : [];
+  trace.artifacts = Array.isArray(trace.artifacts) ? trace.artifacts : [];
+  if (trace.status === "running") {
+    trace.status = "failed";
+    trace.error = trace.error || "Run interrupted by page refresh.";
+  }
+  return trace;
+}
+
+function isStorageRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringStorageValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
 function createChatSession(id: string, title: string, query = ""): ChatSession {
   return {
     id,
@@ -839,6 +1301,34 @@ function withUploadedFileContext(query: string, files: ReportFileSummary[]): str
     ].filter(Boolean).join("\n");
   }).join("\n\n");
   return `${query}\n\nUploaded file context from this conversation:\n${fileContext}`;
+}
+
+function fileKindLabel(file: ReportFileSummary): string {
+  const parsed = file.parsed;
+  if (parsed.sheets.length) {
+    return `${parsed.extension.toUpperCase()} / ${parsed.sheets.length} sheet${parsed.sheets.length > 1 ? "s" : ""}`;
+  }
+  if (parsed.page_count) {
+    return `${parsed.extension.toUpperCase()} / ${parsed.page_count} page${parsed.page_count > 1 ? "s" : ""}`;
+  }
+  if (parsed.text_preview) {
+    return `${parsed.extension.toUpperCase()} / text preview`;
+  }
+  return `${parsed.extension.toUpperCase()} / ${formatBytes(file.size_bytes)}`;
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
 function titleFromQuery(query: string): string {

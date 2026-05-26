@@ -1,5 +1,6 @@
-import { BarChart3, Download, FileText, X } from "lucide-react";
-import type { ArtifactBlock, ArtifactKpi, ArtifactTrace } from "../types";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, Code2, Download, Eye, FileCode2, FileText, X } from "lucide-react";
+import type { ArtifactTrace } from "../types";
 
 type ArtifactPanelProps = {
   artifact: ArtifactTrace;
@@ -7,159 +8,154 @@ type ArtifactPanelProps = {
 };
 
 export function ArtifactPanel({ artifact, onClose }: ArtifactPanelProps) {
+  const [mode, setMode] = useState<"preview" | "code">("preview");
+  const codeWrapRef = useRef<HTMLDivElement | null>(null);
+  const hasHtml = Boolean(artifact.html.trim());
+
+  useEffect(() => {
+    if (mode !== "code" || !codeWrapRef.current) {
+      return;
+    }
+    codeWrapRef.current.scrollTop = codeWrapRef.current.scrollHeight;
+  }, [artifact.html, mode]);
+
   return (
-    <aside className="artifact-panel" aria-label="Report preview">
+    <aside className="artifact-panel" aria-label="HTML report preview">
       <header className="artifact-header">
         <div className="artifact-title">
           <FileText size={18} />
           <div>
             <strong>{artifact.title}</strong>
-            <span>{artifact.status === "ready" ? "Ready" : artifact.currentSection || "Generating"}</span>
+            <span>{artifact.status === "ready" ? "Ready" : artifact.currentSection || "Rendering HTML"}</span>
           </div>
         </div>
         <div className="artifact-actions">
-          <ExportButtons artifact={artifact} />
+          <div className="artifact-view-toggle" role="group" aria-label="报告查看模式">
+            <button
+              className={mode === "preview" ? "artifact-toggle-button is-active" : "artifact-toggle-button"}
+              type="button"
+              aria-label="预览"
+              aria-pressed={mode === "preview"}
+              title="预览"
+              onClick={() => setMode("preview")}
+            >
+              <Eye size={15} />
+            </button>
+            <button
+              className={mode === "code" ? "artifact-toggle-button is-active" : "artifact-toggle-button"}
+              type="button"
+              aria-label="源码"
+              aria-pressed={mode === "code"}
+              title="源码"
+              onClick={() => setMode("code")}
+            >
+              <FileCode2 size={15} />
+            </button>
+          </div>
+          <ExportMenu artifact={artifact} />
           <button className="artifact-icon-button" type="button" title="关闭预览" onClick={onClose}>
             <X size={17} />
           </button>
         </div>
       </header>
 
-      <div className="artifact-scroll">
-        <article className="report-paper">
-          {artifact.blocks.length ? (
-            artifact.blocks.map((block, index) => (
-              <ReportBlockView key={`${block.type}-${index}`} block={block} artifact={artifact} />
-            ))
-          ) : (
-            <div className="report-empty">
-              <BarChart3 size={22} />
-              <span>等待报告内容生成</span>
-            </div>
-          )}
-        </article>
+      <div className="artifact-html-wrap">
+        {artifact.status === "failed" ? (
+          <div className="report-empty is-error">
+            <Code2 size={22} />
+            <span>{artifact.error || "HTML report generation failed."}</span>
+          </div>
+        ) : mode === "code" ? (
+          <div className="artifact-code-wrap" ref={codeWrapRef}>
+            <pre className="artifact-code"><code>{artifact.html || "<!-- waiting for streamed HTML -->"}</code></pre>
+          </div>
+        ) : hasHtml ? (
+          <iframe
+            className="artifact-html-frame"
+            title={artifact.title}
+            sandbox=""
+            srcDoc={artifact.html}
+          />
+        ) : (
+          <div className="report-empty">
+            <Code2 size={22} />
+            <span>正在等待 HTML 内容...</span>
+          </div>
+        )}
       </div>
     </aside>
   );
 }
 
-function ExportButtons({ artifact }: { artifact: ArtifactTrace }) {
+function ExportMenu({ artifact }: { artifact: ArtifactTrace }) {
   const entries = Object.entries(artifact.exports ?? {});
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
   if (!entries.length) {
     return (
       <button className="artifact-export" type="button" disabled>
         <Download size={15} />
-        <span>Export</span>
+        <span>Download</span>
       </button>
     );
   }
   return (
-    <>
-      {entries.map(([format, href]) => (
-        <a className="artifact-export" key={format} href={href} download>
-          <Download size={15} />
-          <span>{format.toUpperCase()}</span>
-        </a>
-      ))}
-    </>
-  );
-}
-
-function ReportBlockView({ block, artifact }: { block: ArtifactBlock; artifact: ArtifactTrace }) {
-  switch (block.type) {
-    case "heading": {
-      const level = Math.max(1, Math.min(block.level ?? 2, 3));
-      const Tag = `h${level}` as "h1" | "h2" | "h3";
-      return <Tag>{block.text}</Tag>;
-    }
-    case "paragraph":
-      return <p>{block.text}</p>;
-    case "callout":
-      return <aside className="report-callout">{block.text}</aside>;
-    case "kpi":
-      return <KpiGrid items={block.kpis ?? []} />;
-    case "table":
-      return <DataTable headers={block.headers ?? []} rows={block.rows ?? []} />;
-    case "chart":
-      return <ChartBlock block={block} artifact={artifact} />;
-    case "page_break":
-      return <hr className="report-page-break" />;
-    default:
-      return null;
-  }
-}
-
-function KpiGrid({ items }: { items: ArtifactKpi[] }) {
-  return (
-    <section className="report-kpi-grid">
-      {items.map((item) => (
-        <article className="report-kpi" key={item.label}>
-          <span>{item.label}</span>
-          <strong>{item.value}</strong>
-          {item.delta ? <em className={`trend-${item.trend ?? "flat"}`}>{item.delta}</em> : null}
-        </article>
-      ))}
-    </section>
-  );
-}
-
-function DataTable({ headers, rows }: { headers: string[]; rows: Array<Array<string | number | null>> }) {
-  return (
-    <div className="report-table-wrap">
-      <table className="report-table">
-        {headers.length ? (
-          <thead>
-            <tr>
-              {headers.map((header) => (
-                <th key={header}>{header}</th>
-              ))}
-            </tr>
-          </thead>
-        ) : null}
-        <tbody>
-          {rows.map((row, rowIndex) => (
-            <tr key={rowIndex}>
-              {row.map((cell, cellIndex) => (
-                <td key={`${rowIndex}-${cellIndex}`}>{cell}</td>
-              ))}
-            </tr>
+    <div className="artifact-download" ref={menuRef}>
+      <button className="artifact-export" type="button" onClick={() => setOpen((value) => !value)}>
+        <Download size={15} />
+        <span>Download</span>
+        <ChevronDown size={14} />
+      </button>
+      {open ? (
+        <div className="artifact-download-menu" role="menu">
+          {entries.map(([format, href]) => (
+            <a
+              className="artifact-download-item"
+              key={format}
+              href={href}
+              download
+              role="menuitem"
+              onClick={() => setOpen(false)}
+            >
+              <Download size={14} />
+              <span>{formatLabel(format)}</span>
+            </a>
           ))}
-        </tbody>
-      </table>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function ChartBlock({ block, artifact }: { block: ArtifactBlock; artifact: ArtifactTrace }) {
-  const chartAsset = block.chart_id ? artifact.charts[block.chart_id] : undefined;
-  if (chartAsset?.url) {
-    return (
-      <figure className="report-figure">
-        <img src={chartAsset.url} alt={block.text || block.chart?.title || "chart"} />
-        <figcaption>{block.text || block.chart?.title}</figcaption>
-      </figure>
-    );
+function formatLabel(format: string) {
+  if (format === "md") {
+    return "Markdown";
   }
-  const chart = block.chart;
-  const firstSeries = chart?.series?.[0];
-  const max = Math.max(...(firstSeries?.data ?? []).map((value) => Math.abs(value ?? 0)), 1);
-  return (
-    <figure className="report-chart">
-      <figcaption>{block.text || chart?.title}</figcaption>
-      <div className="report-chart-bars">
-        {(firstSeries?.data ?? []).map((value, index) => {
-          const width = `${Math.max(4, Math.round((Math.abs(value ?? 0) / max) * 100))}%`;
-          return (
-            <div className="report-chart-row" key={`${chart?.x?.[index] ?? index}`}>
-              <span>{chart?.x?.[index] ?? index + 1}</span>
-              <div>
-                <i style={{ width }} />
-              </div>
-              <strong>{value ?? "-"}</strong>
-            </div>
-          );
-        })}
-      </div>
-    </figure>
-  );
+  if (format === "word") {
+    return "Word";
+  }
+  return format.toUpperCase();
 }
