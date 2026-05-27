@@ -73,7 +73,13 @@ export function ArtifactPanel({ artifact, onClose }: ArtifactPanelProps) {
           <iframe
             className="artifact-html-frame"
             title={artifact.title}
-            sandbox=""
+            // ``allow-scripts`` lets ECharts (loaded from CDN by the
+            // model-generated HTML) actually execute. ``allow-popups``
+            // is for export/download links the model sometimes emits.
+            // We intentionally omit ``allow-same-origin`` so the iframe
+            // cannot read this app's cookies / localStorage even though
+            // it shares the document.
+            sandbox="allow-scripts allow-popups"
             srcDoc={artifact.html}
           />
         ) : (
