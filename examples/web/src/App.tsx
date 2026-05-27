@@ -97,13 +97,26 @@ export function App() {
   const isRunning = activeSession.isRunning;
   const activeArtifact = useMemo(() => {
     const artifacts = activeSession.turns.flatMap((turn) => turn.trace.artifacts);
-    return artifacts.at(-1);
+    // Prefer the most recent artifact that actually has content. While a
+    // new turn is spinning up (artifact_start fired but no html_delta
+    // yet) the panel keeps showing the previous, ready artifact instead
+    // of going blank — that's the "don't auto-close the right side"
+    // behaviour the user asked for.
+    const withOutput = artifacts.filter((artifact) =>
+      artifact.html.trim().length > 0
+      || artifact.status === "ready"
+      || artifact.status === "failed"
+      || Object.keys(artifact.exports ?? {}).length > 0
+      || Boolean(artifact.error),
+    );
+    return withOutput.at(-1) ?? artifacts.at(-1);
   }, [activeSession.turns]);
   const artifactHasOutput = Boolean(
     activeArtifact
       && (
         activeArtifact.html.trim().length > 0
-        || activeArtifact.status !== "streaming"
+        || activeArtifact.status === "ready"
+        || activeArtifact.status === "failed"
         || Object.keys(activeArtifact.exports ?? {}).length > 0
         || activeArtifact.error
       ),
@@ -240,16 +253,33 @@ export function App() {
     const turnId = crypto.randomUUID();
     const attachedFiles = reportFiles;
     const fileIds = attachedFiles.map((file) => file.id);
-    const title = attachedFiles.length ? "财务分析报告" : "财务分析报告 Demo";
+    // If the previous artifact in this session has html (regardless of
+    // status), let the backend resume from it when the user's intent
+    // looks like "continue / iterate / refine" so we don't throw away
+    // the work already done.
+    const RESUME_KEYWORDS = ["继续", "接着", "补全", "修改", "调整", "增加", "去掉", "换成", "再做一版", "改一下", "retry", "继续生成"];
+    const wantsResume = cleanedIntent !== ""
+      && RESUME_KEYWORDS.some((kw) => cleanedIntent.toLowerCase().includes(kw.toLowerCase()));
+    const priorArtifact = wantsResume
+      ? activeSession.turns
+          .flatMap((turn) => turn.trace.artifacts)
+          .filter((artifact) => artifact.html.trim().length > 0)
+          .at(-1)
+      : undefined;
+    const resumeFromReportId = priorArtifact?.reportId ?? "";
+    const title = attachedFiles.length ? "数据分析" : "数据分析 Demo";
     const intent = cleanedIntent || (attachedFiles.length
-      ? "基于已上传的财务文件生成结构化报告预览。"
-      : "生成一个用于验证 artifact 分屏、报告 IR 和 Markdown 导出的财务报告演示。");
+      ? "基于已上传的文件生成结构化数据分析报告。"
+      : "生成一个用于验证 artifact 分屏、报告 IR 和 Markdown 导出的数据分析演示。");
     const existingStop = stopMapRef.current.get(runSessionId);
     if (existingStop) {
       existingStop();
       stopMapRef.current.delete(runSessionId);
     }
-    setClosedArtifactId(null);
+    // Don't reset closedArtifactId here: each new artifact has its own
+    // uuid, so visibility is controlled by the per-artifact id match.
+    // Wiping closedArtifactId would re-open an artifact the user just
+    // explicitly closed.
     setPreviewFile(null);
     setSessions((current) =>
       updateSession(current, runSessionId, (session) => ({
@@ -294,6 +324,7 @@ export function App() {
         setSessionRunning(runSessionId, false);
       },
       runSessionId,
+      resumeFromReportId,
     );
     stopMapRef.current.set(runSessionId, stop);
   }
@@ -660,13 +691,20 @@ function ConversationTurn({
           {trace.pendingQuestions.map((question) => (
             <QuestionPrompt key={question.questionId} question={question} />
           ))}
-          {trace.artifacts.map((artifact) => (
-            <ArtifactCard
-              key={artifact.id}
-              artifact={artifact}
-              onOpen={onOpenArtifact}
-            />
-          ))}
+          {trace.artifacts
+            // Skip artifacts that haven't received any streamed content yet.
+            // Backend emits ``artifact_start`` immediately; we wait for the
+            // first ``artifact_html_delta`` (or a terminal failure) before
+            // surfacing the card, so users never see an empty "Streaming"
+            // placeholder.
+            .filter((artifact) => artifact.html.length > 0 || artifact.status === "failed")
+            .map((artifact) => (
+              <ArtifactCard
+                key={artifact.id}
+                artifact={artifact}
+                onOpen={onOpenArtifact}
+              />
+            ))}
 
           {isRunning ? (
             <div className="live-row">
@@ -889,20 +927,86 @@ function StepGroup({ step }: { step: StepTrace }) {
   );
 }
 
+// Thinking content can get long (multi-paragraph chain-of-thought).
+// While the model is still streaming we expand to show progress; once
+// it stops we collapse. Even when "expanded", anything past
+// THINKING_PREVIEW_LINES is hidden behind a "show all" toggle so the
+// chat scroll stays readable.
+const THINKING_PREVIEW_LINES = 3;
+
 function ThinkingBlock({ chunks, running }: { chunks: string[]; running: boolean }) {
+  // Default collapsed; auto-expand while streaming so the user sees
+  // progress, then collapse once finished.
   const [open, setOpen] = useState(running);
+  const [showAll, setShowAll] = useState(false);
+  // Wall-clock for "thinking took X.Xs". Start at the first non-empty
+  // chunk, freeze when the step finishes. `tick` forces a rerender every
+  // 250ms while running so the displayed seconds advance live.
+  const startedAtRef = useRef<number | null>(null);
+  const finishedAtRef = useRef<number | null>(null);
+  const [tick, setTick] = useState(0);
 
   useEffect(() => {
     setOpen(running);
+    if (!running) setShowAll(false);
   }, [running]);
+
+  useEffect(() => {
+    if (startedAtRef.current === null && chunks.length > 0) {
+      startedAtRef.current = performance.now();
+    }
+  }, [chunks.length]);
+
+  useEffect(() => {
+    if (!running && startedAtRef.current !== null && finishedAtRef.current === null) {
+      finishedAtRef.current = performance.now();
+    }
+  }, [running]);
+
+  useEffect(() => {
+    if (!running || startedAtRef.current === null) return;
+    const id = window.setInterval(() => setTick((value) => value + 1), 250);
+    return () => window.clearInterval(id);
+  }, [running]);
+  // Avoid "unused" lint while still keeping the tick subscription alive.
+  void tick;
+
+  const elapsedSeconds = startedAtRef.current === null
+    ? 0
+    : ((finishedAtRef.current ?? performance.now()) - startedAtRef.current) / 1000;
+  const elapsedLabel = elapsedSeconds < 10
+    ? `${elapsedSeconds.toFixed(1)}s`
+    : `${Math.round(elapsedSeconds)}s`;
+
+  const fullText = chunks.join("");
+  const lines = fullText.split(/\r?\n/);
+  const truncated = lines.length > THINKING_PREVIEW_LINES;
+  const preview = truncated && !showAll
+    ? lines.slice(0, THINKING_PREVIEW_LINES).join("\n")
+    : fullText;
 
   return (
     <div className="thinking-block">
       <button type="button" onClick={() => setOpen((value) => !value)}>
         {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        <span>Thinking</span>
+        <span>
+          {running ? `思考中… ${elapsedLabel}` : `思考 ${elapsedLabel} · ${lines.length} 行`}
+        </span>
       </button>
-      {open ? <p>{chunks.join("")}</p> : null}
+      {open ? (
+        <>
+          <p>{preview}</p>
+          {truncated ? (
+            <button
+              type="button"
+              className="thinking-toggle"
+              onClick={() => setShowAll((value) => !value)}
+            >
+              {showAll ? "收起" : `展开全部 (${lines.length - THINKING_PREVIEW_LINES} 行更多)`}
+            </button>
+          ) : null}
+        </>
+      ) : null}
     </div>
   );
 }
