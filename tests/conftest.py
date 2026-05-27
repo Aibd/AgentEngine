@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from agentengine.base.context import AgentContext
@@ -9,6 +11,22 @@ from agentengine.stream.printer import Printer
 from agentengine.stream.sse_queue import SseEventQueue
 from agentengine.tools.base import Tool
 from agentengine.tools.collection import ToolCollection
+
+
+@pytest.fixture(autouse=True)
+def _isolated_report_file_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each test gets its own ReportFileStore + SQLite DB.
+
+    The module-level ``REPORT_FILE_STORE`` in ``web_api`` would otherwise
+    leak file_refs (and parsed blobs) between tests, breaking assertions
+    that count uploads inside a single conversation.
+    """
+    try:
+        from examples.services import web_api
+        from examples.services.reporting.file_store import ReportFileStore
+    except Exception:
+        return
+    monkeypatch.setattr(web_api, "REPORT_FILE_STORE", ReportFileStore(tmp_path / "report_uploads"))
 
 
 class _EchoTool(Tool):

@@ -9,18 +9,40 @@ from examples.services.reporting import jobs
 from examples.services.reporting.jobs import ReportJobStore, extract_model_html, stream_report_artifact
 
 
-def test_extract_model_html_accepts_fenced_html_and_strips_script() -> None:
+def test_extract_model_html_accepts_fenced_html_and_strips_unsafe_script() -> None:
+    """ECharts inline scripts are kept; remote scripts not from trusted CDNs
+    and inline event handlers are stripped."""
+
     content = """
     ```html
     <!doctype html>
-    <html><head><title>Report</title></head><body><h1>Report</h1><script>alert(1)</script></body></html>
+    <html><head>
+    <title>Report</title>
+    <script src=\"https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js\"></script>
+    <script src=\"https://evil.example.com/exfil.js\"></script>
+    </head><body>
+    <h1 onclick=\"alert(1)\">Report</h1>
+    <a href=\"javascript:steal()\">click</a>
+    <div id=\"chart_1\"></div>
+    <script>echarts.init(document.getElementById('chart_1')).setOption({});</script>
+    </body></html>
     ```
     """
 
     output = extract_model_html(content, title="Report")
+    lowered = output.lower()
 
-    assert "<h1>Report</h1>" in output
-    assert "<script" not in output.lower()
+    # Heading text survives (event handler stripped, text intact)
+    assert "<h1" in lowered and "report</h1>" in lowered
+    assert "onclick" not in lowered
+    # javascript: URL is stripped
+    assert "javascript:" not in lowered
+    # Trusted CDN script is preserved
+    assert "cdn.jsdelivr.net/npm/echarts" in lowered
+    # Untrusted CDN script is removed
+    assert "evil.example.com" not in lowered
+    # Inline ECharts init script is preserved
+    assert "echarts.init" in lowered
 
 
 def test_extract_model_html_wraps_body_fragment() -> None:
@@ -49,7 +71,7 @@ def test_report_job_store_preserves_selected_skill() -> None:
 async def test_report_stream_uses_llm_html_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeLLM:
         async def chat_stream(self, messages, **kwargs):  # type: ignore[no-untyped-def]
-            assert "Uploaded file context" in messages[1].content
+            assert "上传文件上下文" in messages[1].content
             yield LLMChunk(content="<!doctype html><html><head><title>Custom</title></head><body>")
             yield LLMChunk(content="<h1>Streamed HTML Report</h1></body></html>", finish_reason="stop")
 

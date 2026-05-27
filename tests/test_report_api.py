@@ -62,7 +62,7 @@ async def test_report_stream_emits_artifact_sequence_and_snapshot() -> None:
             "/api/reports",
             json={
                 "conversation_id": "report-test-conv",
-                "title": "财务分析报告 Demo",
+                "title": "数据分析 Demo",
                 "intent": "stream artifact",
                 "skill": "data_analysis",
             },
@@ -81,15 +81,17 @@ async def test_report_stream_emits_artifact_sequence_and_snapshot() -> None:
     event_types = [evt["event"] for evt in events]
     assert event_types[0] == "start"
     assert "step" in event_types
-    assert "thinking" in event_types
-    assert "text" in event_types
-    assert "tool_call_start" in event_types
-    assert "tool_result" in event_types
-    assert "step_end" in event_types
     assert "artifact_start" in event_types
     assert "artifact_html_delta" in event_types
     assert "artifact_ready" in event_types
-    assert event_types[-1] == "artifact_export_ready"
+    assert "artifact_export_ready" in event_types
+    assert "step_end" in event_types
+    # Companion narration runs after the artifact, so we expect text
+    # events emitted by the second LLM turn.
+    assert "text" in event_types
+    # Fake tool-call events were removed; ensure they don't reappear.
+    assert "tool_call_start" not in event_types
+    assert "tool_result" not in event_types
 
     for evt in events:
         assert evt["data"]["artifact_id"] == report_id
@@ -100,14 +102,14 @@ async def test_report_stream_emits_artifact_sequence_and_snapshot() -> None:
     body = snapshot.json()
     assert body["status"] == "ready"
     assert body["html_length"] > 0
-    assert "财务分析报告 Demo" in body["html"]
+    assert "数据分析 Demo" in body["html"]
     assert body["exports"]["md"].endswith("/exports/md")
     assert body["exports"]["html"].endswith("/exports/html")
     assert body["exports"]["pdf"].endswith("/exports/pdf")
     assert body["exports"]["word"].endswith("/exports/word")
 
     assert exported.status_code == 200
-    assert "财务分析报告 Demo" in exported.text
+    assert "数据分析 Demo" in exported.text
 
 
 async def test_report_export_rejects_unknown_format() -> None:

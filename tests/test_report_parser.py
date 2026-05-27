@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import zipfile
 from pathlib import Path
 
 import pytest
@@ -65,30 +64,11 @@ def test_parse_pdf_text_preview(tmp_path: Path) -> None:
 
 
 def _write_minimal_xlsx(path: Path) -> None:
-    with zipfile.ZipFile(path, "w") as archive:
-        archive.writestr(
-            "xl/workbook.xml",
-            """<?xml version="1.0" encoding="UTF-8"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
- xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
-</workbook>""",
-        )
-        archive.writestr(
-            "xl/_rels/workbook.xml.rels",
-            """<?xml version="1.0" encoding="UTF-8"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-</Relationships>""",
-        )
-        archive.writestr(
-            "xl/worksheets/sheet1.xml",
-            """<?xml version="1.0" encoding="UTF-8"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <sheetData>
-    <row r="1"><c r="A1" t="inlineStr"><is><t>period</t></is></c><c r="B1" t="inlineStr"><is><t>revenue</t></is></c></row>
-    <row r="2"><c r="A2" t="inlineStr"><is><t>2023Q1</t></is></c><c r="B2"><v>698</v></c></row>
-    <row r="3"><c r="A3" t="inlineStr"><is><t>2024Q1</t></is></c><c r="B3"><v>805</v></c></row>
-  </sheetData>
-</worksheet>""",
-        )
+    openpyxl = pytest.importorskip("openpyxl")
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Sheet1"
+    sheet.append(["period", "revenue"])
+    sheet.append(["2023Q1", 698])
+    sheet.append(["2024Q1", 805])
+    workbook.save(path)
