@@ -174,7 +174,7 @@ async def upload_report_file(
 
 @app.get("/api/report-files/{file_id}")
 async def report_file_snapshot(file_id: str) -> dict[str, Any]:
-    record = REPORT_FILE_STORE.get(file_id)
+    record = await REPORT_FILE_STORE.aget(file_id)
     if record is None:
         raise HTTPException(status_code=404, detail="report file not found")
     return record.snapshot()
@@ -189,7 +189,7 @@ async def create_report(body: dict[str, Any]) -> dict[str, Any]:
     through the model streaming API.
     """
     conversation_id = str(body.get("conversation_id") or "web-conversation").strip()
-    title = str(body.get("title") or "财务分析报告").strip()
+    title = str(body.get("title") or "数据分析").strip()
     intent = str(body.get("intent") or body.get("query") or "").strip()
     skill = str(body.get("skill") or "data_analysis").strip() or "data_analysis"
     file_ids = [str(item) for item in body.get("file_ids") or [] if str(item).strip()]
@@ -202,19 +202,28 @@ async def create_report(body: dict[str, Any]) -> dict[str, Any]:
         str(body.get("tenant_id") or "default"),
     )
     files = (
-        REPORT_FILE_STORE.get_many(file_ids)
+        await REPORT_FILE_STORE.aget_many(file_ids)
         if file_ids
-        else REPORT_FILE_STORE.list_by_conversation(scoped_conversation_id)
+        else await REPORT_FILE_STORE.alist_by_conversation(scoped_conversation_id)
     )
     missing = sorted(set(file_ids) - {record.id for record in files})
     if missing:
         raise HTTPException(status_code=404, detail={"missing_file_ids": missing})
+
+    resume_from_html = ""
+    resume_from_id = str(body.get("resume_from_report_id") or "").strip()
+    if resume_from_id:
+        prior_job = REPORT_STORE.get(resume_from_id)
+        if prior_job is not None and prior_job.html.strip():
+            resume_from_html = prior_job.html
+
     job = REPORT_STORE.create(
         conversation_id=conversation_id,
         title=title,
         intent=intent,
         skill=skill,
         files=files,
+        resume_from_html=resume_from_html,
     )
     return job.snapshot()
 
