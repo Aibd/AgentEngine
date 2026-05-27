@@ -65,10 +65,20 @@ export function runReportTrace(
   onEvent: TraceHandler,
   onDone: DoneHandler,
   conversationId = "web-conversation",
+  resumeFromReportId = "",
 ): () => void {
   const controller = new AbortController();
 
-  void createAndStreamReport(title, intent, fileIds, skill, conversationId, controller.signal, onEvent)
+  void createAndStreamReport(
+    title,
+    intent,
+    fileIds,
+    skill,
+    conversationId,
+    controller.signal,
+    onEvent,
+    resumeFromReportId,
+  )
     .catch((error: unknown) => {
       if (controller.signal.aborted) {
         return;
@@ -174,17 +184,22 @@ async function createAndStreamReport(
   conversationId: string,
   signal: AbortSignal,
   onEvent: TraceHandler,
+  resumeFromReportId = "",
 ): Promise<void> {
+  const body: Record<string, unknown> = {
+    title,
+    intent,
+    skill,
+    file_ids: fileIds,
+    conversation_id: conversationId,
+  };
+  if (resumeFromReportId) {
+    body.resume_from_report_id = resumeFromReportId;
+  }
   const response = await fetch("/api/reports", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      title,
-      intent,
-      skill,
-      file_ids: fileIds,
-      conversation_id: conversationId,
-    }),
+    body: JSON.stringify(body),
     signal,
   });
   if (!response.ok) {
