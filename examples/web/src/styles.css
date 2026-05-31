@@ -690,6 +690,13 @@ button:disabled {
   margin: 24px 0;
 }
 
+.artifact-context-label {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: #4b5563;
+  line-height: 1.5;
+}
+
 .artifact-card {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) auto;

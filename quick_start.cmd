@@ -29,32 +29,31 @@ if not exist ".env" (
 
 :: Install dependencies
 echo [1/3] Installing dependencies...
-if exist "uv.lock" (
-    py -m uv --version >nul 2>&1
-    if errorlevel 1 (
-        where uv >nul 2>&1
-        if errorlevel 1 (
-            echo uv not found. Please install uv or remove uv.lock to use pip fallback.
-            pause
-            exit /b 1
-        )
-        set "UV_CMD=uv"
-    ) else (
-        set "UV_CMD=py -m uv"
-    )
-    !UV_CMD! sync --extra dev
+set "UV_FOUND=0"
+where uv >nul 2>&1
+if not errorlevel 1 ( set "UV_FOUND=1" )
+if "%UV_FOUND%"=="0" if exist "%USERPROFILE%\.local\bin\uv.exe" (
+    set "PATH=%USERPROFILE%\.local\bin;%PATH%"
+    set "UV_FOUND=1"
+)
+if "%UV_FOUND%"=="0" if exist "%USERPROFILE%\.cargo\bin\uv.exe" (
+    set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
+    set "UV_FOUND=1"
+)
+if "%UV_FOUND%"=="1" (
+    echo   Using uv...
+    uv sync --all-extras
     if errorlevel 1 (
         echo Dependency installation failed.
         pause
         exit /b 1
     )
     set "PYTHON_RUN=.venv\Scripts\python.exe"
-    if not exist "!PYTHON_RUN!" (
-        set "PYTHON_RUN=py"
-    )
+    if not exist "!PYTHON_RUN!" ( set "PYTHON_RUN=py" )
     set "UVICORN_RUN=!PYTHON_RUN! -m uvicorn"
 ) else (
-    py -m pip install -e ".[dev]"
+    echo   uv not found, using pip...
+    py -m pip install -e ".[dev,report]"
     if errorlevel 1 (
         echo Dependency installation failed.
         pause

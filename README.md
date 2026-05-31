@@ -60,7 +60,7 @@ uv run --env-file .env pytest -q
 
 ```bash
 # Windows
-quick_start.cmd
+.\quick_start.cmd
 
 # macOS / Linux
 chmod +x quick_start.sh

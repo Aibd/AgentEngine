@@ -698,11 +698,13 @@ function ConversationTurn({
             // surfacing the card, so users never see an empty "Streaming"
             // placeholder.
             .filter((artifact) => artifact.html.length > 0 || artifact.status === "failed")
-            .map((artifact) => (
+            .map((artifact, index) => (
               <ArtifactCard
                 key={artifact.id}
                 artifact={artifact}
                 onOpen={onOpenArtifact}
+                isFirst={index === 0}
+                hasNoStepText={!hasStreamedText}
               />
             ))}
 
@@ -878,7 +880,7 @@ function FileSheetPreview({ sheet }: { sheet: ReportFileSummary["parsed"]["sheet
   );
 }
 
-function ArtifactCard({ artifact, onOpen }: { artifact: ArtifactTrace; onOpen: () => void }) {
+function ArtifactCard({ artifact, onOpen, isFirst = false, hasNoStepText = false }: { artifact: ArtifactTrace; onOpen: () => void; isFirst?: boolean; hasNoStepText?: boolean }) {
   const exportCount = Object.keys(artifact.exports ?? {}).length;
   const subtitle = artifact.status === "ready"
     ? `已生成 HTML 报告，${exportCount} 个导出入口`
@@ -887,18 +889,25 @@ function ArtifactCard({ artifact, onOpen }: { artifact: ArtifactTrace; onOpen: (
       : `正在渲染 HTML${artifact.html ? `（${artifact.html.length} 字符）` : ""}`;
 
   return (
-    <button className="artifact-card" type="button" onClick={onOpen}>
-      <span className="artifact-card-icon">
-        <FileText size={18} />
-      </span>
-      <span className="artifact-card-body">
-        <strong>{artifact.title}</strong>
-        <span>{subtitle}</span>
-      </span>
-      <span className={`artifact-card-status ${artifact.status}`}>
-        {artifact.status === "ready" ? "Ready" : artifact.status === "failed" ? "Failed" : "Streaming"}
-      </span>
-    </button>
+    <>
+      {isFirst && hasNoStepText ? (
+        <p className="artifact-context-label">
+          {artifact.status === "ready" ? "报告已生成，点击在右侧预览：" : "正在生成报告，稍后可在右侧预览："}
+        </p>
+      ) : null}
+      <button className="artifact-card" type="button" onClick={onOpen}>
+        <span className="artifact-card-icon">
+          <FileText size={18} />
+        </span>
+        <span className="artifact-card-body">
+          <strong>{artifact.title}</strong>
+          <span>{subtitle}</span>
+        </span>
+        <span className={`artifact-card-status ${artifact.status}`}>
+          {artifact.status === "ready" ? "Ready" : artifact.status === "failed" ? "Failed" : "Streaming"}
+        </span>
+      </button>
+    </>
   );
 }
 
@@ -914,7 +923,7 @@ function StepGroup({ step }: { step: StepTrace }) {
         </div>
       ) : null}
 
-      {step.thinking.length ? <ThinkingBlock chunks={step.thinking} running={step.status === "running"} /> : null}
+      {step.thinking.length ? <ThinkingBlock chunks={step.thinking} running={step.status === "running"} stepElapsedSeconds={step.elapsedSeconds} /> : null}
 
       <div className="tool-grid">
         {step.tools.map((tool) => (
@@ -934,16 +943,15 @@ function StepGroup({ step }: { step: StepTrace }) {
 // chat scroll stays readable.
 const THINKING_PREVIEW_LINES = 3;
 
-function ThinkingBlock({ chunks, running }: { chunks: string[]; running: boolean }) {
+function ThinkingBlock({ chunks, running, stepElapsedSeconds }: { chunks: string[]; running: boolean; stepElapsedSeconds?: number }) {
   // Default collapsed; auto-expand while streaming so the user sees
   // progress, then collapse once finished.
   const [open, setOpen] = useState(running);
   const [showAll, setShowAll] = useState(false);
-  // Wall-clock for "thinking took X.Xs". Start at the first non-empty
-  // chunk, freeze when the step finishes. `tick` forces a rerender every
-  // 250ms while running so the displayed seconds advance live.
+  // Wall-clock frontend timer — used only while the step is still running
+  // (no backend elapsed yet). Once step_end arrives, stepElapsedSeconds
+  // takes over as the authoritative value so the label matches the step header.
   const startedAtRef = useRef<number | null>(null);
-  const finishedAtRef = useRef<number | null>(null);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -958,22 +966,19 @@ function ThinkingBlock({ chunks, running }: { chunks: string[]; running: boolean
   }, [chunks.length]);
 
   useEffect(() => {
-    if (!running && startedAtRef.current !== null && finishedAtRef.current === null) {
-      finishedAtRef.current = performance.now();
-    }
-  }, [running]);
-
-  useEffect(() => {
     if (!running || startedAtRef.current === null) return;
     const id = window.setInterval(() => setTick((value) => value + 1), 250);
     return () => window.clearInterval(id);
   }, [running]);
-  // Avoid "unused" lint while still keeping the tick subscription alive.
   void tick;
 
-  const elapsedSeconds = startedAtRef.current === null
-    ? 0
-    : ((finishedAtRef.current ?? performance.now()) - startedAtRef.current) / 1000;
+  // After the step ends, use the backend-reported elapsed time; while still
+  // running fall back to the frontend wall-clock so the counter ticks live.
+  const elapsedSeconds = !running && stepElapsedSeconds != null && stepElapsedSeconds > 0
+    ? stepElapsedSeconds
+    : startedAtRef.current === null
+      ? 0
+      : (performance.now() - startedAtRef.current) / 1000;
   const elapsedLabel = elapsedSeconds < 10
     ? `${elapsedSeconds.toFixed(1)}s`
     : `${Math.round(elapsedSeconds)}s`;
