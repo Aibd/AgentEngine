@@ -34,6 +34,7 @@ from agentengine.skills.loader import SkillLoader
 from agentengine.tools.builtin import build_default_tools, ReadFileTool, SkillTool
 from examples.services.reporting.file_store import ReportFileStore
 from examples.services.agent_orchestration_service import AgentOrchestrationService
+from examples.services.reporting.db import ReportMetadataDB
 from examples.services.reporting.docx_renderer import render_docx
 from examples.services.reporting.jobs import ReportJobStore, stream_report_artifact
 from examples.services.reporting.pdf_renderer import PdfRendererUnavailable, render_pdf
@@ -64,11 +65,16 @@ _load_dotenv(REPO_ROOT / ".env")
 # per request must share the same instances so all conversations land in one
 # database and concurrent runs hit the same locks.
 DEFAULT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+DEFAULT_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 PERSISTENCE = SqlitePersistence(DEFAULT_DB_PATH)
 LOCK_MANAGER = InMemoryConversationLockManager()
 QUOTA_STORE = QuotaStore()
 APPROVAL_GATE = ApprovalGate(timeout_seconds=float(os.getenv("APPROVAL_TIMEOUT_SECONDS", "300")))
-REPORT_STORE = ReportJobStore()
+REPORT_FILES_DB = ReportMetadataDB(DEFAULT_UPLOAD_ROOT / "index.db")
+REPORT_STORE = ReportJobStore(
+    db=REPORT_FILES_DB,
+    reports_dir=DEFAULT_UPLOAD_ROOT / "reports",
+)
 REPORT_FILE_STORE = ReportFileStore(DEFAULT_UPLOAD_ROOT)
 
 app = FastAPI(title="AgentEngine Web API")
@@ -213,11 +219,11 @@ async def create_report(body: dict[str, Any]) -> dict[str, Any]:
     resume_from_html = ""
     resume_from_id = str(body.get("resume_from_report_id") or "").strip()
     if resume_from_id:
-        prior_job = REPORT_STORE.get(resume_from_id)
+        prior_job = await REPORT_STORE.aload(resume_from_id)
         if prior_job is not None and prior_job.html.strip():
             resume_from_html = prior_job.html
 
-    job = REPORT_STORE.create(
+    job = await REPORT_STORE.acreate(
         conversation_id=conversation_id,
         title=title,
         intent=intent,
@@ -228,9 +234,22 @@ async def create_report(body: dict[str, Any]) -> dict[str, Any]:
     return job.snapshot()
 
 
+@app.get("/api/reports")
+async def list_reports(
+    conversation_id: str = Query(...),
+    limit: int = Query(50, ge=1, le=200),
+) -> dict[str, Any]:
+    """List report metadata for a conversation, newest first."""
+    rows = await REPORT_STORE.alist_by_conversation(
+        conversation_id,
+        limit=limit,
+    )
+    return {"reports": rows}
+
+
 @app.get("/api/reports/{report_id}")
 async def report_snapshot(report_id: str) -> dict[str, Any]:
-    job = REPORT_STORE.get(report_id)
+    job = await REPORT_STORE.aload(report_id)
     if job is None:
         raise HTTPException(status_code=404, detail="report not found")
     return job.snapshot()
@@ -238,13 +257,13 @@ async def report_snapshot(report_id: str) -> dict[str, Any]:
 
 @app.get("/api/reports/{report_id}/stream")
 async def report_stream(report_id: str) -> StreamingResponse:
-    job = REPORT_STORE.get(report_id)
+    job = await REPORT_STORE.aload(report_id)
     if job is None:
         raise HTTPException(status_code=404, detail="report not found")
     request_id = f"report-{uuid.uuid4().hex[:12]}"
 
     async def events() -> AsyncIterator[str]:
-        async for frame in stream_report_artifact(job=job, request_id=request_id):
+        async for frame in stream_report_artifact(job=job, request_id=request_id, store=REPORT_STORE):
             yield _format_sse_frame(frame)
 
     return StreamingResponse(
@@ -262,7 +281,7 @@ async def report_stream(report_id: str) -> StreamingResponse:
 
 @app.get("/api/reports/{report_id}/charts/{chart_id}.svg")
 async def report_chart_svg(report_id: str, chart_id: str) -> Response:
-    job = REPORT_STORE.get(report_id)
+    job = await REPORT_STORE.aload(report_id)
     if job is None:
         raise HTTPException(status_code=404, detail="report not found")
     svg = job.chart_assets.get(chart_id)
@@ -273,7 +292,7 @@ async def report_chart_svg(report_id: str, chart_id: str) -> Response:
 
 @app.get("/api/reports/{report_id}/exports/{export_format}")
 async def report_export(report_id: str, export_format: str) -> Response:
-    job = REPORT_STORE.get(report_id)
+    job = await REPORT_STORE.aload(report_id)
     if job is None:
         raise HTTPException(status_code=404, detail="report not found")
     if export_format not in {"md", "html", "word", "doc", "docx", "pdf"}:
