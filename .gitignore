@@ -16,3 +16,10 @@ examples/web/dist/
 
 # Coverage
 .coverage
+
+# WorkBuddy
+.workbuddy/
+
+# Python build artifacts
+*.egg-info/
+*.eggs/
