@@ -28,6 +28,7 @@ from agentengine.tools.builtin.grep_tool import GrepTool
 from agentengine.tools.builtin.read_file_tool import ReadFileTool
 from agentengine.tools.builtin.skill_tool import SkillTool
 from agentengine.tools.builtin.todo_write_tool import TodoWriteTool
+from agentengine.skills.loader import SkillLoader
 
 if TYPE_CHECKING:
     from agentengine.base.context import AgentContext
@@ -63,7 +64,14 @@ BUILTIN_TOOL_FACTORIES: dict[str, Callable[..., Tool]] = {
     "edit_file": lambda workspace_root, **kw: FileEditTool(workspace_root=workspace_root, **kw),
     "TodoWrite": lambda workspace_root, **kw: TodoWriteTool(**kw),
     "AskUserQuestion": lambda workspace_root, **kw: AskUserQuestionTool(**kw),
+    "Skill": lambda workspace_root, **kw: SkillTool(kw.pop("loader", None) or SkillLoader()),
 }
+
+# Tools resolvable by explicit name but excluded from the implicit "build
+# everything" default (when ``include is None``). ``Skill`` depends on a
+# SkillLoader scanning ``.agent/skills`` and should only attach when a preset
+# asks for it by name, not silently to every agent.
+_DEFAULT_EXCLUDED: frozenset[str] = frozenset({"Skill"})
 
 
 def _build(
@@ -73,7 +81,10 @@ def _build(
     exclude: list[str] | None,
     per_tool_kwargs: dict[str, dict[str, Any]],
 ) -> list[Tool]:
-    names = list(include) if include is not None else list(BUILTIN_TOOL_FACTORIES)
+    if include is not None:
+        names = list(include)
+    else:
+        names = [n for n in BUILTIN_TOOL_FACTORIES if n not in _DEFAULT_EXCLUDED]
     excluded = set(exclude or [])
     tools: list[Tool] = []
     for name in names:

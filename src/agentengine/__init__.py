@@ -11,6 +11,7 @@ from agentengine.enterprise import MiddlewareChain
 from agentengine.llm.interfaces import LLMChunk, LLMClient, LLMResponse
 from agentengine.persistence import PersistencePort
 from agentengine.preset import AgentPreset, DEFAULT_AGENT_SYSTEM_PROMPT
+from agentengine.preset_loader import load_preset, load_presets
 from agentengine.run_config import RunConfig
 from agentengine.runtime.cancellation import CancellationToken
 from agentengine.runtime.compaction import Compactor, LLMSummaryCompactor
@@ -57,6 +58,8 @@ __all__ = [
     "LLMClient",
     "LLMResponse",
     "MiddlewareChain",
+    "load_preset",
+    "load_presets",
     "PersistencePort",
     "ReasoningDelta",
     "RedisConversationLockManager",

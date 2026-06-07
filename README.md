@@ -142,6 +142,8 @@ async for frame in event_stream:
 answer = await task  # 完整最终回答字符串
 ```
 
+> 也可以把 Agent 写成 Markdown 文件（YAML frontmatter + 正文，格式同 Claude Code subagent），用 `load_presets("agents/")` 批量加载。frontmatter 的 `tools: [read_file, Skill]` 会自动装配内置工具，无需手写 `setup`。详见 [PUBLIC_API.md](PUBLIC_API.md) 的「用 Markdown 声明 Agent」。
+
 全部公开 API 见 **[PUBLIC_API.md](PUBLIC_API.md)**（含完整类签名、事件契约、错误层次结构和集成说明）。
 
 ---
