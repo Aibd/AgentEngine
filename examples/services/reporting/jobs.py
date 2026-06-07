@@ -12,11 +12,14 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from agentengine.llm.env import create_llm_from_env
 from agentengine.memory.message import Message
 from examples.services.reporting.file_store import ReportFileRecord
+
+if TYPE_CHECKING:
+    from examples.services.reporting.db import ReportMetadataDB
 
 
 logger = logging.getLogger(__name__)
@@ -26,7 +29,7 @@ def _utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-@dataclass(slots=True)
+@dataclass
 class ReportJob:
     id: str
     conversation_id: str
@@ -71,10 +74,30 @@ class ReportJob:
 
 
 class ReportJobStore:
-    """Process-local report store for the demo service."""
+    """Report store backed by in-memory cache + SQLite persistence.
 
-    def __init__(self) -> None:
+    Reports are cached in ``_jobs`` for fast access during active
+    generation. Once a report reaches ``ready`` or ``failed`` status,
+    its HTML is written to disk and metadata is upserted into the
+    ``reports`` table of ``ReportMetadataDB`` so it survives process
+    restarts.
+
+    When a report is requested via ``aload()`` and not found in
+    memory, the store falls back to the DB + disk, reconstructing
+    a ReportJob from the persisted data.
+    """
+
+    def __init__(
+        self,
+        db: "ReportMetadataDB",
+        reports_dir: Path,
+    ) -> None:
         self._jobs: dict[str, ReportJob] = {}
+        self._db = db
+        self._reports_dir = reports_dir
+        reports_dir.mkdir(parents=True, exist_ok=True)
+
+    # -- Creation ------------------------------------------------------
 
     def create(
         self,
@@ -101,16 +124,153 @@ class ReportJobStore:
         self._jobs[report_id] = job
         return job
 
+    async def acreate(
+        self,
+        *,
+        conversation_id: str,
+        title: str,
+        intent: str,
+        skill: str = "data_analysis",
+        files: list[ReportFileRecord] | None = None,
+        resume_from_html: str = "",
+    ) -> ReportJob:
+        """Create a job AND write its metadata row to the DB.
+
+        The job is still in ``created`` status — HTML will be persisted
+        later when generation finishes.
+        """
+        job = self.create(
+            conversation_id=conversation_id,
+            title=title,
+            intent=intent,
+            skill=skill,
+            files=files,
+            resume_from_html=resume_from_html,
+        )
+        await self._db.insert_report(
+            report_id=job.id,
+            conversation_id=job.conversation_id,
+            title=job.title,
+            intent=job.intent,
+            skill=job.skill,
+        )
+        return job
+
+    # -- Retrieval -----------------------------------------------------
+
     def get(self, report_id: str) -> ReportJob | None:
         return self._jobs.get(report_id)
+
+    async def aload(self, report_id: str) -> ReportJob | None:
+        """Load a report from memory cache or, on miss, from DB + disk.
+
+        When loaded from persisted storage the job is placed back into
+        the memory cache so subsequent calls are instant.
+        """
+        cached = self._jobs.get(report_id)
+        if cached is not None:
+            return cached
+
+        row = await self._db.get_report(report_id)
+        if row is None:
+            return None
+
+        html = ""
+        if row.html_file_path and row.html_size > 0:
+            html_path = self._reports_dir / row.html_file_path
+            try:
+                html = html_path.read_text(encoding="utf-8")
+            except OSError:
+                logger.warning("report_html_file_missing report_id=%s path=%s", report_id, html_path)
+
+        job = ReportJob(
+            id=row.report_id,
+            conversation_id=row.conversation_id,
+            title=row.title,
+            intent=row.intent,
+            skill=row.skill,
+            html=html,
+            status=row.status,
+            error=row.error,
+            created_at=row.created_at,
+            finished_at=row.updated_at if row.status in ("ready", "failed") else "",
+        )
+        self._jobs[report_id] = job
+        logger.info("report_loaded_from_db report_id=%s status=%s", report_id, row.status)
+        return job
+
+    async def alist_by_conversation(
+        self,
+        conversation_id: str,
+        *,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        rows = await self._db.list_reports_by_conversation(
+            conversation_id,
+            limit=limit,
+        )
+        return [
+            {
+                "report_id": r.report_id,
+                "conversation_id": r.conversation_id,
+                "title": r.title,
+                "intent": r.intent,
+                "skill": r.skill,
+                "status": r.status,
+                "html_size": r.html_size,
+                "error": r.error,
+                "created_at": r.created_at,
+                "updated_at": r.updated_at,
+            }
+            for r in rows
+        ]
+
+    # -- Persistence helpers (called by the generation pipeline) -------
+
+    async def _persist_html(self, job: ReportJob) -> None:
+        """Write job HTML to disk + update the DB row.
+
+        Should be called when status transitions to ``ready`` or
+        ``failed``. Skipped silently if HTML is empty (generation
+        never reached the model response).
+        """
+        if job.status not in {"ready", "failed"}:
+            return
+        if not job.html and job.status != "failed":
+            return
+
+        html_file_name = f"{job.id}.html"
+        html_path = self._reports_dir / html_file_name
+        try:
+            await asyncio.to_thread(self._write_html_sync, html_path, job.html)
+            await self._db.update_report(
+                job.id,
+                status=job.status,
+                html_file_path=html_file_name,
+                html_size=len(job.html),
+                error=job.error or None,
+            )
+            logger.info(
+                "report_html_persisted report_id=%s status=%s size=%d",
+                job.id,
+                job.status,
+                len(job.html),
+            )
+        except Exception:
+            logger.exception("report_html_persist_failed report_id=%s", job.id)
+
+    @staticmethod
+    def _write_html_sync(path: Path, content: str) -> None:
+        path.write_text(content, encoding="utf-8")
 
 
 async def stream_report_artifact(
     *,
     job: ReportJob,
     request_id: str,
+    store: "ReportJobStore | None" = None,
 ) -> AsyncIterator[dict[str, Any]]:
-    _ensure_report_generation_task(job, request_id=request_id)
+    _ensure_report_generation_task(job, request_id=request_id, store=store)
     event_index = 0
 
     while True:
@@ -127,19 +287,34 @@ async def stream_report_artifact(
         await job.event_signal.wait()
 
 
-def _ensure_report_generation_task(job: ReportJob, *, request_id: str) -> None:
+def _ensure_report_generation_task(
+    job: ReportJob,
+    *,
+    request_id: str,
+    store: "ReportJobStore | None" = None,
+) -> None:
     if job.status in {"ready", "failed"}:
         return
     if job.generation_task is not None and not job.generation_task.done():
         return
-    job.generation_task = asyncio.create_task(_collect_report_events(job=job, request_id=request_id))
+    job.generation_task = asyncio.create_task(
+        _collect_report_events(job=job, request_id=request_id, store=store)
+    )
 
 
-async def _collect_report_events(*, job: ReportJob, request_id: str) -> None:
+async def _collect_report_events(
+    *,
+    job: ReportJob,
+    request_id: str,
+    store: "ReportJobStore | None" = None,
+) -> None:
     try:
         async for frame in _generate_report_artifact_frames(job=job, request_id=request_id):
             job.events.append(frame)
             job.event_signal.set()
+        # Generation completed successfully — persist if store is available.
+        if store is not None:
+            await store._persist_html(job)
     except Exception as exc:
         logger.exception("report_background_generation_failed report_id=%s", job.id)
         job.status = "failed"
@@ -147,6 +322,8 @@ async def _collect_report_events(*, job: ReportJob, request_id: str) -> None:
         job.finished_at = _utc_iso()
         job.events.append(_frame("artifact_error", job, request_id, {"message": job.error}))
         job.event_signal.set()
+        if store is not None:
+            await store._persist_html(job)
     finally:
         job.event_signal.set()
 
