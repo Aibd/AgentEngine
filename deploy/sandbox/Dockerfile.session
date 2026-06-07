@@ -1,0 +1,21 @@
+# Session sandbox image — resident container, exec runs `python -c` / shell.
+# Build:  docker build -f deploy/sandbox/Dockerfile.session -t agentengine-sandbox:session .
+#
+# Keep this lean: it is the untrusted execution environment. Only install what
+# the agent's code legitimately needs. Everything here runs as the non-root
+# `sandbox` user (uid 1000) per SandboxConfig.user.
+FROM python:3.12-slim
+
+# Non-root user the container runs as. Matches SandboxConfig.user="sandbox".
+RUN useradd -m -u 1000 sandbox
+
+# Pre-install the libraries agent code commonly reaches for, so a session
+# doesn't pay import/install cost at runtime. Trim to taste.
+RUN pip install --no-cache-dir numpy pandas
+
+USER sandbox
+WORKDIR /workspace
+
+# The manager overrides CMD with `sleep infinity`; this default is just a
+# sane fallback if you `docker run` the image by hand.
+CMD ["sleep", "infinity"]
