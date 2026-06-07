@@ -2,7 +2,7 @@ from agentengine.base.context import AgentContext
 from agentengine.skills.loader import SkillLoader
 from agentengine.tools.builtin.read_file_tool import ReadFileTool
 from agentengine.tools.builtin.skill_tool import SkillTool
-from examples.agents.preset import AgentPreset
+from app.backend.agents.preset import AgentPreset
 
 _INSTRUCTIONS = (
     "You are a deep research assistant. Break the task into clear questions, "

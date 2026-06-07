@@ -4,7 +4,7 @@ import json
 
 from agentengine.llm.interfaces import LLMResponse
 from mock_llm import MockLLMClient
-from examples.services.agent_orchestration_service import AgentOrchestrationService
+from app.backend.services.agent_orchestration_service import AgentOrchestrationService
 
 
 async def test_full_run_records_runtime_events_and_sse(tmp_path, monkeypatch) -> None:

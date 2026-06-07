@@ -3,7 +3,7 @@ from __future__ import annotations
 import html
 from dataclasses import dataclass
 
-from examples.services.reporting.models import ChartSpec
+from app.backend.services.reporting.models import ChartSpec
 
 
 @dataclass(slots=True)

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from examples.services.reporting.agent_tools import (
+from app.backend.services.reporting.agent_tools import (
     MAX_SHEET_ROWS,
     MAX_TEXT_CHARS,
     ReportAgentTools,
@@ -17,7 +17,7 @@ from examples.services.reporting.agent_tools import (
     TOOL_READ_TEXT,
     tool_specs,
 )
-from examples.services.reporting.file_store import ReportFileStore
+from app.backend.services.reporting.file_store import ReportFileStore
 
 
 pytestmark = pytest.mark.asyncio
@@ -167,7 +167,7 @@ async def test_unauthorised_file_id_rejected(tmp_path: Path) -> None:
 async def test_read_text_uses_full_path_when_preview_truncated(tmp_path: Path) -> None:
     # Build a markdown file longer than PREVIEW_TEXT_CHARS so the parser
     # writes text_full_path.
-    from examples.services.reporting.parser import PREVIEW_TEXT_CHARS
+    from app.backend.services.reporting.parser import PREVIEW_TEXT_CHARS
 
     long_content = "段落\n" * (PREVIEW_TEXT_CHARS // 3 + 10)
     store = ReportFileStore(tmp_path / "uploads")

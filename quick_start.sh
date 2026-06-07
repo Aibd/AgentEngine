@@ -71,21 +71,21 @@ cleanup_port 5173
 sleep 1
 
 echo "[3/3] Starting services..."
-sh -c "$UVICORN_RUN examples.services.web_api:app --host 127.0.0.1 --port 8000 --log-level warning" \
+sh -c "$UVICORN_RUN app.backend.services.web_api:app --host 127.0.0.1 --port 8000 --log-level warning" \
   > logs/backend.log 2>&1 &
 BACKEND_PID="$!"
 echo "$BACKEND_PID" > logs/quick_start_backend.pid
 
 FRONTEND_PID=""
-if [ -f "examples/web/package.json" ]; then
+if [ -f "app/frontend/package.json" ]; then
   if command -v npm >/dev/null 2>&1; then
     (
-      cd examples/web
+      cd app/frontend
       if [ ! -d "node_modules" ]; then
         npm install
       fi
       npm run dev
-    ) > ../../logs/frontend.log 2>&1 &
+    ) > logs/frontend.log 2>&1 &
     FRONTEND_PID="$!"
     echo "$FRONTEND_PID" > logs/quick_start_frontend.pid
   else

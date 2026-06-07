@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import cast
 
-from examples.agents import REGISTRY as AGENT_REGISTRY
+from app.backend.agents import REGISTRY as AGENT_REGISTRY
 from agentengine.engine import AgentEngine, DEFAULT_MAX_QUERY_CHARS, PresetLike
 from agentengine.concurrency import ConversationLockManager
 from agentengine.enterprise.middleware import MiddlewareChain

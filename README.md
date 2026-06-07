@@ -171,10 +171,10 @@ uv run --env-file .env python examples/full_sdk_example.py
 
 ```bash
 # 启动后端
-uv run --env-file .env uvicorn examples.services.web_api:app --host 127.0.0.1 --port 8000
+uv run --env-file .env uvicorn app.backend.services.web_api:app --host 127.0.0.1 --port 8000
 
 # 启动前端
-cd examples/web && npm install && npm run dev   # http://localhost:5173
+cd app/frontend && npm install && npm run dev   # http://localhost:5173
 ```
 
 ---
@@ -382,7 +382,7 @@ engine = AgentEngine(presets=presets, middleware=middleware)
 
 ## 注意事项
 
-- 不要 `import examples` — 那是示范代码，不属于 SDK，需要就复制到你的代码库改造
+- 不要 `import examples` / `import app.backend` — 那是参考应用与示范代码，不属于 SDK，需要就复制到你的代码库改造
 - 不要依赖 `agentengine.runtime.turn` 等内部模块 — 只用 `agentengine` 包根的公开导入
 - 不要在多副本生产环境用默认锁 — `InMemoryConversationLockManager` 只在单进程有效，必须换 Redis
 - 不要把 query 不脱敏直接进引擎 — PII 处理是业务系统责任
@@ -412,8 +412,12 @@ engine = AgentEngine(presets=presets, middleware=middleware)
 
 ```text
 src/agentengine/        核心 SDK，唯一发布包
-examples/               参考应用和示例脚本
-examples/web/           React + Vite 前端参考应用
+app/                    Web 应用（主产品）
+  backend/              FastAPI 后端
+    services/           web_api、orchestration、reporting
+    agents/             预设 agent（markdown/*.md 声明 + sandboxed_coder 代码示例）
+  frontend/             React + Vite 前端
+examples/               独立示例脚本（full_sdk_example.py）
 scripts/                CLI 聊天工具
 tests/                  pytest 测试
 ```

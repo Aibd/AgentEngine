@@ -16,10 +16,10 @@ from typing import Any, TYPE_CHECKING
 
 from agentengine.llm.env import create_llm_from_env
 from agentengine.memory.message import Message
-from examples.services.reporting.file_store import ReportFileRecord
+from app.backend.services.reporting.file_store import ReportFileRecord
 
 if TYPE_CHECKING:
-    from examples.services.reporting.db import ReportMetadataDB
+    from app.backend.services.reporting.db import ReportMetadataDB
 
 
 logger = logging.getLogger(__name__)
@@ -878,7 +878,7 @@ class _FilePayload:
 
 
 def _project_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return Path(__file__).resolve().parents[4]
 
 
 def _load_full_payload(brief: dict[str, Any], project_root: Path) -> _FilePayload:

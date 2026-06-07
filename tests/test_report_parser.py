@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from examples.services.reporting.parser import parse_attachment_metadata, parse_financial_file
+from app.backend.services.reporting.parser import parse_attachment_metadata, parse_financial_file
 
 
 def test_parse_csv_preview(tmp_path: Path) -> None:

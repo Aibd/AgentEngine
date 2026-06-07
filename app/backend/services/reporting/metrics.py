@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from examples.services.reporting.models import ChartSeries, ChartSpec, KpiItem
+from app.backend.services.reporting.models import ChartSeries, ChartSpec, KpiItem
 
 
 @dataclass(slots=True)

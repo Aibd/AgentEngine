@@ -13,10 +13,10 @@ flowchart TB
 
     %% ========== 01 Entry ==========
     subgraph L1["01 接入层"]
-        Web["React Web UI<br/>examples/web/src<br/>消费 SSE，聚合 RunTrace"]:::client
+        Web["React Web UI<br/>app/frontend/src<br/>消费 SSE，聚合 RunTrace"]:::client
         CLI["CLI / Demo<br/>scripts/chat_pretty.py<br/>examples/full_sdk_example.py"]:::client
         Host["宿主系统<br/>业务系统直接嵌入 SDK<br/>自定义 preset / LLM / persistence"]:::client
-        Presets["Agent Presets<br/>general_chat / deep_research<br/>instructions + setup hooks"]:::client
+        Presets["Agent Presets<br/>general_chat / deep_research<br/>Markdown(frontmatter) 或 Python<br/>instructions + tools + setup hooks"]:::client
     end
 
     %% ========== 02 Service ==========
@@ -94,7 +94,7 @@ flowchart TB
 ## 核心链路
 
 1. Web、CLI 或宿主系统把用户请求交给 `AgentEngine`。
-2. `AgentEngine` 解析 preset / `RunConfig`，注入 LLM、持久化、锁和中间件。
+2. `AgentEngine` 解析 preset / `RunConfig`，注入 LLM、持久化、锁和中间件。Preset 可用 Python 构造，也可用 Markdown（YAML frontmatter + 正文）声明，经 `load_preset` / `load_presets` 编译为 `AgentPreset`（frontmatter 的 `tools` 列表会自动装配内置工具）。
 3. `TurnRunner` 包住一次运行，负责运行 ID、状态、事件扇出、日志和 hook 生命周期。
 4. `run_turn()` 执行单一 ReAct 循环：读写 `Memory`，调用 `LLMClient`，执行 `tool_calls`，再把工具结果写回 `Memory`。
 5. 运行事件同时进入 SSE、JSONL 日志和外部回调；历史消息通过 SQLite 持久化。

@@ -22,8 +22,8 @@ def _isolated_report_file_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     that count uploads inside a single conversation.
     """
     try:
-        from examples.services import web_api
-        from examples.services.reporting.file_store import ReportFileStore
+        from app.backend.services import web_api
+        from app.backend.services.reporting.file_store import ReportFileStore
     except Exception:
         return
     monkeypatch.setattr(web_api, "REPORT_FILE_STORE", ReportFileStore(tmp_path / "report_uploads"))

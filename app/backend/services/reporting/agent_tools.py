@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-from examples.services.reporting.file_store import ReportFileStore
+from app.backend.services.reporting.file_store import ReportFileStore
 
 
 logger = logging.getLogger(__name__)

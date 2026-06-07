@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response, StreamingResponse
 
-from examples.agents import REGISTRY as AGENT_REGISTRY
+from app.backend.agents import REGISTRY as AGENT_REGISTRY
 from agentengine.concurrency import InMemoryConversationLockManager
 from agentengine.enterprise import (
     ApprovalGate,
@@ -32,15 +32,15 @@ from agentengine.errors import error_to_dict
 from agentengine.persistence import SqlitePersistence
 from agentengine.skills.loader import SkillLoader
 from agentengine.tools.builtin import build_default_tools, ReadFileTool, SkillTool
-from examples.services.reporting.file_store import ReportFileStore
-from examples.services.agent_orchestration_service import AgentOrchestrationService
-from examples.services.reporting.db import ReportMetadataDB
-from examples.services.reporting.docx_renderer import render_docx
-from examples.services.reporting.jobs import ReportJobStore, stream_report_artifact
-from examples.services.reporting.pdf_renderer import PdfRendererUnavailable, render_pdf
+from app.backend.services.reporting.file_store import ReportFileStore
+from app.backend.services.agent_orchestration_service import AgentOrchestrationService
+from app.backend.services.reporting.db import ReportMetadataDB
+from app.backend.services.reporting.docx_renderer import render_docx
+from app.backend.services.reporting.jobs import ReportJobStore, stream_report_artifact
+from app.backend.services.reporting.pdf_renderer import PdfRendererUnavailable, render_pdf
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DB_PATH = REPO_ROOT / "data" / "chatbot.db"
 DEFAULT_UPLOAD_ROOT = REPO_ROOT / "data" / "uploads"
 

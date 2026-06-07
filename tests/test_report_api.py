@@ -8,8 +8,8 @@ import httpx
 import pytest
 
 from agentengine.llm.interfaces import LLMChunk
-from examples.services import web_api
-from examples.services.reporting import jobs
+from app.backend.services import web_api
+from app.backend.services.reporting import jobs
 
 
 pytestmark = pytest.mark.asyncio

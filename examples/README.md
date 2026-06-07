@@ -2,13 +2,12 @@
 
 本目录提供可运行的示例代码，用来演示如何在业务应用中接入 `agentengine`
 
+> Web 应用（FastAPI 后端 + React 前端）已迁出本目录：后端在 `app/backend/`，前端在 `app/frontend/`。本目录只保留独立的 SDK 示例脚本。
+
 ## 目录结构
 
 | 路径 | 用途 |
 |------|------|
-| `agents/` | 示例 Agent 预设，包含 `general_chat` 和 `deep_research` |
-| `services/agent_orchestration_service.py` | 示例编排服务，将 Agent 预设接入 `AgentEngine` |
-| `services/web_api.py` | FastAPI + SSE 示例接口，可用于本地 Web UI 或接口调试 |
 | `full_sdk_example.py` | 端到端 SDK 示例，包含 LLM 客户端配置、Agent 预设、自定义工具、流式输出和 SQLite 持久化 |
 
 ## 运行完整 SDK 示例
@@ -37,16 +36,16 @@ uv run python examples/full_sdk_example.py \
   --query "请先调用用户资料查询工具获取用户 U-100 的资料，然后总结查询结果。"
 ```
 
-## 运行 Web API 示例
+## 运行 Web 应用
+
+Web 后端与前端已迁至根目录，详见根 `README.md`：
 
 ```bash
-uv run --env-file .env uvicorn examples.services.web_api:app --host 127.0.0.1 --port 8000
-```
+# 后端
+uv run --env-file .env uvicorn app.backend.services.web_api:app --host 127.0.0.1 --port 8000
 
-启动后可以访问：
-
-```text
-http://127.0.0.1:8000
+# 前端
+cd app/frontend && npm install && npm run dev
 ```
 
 ## 说明

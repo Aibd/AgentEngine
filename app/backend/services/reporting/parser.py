@@ -26,7 +26,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from examples.services.reporting.models import ParsedFile, ParsedSheet
+from app.backend.services.reporting.models import ParsedFile, ParsedSheet
 
 
 logger = logging.getLogger(__name__)
@@ -625,7 +625,7 @@ def _write_tables_json(output_dir: Path, tables: list[dict[str, Any]]) -> None:
 def _relative_to_root(path: Path) -> str:
     """Best-effort project-root relative path; falls back to absolute string."""
     try:
-        root = Path(__file__).resolve().parents[3]
+        root = Path(__file__).resolve().parents[4]
         return str(path.resolve().relative_to(root))
     except (ValueError, OSError):
         return str(path)

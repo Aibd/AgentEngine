@@ -36,9 +36,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from examples.services.reporting.db import PARSER_VERSION, ReportMetadataDB
-from examples.services.reporting.models import ParsedFile
-from examples.services.reporting.parser import parse_file
+from app.backend.services.reporting.db import PARSER_VERSION, ReportMetadataDB
+from app.backend.services.reporting.models import ParsedFile
+from app.backend.services.reporting.parser import parse_file
 
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024

@@ -12,7 +12,7 @@ from agentengine.runtime.turn import run_turn
 from agentengine.llm.interfaces import LLMChunk, LLMResponse
 from agentengine.run_config import RunConfig
 from mock_llm import MockLLMClient
-from examples.services.agent_orchestration_service import AgentOrchestrationService
+from app.backend.services.agent_orchestration_service import AgentOrchestrationService
 
 
 class _ClosableLLM(MockLLMClient):

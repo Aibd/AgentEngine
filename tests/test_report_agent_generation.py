@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 
 from agentengine.llm.interfaces import LLMChunk
-from examples.services.reporting import jobs
-from examples.services.reporting.jobs import ReportJobStore, extract_model_html, stream_report_artifact
+from app.backend.services.reporting import jobs
+from app.backend.services.reporting.db import ReportMetadataDB
+from app.backend.services.reporting.jobs import ReportJobStore, extract_model_html, stream_report_artifact
+
+
+@pytest.fixture
+def store(tmp_path: Path) -> ReportJobStore:
+    """An isolated ReportJobStore backed by a per-test SQLite DB + reports dir."""
+    db = ReportMetadataDB(tmp_path / "index.db")
+    return ReportJobStore(db=db, reports_dir=tmp_path / "reports")
 
 
 def test_extract_model_html_accepts_fenced_html_and_strips_unsafe_script() -> None:
@@ -53,9 +62,7 @@ def test_extract_model_html_wraps_body_fragment() -> None:
     assert "<section><h1>Fragment</h1></section>" in output
 
 
-def test_report_job_store_preserves_selected_skill() -> None:
-    store = ReportJobStore()
-
+def test_report_job_store_preserves_selected_skill(store: ReportJobStore) -> None:
     job = store.create(
         conversation_id="conv",
         title="Report",
@@ -68,7 +75,9 @@ def test_report_job_store_preserves_selected_skill() -> None:
 
 
 @pytest.mark.asyncio
-async def test_report_stream_uses_llm_html_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_report_stream_uses_llm_html_when_configured(
+    monkeypatch: pytest.MonkeyPatch, store: ReportJobStore
+) -> None:
     class FakeLLM:
         async def chat_stream(self, messages, **kwargs):  # type: ignore[no-untyped-def]
             assert "上传文件上下文" in messages[1].content
@@ -79,7 +88,6 @@ async def test_report_stream_uses_llm_html_when_configured(monkeypatch: pytest.M
             return None
 
     monkeypatch.setattr(jobs, "create_llm_from_env", lambda required=False: FakeLLM())
-    store = ReportJobStore()
     job = store.create(
         conversation_id="conv",
         title="Custom",
@@ -97,7 +105,9 @@ async def test_report_stream_uses_llm_html_when_configured(monkeypatch: pytest.M
 
 
 @pytest.mark.asyncio
-async def test_report_stream_normalizes_streamed_markdown_fence(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_report_stream_normalizes_streamed_markdown_fence(
+    monkeypatch: pytest.MonkeyPatch, store: ReportJobStore
+) -> None:
     class FakeLLM:
         async def chat_stream(self, messages, **kwargs):  # type: ignore[no-untyped-def]
             yield LLMChunk(content="```html\n<!doctype html><html><body>")
@@ -107,7 +117,7 @@ async def test_report_stream_normalizes_streamed_markdown_fence(monkeypatch: pyt
             return None
 
     monkeypatch.setattr(jobs, "create_llm_from_env", lambda required=False: FakeLLM())
-    job = ReportJobStore().create(conversation_id="conv", title="Fenced", intent="generate", skill="data_analysis")
+    job = store.create(conversation_id="conv", title="Fenced", intent="generate", skill="data_analysis")
 
     events = [event async for event in stream_report_artifact(job=job, request_id="report-test")]
 
@@ -120,7 +130,9 @@ async def test_report_stream_normalizes_streamed_markdown_fence(monkeypatch: pyt
 
 
 @pytest.mark.asyncio
-async def test_report_stream_replays_after_client_disconnect(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_report_stream_replays_after_client_disconnect(
+    monkeypatch: pytest.MonkeyPatch, store: ReportJobStore
+) -> None:
     class SlowLLM:
         async def chat_stream(self, messages, **kwargs):  # type: ignore[no-untyped-def]
             yield LLMChunk(content="<!doctype html><html><body>")
@@ -131,7 +143,7 @@ async def test_report_stream_replays_after_client_disconnect(monkeypatch: pytest
             return None
 
     monkeypatch.setattr(jobs, "create_llm_from_env", lambda required=False: SlowLLM())
-    job = ReportJobStore().create(conversation_id="conv", title="Reconnect", intent="generate", skill="data_analysis")
+    job = store.create(conversation_id="conv", title="Reconnect", intent="generate", skill="data_analysis")
 
     first_stream = stream_report_artifact(job=job, request_id="first-request")
     async for event in first_stream:
@@ -152,9 +164,10 @@ async def test_report_stream_replays_after_client_disconnect(monkeypatch: pytest
 
 
 @pytest.mark.asyncio
-async def test_report_stream_fails_when_llm_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_report_stream_fails_when_llm_is_missing(
+    monkeypatch: pytest.MonkeyPatch, store: ReportJobStore
+) -> None:
     monkeypatch.setattr(jobs, "create_llm_from_env", lambda required=False: None)
-    store = ReportJobStore()
     job = store.create(conversation_id="conv", title="Missing LLM", intent="generate", skill="data_analysis")
 
     events = [event async for event in stream_report_artifact(job=job, request_id="report-test")]

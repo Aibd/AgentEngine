@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from examples.services.reporting.metrics import analyze_first_sheet
+from app.backend.services.reporting.metrics import analyze_first_sheet
 
 
 def test_analyze_first_sheet_detects_core_financial_metrics() -> None:

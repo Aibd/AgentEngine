@@ -78,10 +78,10 @@ timeout /t 1 /nobreak >nul
 
 :: --- Start backend + frontend ---
 echo [3/3] Starting services...
-start "AgentEngine Backend" cmd /k "%UVICORN_RUN% examples.services.web_api:app --host 127.0.0.1 --port 8000 --log-level info"
+start "AgentEngine Backend" cmd /k "%UVICORN_RUN% app.backend.services.web_api:app --host 127.0.0.1 --port 8000 --log-level info"
 
 set "FRONTEND_STARTED=0"
-if not exist "examples\web\package.json" (
+if not exist "app\frontend\package.json" (
     echo   Frontend package not found; skipping frontend startup.
     goto after_frontend_start
 )
@@ -90,7 +90,7 @@ if errorlevel 1 (
     echo   npm not found; skipping frontend startup.
     goto after_frontend_start
 )
-start "AgentEngine Frontend" cmd /k "cd /d examples\web && (if exist node_modules (echo Dependencies already installed.) else (npm install)) && npm run dev"
+start "AgentEngine Frontend" cmd /k "cd /d app\frontend && (if exist node_modules (echo Dependencies already installed.) else (npm install)) && npm run dev"
 set "FRONTEND_STARTED=1"
 :after_frontend_start
 
