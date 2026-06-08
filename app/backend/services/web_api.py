@@ -31,6 +31,11 @@ from agentengine.enterprise import (
 from agentengine.errors import error_to_dict
 from agentengine.persistence import SqlitePersistence
 from agentengine.skills.loader import SkillLoader
+from agentengine.skills.catalog import (
+    LocalCatalogProvider,
+    SkillCatalog,
+    SkillCatalogError,
+)
 from agentengine.skills.registry import (
     SkillImportError,
     SkillRegistry,
@@ -38,6 +43,7 @@ from agentengine.skills.registry import (
 from agentengine.tools.builtin import build_default_tools, ReadFileTool, SkillTool
 from app.backend.services.reporting.file_store import ReportFileStore
 from app.backend.services.agent_orchestration_service import AgentOrchestrationService
+from app.backend.services.expert_catalog import ExpertCatalog
 from app.backend.services.reporting.db import ReportMetadataDB
 from app.backend.services.reporting.docx_renderer import render_docx
 from app.backend.services.reporting.jobs import ReportJobStore, stream_report_artifact
@@ -81,6 +87,12 @@ REPORT_STORE = ReportJobStore(
 )
 REPORT_FILE_STORE = ReportFileStore(DEFAULT_UPLOAD_ROOT)
 SKILL_REGISTRY = SkillRegistry(cwd=REPO_ROOT, db_path=DEFAULT_DB_PATH)
+SKILL_CATALOG = SkillCatalog(provider=LocalCatalogProvider(), registry=SKILL_REGISTRY)
+EXPERT_CATALOG = ExpertCatalog(
+    markdown_dir=REPO_ROOT / "app" / "backend" / "agents" / "markdown",
+    registry=AGENT_REGISTRY,
+    teams_path=REPO_ROOT / "app" / "backend" / "services" / "experts_data" / "teams.json",
+)
 
 MAX_SKILL_ZIP_BYTES = 20 * 1024 * 1024  # 20MB ceiling for an uploaded skill pack.
 
@@ -226,6 +238,98 @@ async def export_skill(name: str) -> Response:
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{name}.zip"'},
     )
+
+
+# -- Skill marketplace (browse + install) ------------------------------------
+
+
+@app.get("/api/skill-market")
+async def list_skill_market(
+    category: str = Query("", min_length=0),
+    q: str = Query("", min_length=0),
+) -> dict[str, Any]:
+    """List installable marketplace skills, flagged with their install state."""
+    views = await SKILL_CATALOG.list(category=category or None, query=q or None)
+    return {"skills": [view.snapshot() for view in views]}
+
+
+@app.get("/api/skill-market/categories")
+async def list_skill_market_categories() -> dict[str, Any]:
+    """Return the marketplace category filters (with an "all" entry first)."""
+    return {"categories": await SKILL_CATALOG.categories()}
+
+
+@app.post("/api/skill-market/{entry_id}/install")
+async def install_skill_from_market(entry_id: str) -> dict[str, Any]:
+    """Install a marketplace skill into ``.agent/skills``."""
+    try:
+        view = await SKILL_CATALOG.install(entry_id)
+    except FileExistsError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"技能「{exc.args[0] if exc.args else entry_id}」已安装",
+        ) from exc
+    except (SkillCatalogError, SkillImportError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return view.snapshot()
+
+
+# -- Experts (runnable agent presets surfaced as a directory) ----------------
+
+
+@app.get("/api/experts")
+async def list_experts(
+    category: str = Query("", min_length=0),
+    scenario: str = Query("", min_length=0),
+    q: str = Query("", min_length=0),
+) -> dict[str, Any]:
+    """List runnable experts (agent presets with display metadata)."""
+    experts = EXPERT_CATALOG.list(
+        category=category or None,
+        scenario=scenario or None,
+        query=q or None,
+    )
+    return {"experts": [expert.snapshot() for expert in experts]}
+
+
+@app.get("/api/experts/categories")
+async def list_expert_categories() -> dict[str, Any]:
+    """Return the expert category filters (with an "all" entry first)."""
+    return {"categories": EXPERT_CATALOG.categories()}
+
+
+@app.get("/api/experts/scenarios")
+async def list_expert_scenarios() -> dict[str, Any]:
+    """Return featured scenario groups for the experts page."""
+    return {"scenarios": [group.snapshot() for group in EXPERT_CATALOG.scenarios()]}
+
+
+# -- Expert teams (sequential relay pipelines) -------------------------------
+
+
+@app.get("/api/expert-teams")
+async def list_expert_teams(
+    category: str = Query("", min_length=0),
+    q: str = Query("", min_length=0),
+) -> dict[str, Any]:
+    """List expert teams (ordered groups run as a relay pipeline)."""
+    teams = EXPERT_CATALOG.list_teams(category=category or None, query=q or None)
+    return {"teams": [team.snapshot() for team in teams]}
+
+
+@app.get("/api/expert-teams/categories")
+async def list_expert_team_categories() -> dict[str, Any]:
+    """Return the expert-team category filters (with an "all" entry first)."""
+    return {"categories": EXPERT_CATALOG.team_categories()}
+
+
+@app.get("/api/expert-teams/{team_id}")
+async def expert_team_detail(team_id: str) -> dict[str, Any]:
+    """Return one expert team (ordered members) for the start-team confirm step."""
+    team = EXPERT_CATALOG.get_team(team_id)
+    if team is None:
+        raise HTTPException(status_code=404, detail="expert team not found")
+    return team.snapshot()
 
 
 @app.get("/api/conversations/{conversation_id}/messages")

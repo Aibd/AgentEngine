@@ -356,3 +356,212 @@ async def test_skill_detail_returns_body(isolated_skill_registry: Path) -> None:
         response = await client.get("/api/skills/seeded")
     assert response.status_code == 200
     assert "Body" in response.json()["body"]
+
+
+# -- Skill marketplace API ---------------------------------------------------
+
+
+from agentengine.skills.catalog import LocalCatalogProvider, SkillCatalog
+
+
+@pytest.fixture
+def isolated_skill_market(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point ``web_api.SKILL_REGISTRY`` and ``SKILL_CATALOG`` at temp storage."""
+    skills_dir = tmp_path / ".agent" / "skills"
+    skills_dir.mkdir(parents=True)
+    catalog_root = tmp_path / "catalog_data"
+    catalog_root.mkdir()
+    (catalog_root / "catalog.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "summarize",
+                    "name": "Summarize",
+                    "description": "Summarize text",
+                    "category": "效率提升",
+                    "downloads": 100,
+                    "rating": 4.5,
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    entry_dir = catalog_root / "summarize"
+    entry_dir.mkdir()
+    (entry_dir / "SKILL.md").write_text(
+        "---\nname: summarize\ndescription: Summarize text\n---\nBody",
+        encoding="utf-8",
+    )
+    from agentengine.skills.registry import SkillRegistry
+
+    registry = SkillRegistry(cwd=tmp_path, db_path=tmp_path / "meta.db")
+    catalog = SkillCatalog(provider=LocalCatalogProvider(root=catalog_root), registry=registry)
+    monkeypatch.setattr(web_api, "SKILL_REGISTRY", registry)
+    monkeypatch.setattr(web_api, "SKILL_CATALOG", catalog)
+
+
+async def test_market_lists_entries(isolated_skill_market: None) -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/skill-market")
+    assert response.status_code == 200
+    skills = response.json()["skills"]
+    summarize = next(s for s in skills if s["id"] == "summarize")
+    assert summarize["installed"] is False
+    assert summarize["category"] == "效率提升"
+    assert summarize["rating"] == 4.5
+
+
+async def test_market_categories(isolated_skill_market: None) -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/skill-market/categories")
+    assert response.status_code == 200
+    categories = response.json()["categories"]
+    assert categories[0] == "全部"
+    assert "效率提升" in categories
+
+
+async def test_market_install_then_visible_in_skills(isolated_skill_market: None) -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        install = await client.post("/api/skill-market/summarize/install")
+        assert install.status_code == 200
+        assert install.json()["source"] == "market"
+
+        # Now flagged installed in the market listing...
+        market = await client.get("/api/skill-market")
+        summarize = next(s for s in market.json()["skills"] if s["id"] == "summarize")
+        assert summarize["installed"] is True
+
+        # ...and present in the installed-skills endpoint.
+        installed = await client.get("/api/skills")
+        assert "summarize" in {s["name"] for s in installed.json()["skills"]}
+
+
+async def test_market_install_twice_returns_409(isolated_skill_market: None) -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        first = await client.post("/api/skill-market/summarize/install")
+        assert first.status_code == 200
+        second = await client.post("/api/skill-market/summarize/install")
+    assert second.status_code == 409
+
+
+async def test_market_install_unknown_returns_400(isolated_skill_market: None) -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post("/api/skill-market/ghost/install")
+    assert response.status_code == 400
+
+
+# -- Experts API -------------------------------------------------------------
+
+
+async def test_experts_list_returns_runnable_experts() -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/experts")
+    assert response.status_code == 200
+    experts = response.json()["experts"]
+    assert len(experts) >= 6
+    names = {e["name"] for e in experts}
+    # Base agents (no ``role``) are not experts.
+    assert "general_chat" not in names
+    sample = experts[0]
+    assert {"name", "role", "description", "category", "skills"} <= sample.keys()
+
+
+async def test_experts_categories() -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/experts/categories")
+    assert response.status_code == 200
+    categories = response.json()["categories"]
+    assert categories[0] == "全部"
+    assert len(categories) > 1
+
+
+async def test_experts_scenarios() -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/experts/scenarios")
+    assert response.status_code == 200
+    scenarios = response.json()["scenarios"]
+    assert scenarios  # at least one featured scenario
+    first = scenarios[0]
+    assert "scenario" in first
+    assert isinstance(first["experts"], list)
+
+
+async def test_expert_is_runnable_via_run_stream() -> None:
+    """A selected expert's name is a real agent the run-stream can execute."""
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver", timeout=10.0) as client:
+        experts = (await client.get("/api/experts")).json()["experts"]
+        expert_name = experts[0]["name"]
+        async with client.stream(
+            "GET",
+            "/api/runs/stream",
+            params={
+                "query": "你好",
+                "agent_name": expert_name,
+                "conversation_id": "expert-run-test",
+            },
+        ) as response:
+            assert response.status_code == 200
+            events = [evt async for evt in _consume_sse(response)]
+
+    types = [e["event"] for e in events]
+    assert types[0] == "start"
+    assert types[-1] == "done"
+
+
+# -- Expert teams API --------------------------------------------------------
+
+
+async def test_expert_teams_list() -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/expert-teams")
+    assert response.status_code == 200
+    teams = response.json()["teams"]
+    assert len(teams) >= 1
+    team = teams[0]
+    assert {"id", "name", "members", "member_experts"} <= team.keys()
+    assert len(team["members"]) >= 1
+    # member_experts resolve to full expert views
+    assert len(team["member_experts"]) == len(team["members"])
+
+
+async def test_expert_team_members_are_runnable_agents() -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        teams = (await client.get("/api/expert-teams")).json()["teams"]
+        experts = (await client.get("/api/experts")).json()["experts"]
+    expert_names = {e["name"] for e in experts}
+    for team in teams:
+        for member in team["members"]:
+            assert member in expert_names
+
+
+async def test_expert_team_categories() -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/expert-teams/categories")
+    assert response.status_code == 200
+    categories = response.json()["categories"]
+    assert categories[0] == "全部"
+
+
+async def test_expert_team_detail_and_404() -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        teams = (await client.get("/api/expert-teams")).json()["teams"]
+        team_id = teams[0]["id"]
+        ok = await client.get(f"/api/expert-teams/{team_id}")
+        assert ok.status_code == 200
+        assert ok.json()["id"] == team_id
+        missing = await client.get("/api/expert-teams/does-not-exist")
+        assert missing.status_code == 404
