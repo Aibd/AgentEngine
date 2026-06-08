@@ -1,0 +1,83 @@
+[
+  {
+    "id": "summarize",
+    "name": "Summarize",
+    "description": "把长文本、网页或文件提炼成结构化摘要。先抓主旨，再列要点，最后给一句话结论。",
+    "category": "效率提升",
+    "icon": "S",
+    "downloads": 515000,
+    "rating": 4.8
+  },
+  {
+    "id": "data-analysis",
+    "name": "数据分析",
+    "description": "对上传的表格做指标诊断、趋势分析和结论提炼，产出结构化分析报告。",
+    "category": "数据分析",
+    "icon": "D",
+    "downloads": 233000,
+    "rating": 4.6
+  },
+  {
+    "id": "codebase-research",
+    "name": "Codebase Research",
+    "description": "调研代码库：先列结构、再读关键文件，最后产出架构分层与扩展点报告。",
+    "category": "开发工具",
+    "icon": "C",
+    "downloads": 320000,
+    "rating": 4.7
+  },
+  {
+    "id": "markdown-formatter",
+    "name": "Markdown 排版",
+    "description": "把杂乱文本整理成规范 Markdown：加标题层级、列表与表格规范化、清理多余空行。",
+    "category": "内容创作",
+    "icon": "M",
+    "downloads": 141000,
+    "rating": 4.4
+  },
+  {
+    "id": "find-skills",
+    "name": "Find Skills",
+    "description": "当用户问\"如何做某事\"\"有没有现成技能\"时，帮其发现并推荐可安装的技能。",
+    "category": "AI 智能",
+    "icon": "F",
+    "downloads": 483000,
+    "rating": 4.5
+  },
+  {
+    "id": "prompt-refiner",
+    "name": "Prompt 优化器",
+    "description": "把模糊的需求改写成清晰、可执行的提示词：补齐目标、约束、输出格式与示例。",
+    "category": "AI 智能",
+    "icon": "P",
+    "downloads": 210000,
+    "rating": 4.5
+  },
+  {
+    "id": "sql-helper",
+    "name": "SQL 助手",
+    "description": "用自然语言描述需求，生成规范的 SQL 查询，并解释每个子句的作用与注意点。",
+    "category": "开发工具",
+    "icon": "Q",
+    "downloads": 185000,
+    "rating": 4.3
+  },
+  {
+    "id": "meeting-notes",
+    "name": "会议纪要",
+    "description": "把零散的会议记录整理成纪要：决议、待办（含负责人）、风险与下一步。",
+    "category": "效率提升",
+    "icon": "N",
+    "downloads": 109000,
+    "rating": 4.2
+  },
+  {
+    "id": "compliance-reviewer",
+    "name": "合规审查",
+    "description": "审查文本中的合规风险点，逐条标注问题、依据与改进建议。",
+    "category": "安全合规",
+    "icon": "R",
+    "downloads": 96000,
+    "rating": 4.1
+  }
+]

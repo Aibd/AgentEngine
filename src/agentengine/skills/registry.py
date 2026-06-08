@@ -44,6 +44,10 @@ SKILL_FILE = "SKILL.md"
 # Source values stored in ``skills_meta.source``.
 SOURCE_BUILTIN = "builtin"
 SOURCE_IMPORTED = "imported"
+SOURCE_MARKET = "market"
+
+# Sources whose skills the user may delete (builtin skills are protected).
+DELETABLE_SOURCES = frozenset({SOURCE_IMPORTED, SOURCE_MARKET})
 
 
 def _utc_iso() -> str:
@@ -237,6 +241,17 @@ class SkillRegistry:
         """Names of skills that are currently enabled."""
         return {view.name for view in await self.list() if view.enabled}
 
+    def _find_skill_in_dir(self, directory: Path) -> Any | None:
+        """Return the discovered skill whose SKILL.md lives under *directory*."""
+        target = directory.resolve()
+        for skill in self._loader.discover(force=True).values():
+            try:
+                Path(skill.path).resolve().relative_to(target)
+            except ValueError:
+                continue
+            return skill
+        return None
+
     def _view_for(self, skill: Any, meta: dict[str, Any] | None) -> SkillView:
         if meta is None:
             return SkillView(
@@ -277,37 +292,62 @@ class SkillRegistry:
             raise KeyError(name)
         meta = (await self._db.get_all()).get(name)
         source = str(meta["source"]) if meta else SOURCE_BUILTIN
-        if source != SOURCE_IMPORTED:
-            raise PermissionError(f"skill '{name}' is not imported and cannot be deleted")
+        if source not in DELETABLE_SOURCES:
+            raise PermissionError(f"skill '{name}' is built in and cannot be deleted")
         skill_dir = Path(skill.path).parent
         await asyncio.to_thread(_remove_tree, skill_dir)
         await self._db.delete(name)
         self._loader.invalidate()
         logger.info("skill_deleted name=%s dir=%s", name, skill_dir)
 
-    # -- import / export --------------------------------------------------
+    # -- install / import / export ----------------------------------------
 
-    async def import_zip(self, data: bytes, *, original_filename: str = "") -> SkillView:
-        """Install a skill from a ``.zip`` archive containing a SKILL.md."""
-        name, files = await asyncio.to_thread(_extract_skill_from_zip, data)
+    async def install_files(
+        self,
+        name: str,
+        files: dict[str, bytes],
+        *,
+        source: str,
+        origin: str = "",
+    ) -> SkillView:
+        """Write a skill's file tree to ``.agent/skills/<name>`` and record metadata.
+
+        Shared by ``import_zip`` (zip upload) and the skill catalog installer.
+        Raises :class:`FileExistsError` (name only) when the target already
+        exists, and :class:`SkillImportError` if the skill fails to load back.
+        """
         target_dir = self._install_root / name
         if target_dir.exists():
             raise FileExistsError(name)
         await asyncio.to_thread(_write_skill_tree, target_dir, files)
         self._loader.invalidate()
+        # The loader keys skills by their frontmatter ``name`` — which may differ
+        # from the directory name we just wrote (e.g. frontmatter uses
+        # underscores that the dir name normalizes to hyphens). Find the skill by
+        # its on-disk path so metadata is keyed by the identity the loader uses.
+        skill = self._find_skill_in_dir(target_dir)
+        if skill is None:  # pragma: no cover - defensive; we just wrote it
+            raise SkillImportError(f"installed skill '{name}' did not load")
         await self._db.upsert(
-            name,
+            skill.name,
             enabled=True,
-            source=SOURCE_IMPORTED,
-            origin=original_filename or "",
+            source=source,
+            origin=origin or "",
             imported_at=_utc_iso(),
         )
-        skill = self._loader.discover(force=True).get(name)
-        if skill is None:  # pragma: no cover - defensive; we just wrote it
-            raise SkillImportError(f"imported skill '{name}' did not load")
-        meta = (await self._db.get_all()).get(name)
-        logger.info("skill_imported name=%s origin=%s", name, original_filename)
+        meta = (await self._db.get_all()).get(skill.name)
+        logger.info("skill_installed name=%s source=%s origin=%s", skill.name, source, origin)
         return self._view_for(skill, meta)
+
+    async def import_zip(self, data: bytes, *, original_filename: str = "") -> SkillView:
+        """Install a skill from a ``.zip`` archive containing a SKILL.md."""
+        name, files = await asyncio.to_thread(_extract_skill_from_zip, data)
+        return await self.install_files(
+            name,
+            files,
+            source=SOURCE_IMPORTED,
+            origin=original_filename,
+        )
 
     async def export_zip(self, name: str) -> bytes:
         """Package an installed skill directory into a ``.zip`` byte stream."""
@@ -430,4 +470,6 @@ __all__ = [
     "SkillView",
     "SOURCE_BUILTIN",
     "SOURCE_IMPORTED",
+    "SOURCE_MARKET",
+    "DELETABLE_SOURCES",
 ]
