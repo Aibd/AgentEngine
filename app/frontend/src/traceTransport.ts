@@ -1,7 +1,11 @@
 import type {
   CapabilitySummary,
+  Expert,
+  ExpertTeam,
+  MarketSkill,
   ReportFileSummary,
   ResponseType,
+  ScenarioGroup,
   SkillDetail,
   SkillSummary,
   SseEvent,
@@ -188,6 +192,106 @@ export async function deleteSkill(name: string): Promise<void> {
 
 export function skillExportUrl(name: string): string {
   return `/api/skills/${encodeURIComponent(name)}/export`;
+}
+
+export async function fetchMarketSkills(category?: string, q?: string): Promise<MarketSkill[]> {
+  const params = new URLSearchParams();
+  if (category && category !== "全部") {
+    params.set("category", category);
+  }
+  if (q && q.trim()) {
+    params.set("q", q.trim());
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`/api/skill-market${suffix}`);
+  if (!response.ok) {
+    throw new Error(`skill market request failed: ${response.status}`);
+  }
+  const body = (await response.json()) as { skills?: MarketSkill[] };
+  return body.skills ?? [];
+}
+
+export async function fetchMarketCategories(): Promise<string[]> {
+  const response = await fetch("/api/skill-market/categories");
+  if (!response.ok) {
+    throw new Error(`skill market categories request failed: ${response.status}`);
+  }
+  const body = (await response.json()) as { categories?: string[] };
+  return body.categories ?? [];
+}
+
+export async function installMarketSkill(entryId: string): Promise<SkillSummary> {
+  const response = await fetch(`/api/skill-market/${encodeURIComponent(entryId)}/install`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "安装失败"));
+  }
+  return (await response.json()) as SkillSummary;
+}
+
+export async function fetchExperts(category?: string, scenario?: string, q?: string): Promise<Expert[]> {
+  const params = new URLSearchParams();
+  if (category && category !== "全部") {
+    params.set("category", category);
+  }
+  if (scenario) {
+    params.set("scenario", scenario);
+  }
+  if (q && q.trim()) {
+    params.set("q", q.trim());
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`/api/experts${suffix}`);
+  if (!response.ok) {
+    throw new Error(`experts request failed: ${response.status}`);
+  }
+  const body = (await response.json()) as { experts?: Expert[] };
+  return body.experts ?? [];
+}
+
+export async function fetchExpertCategories(): Promise<string[]> {
+  const response = await fetch("/api/experts/categories");
+  if (!response.ok) {
+    throw new Error(`expert categories request failed: ${response.status}`);
+  }
+  const body = (await response.json()) as { categories?: string[] };
+  return body.categories ?? [];
+}
+
+export async function fetchExpertScenarios(): Promise<ScenarioGroup[]> {
+  const response = await fetch("/api/experts/scenarios");
+  if (!response.ok) {
+    throw new Error(`expert scenarios request failed: ${response.status}`);
+  }
+  const body = (await response.json()) as { scenarios?: ScenarioGroup[] };
+  return body.scenarios ?? [];
+}
+
+export async function fetchExpertTeams(category?: string, q?: string): Promise<ExpertTeam[]> {
+  const params = new URLSearchParams();
+  if (category && category !== "全部") {
+    params.set("category", category);
+  }
+  if (q && q.trim()) {
+    params.set("q", q.trim());
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`/api/expert-teams${suffix}`);
+  if (!response.ok) {
+    throw new Error(`expert teams request failed: ${response.status}`);
+  }
+  const body = (await response.json()) as { teams?: ExpertTeam[] };
+  return body.teams ?? [];
+}
+
+export async function fetchExpertTeamCategories(): Promise<string[]> {
+  const response = await fetch("/api/expert-teams/categories");
+  if (!response.ok) {
+    throw new Error(`expert team categories request failed: ${response.status}`);
+  }
+  const body = (await response.json()) as { categories?: string[] };
+  return body.categories ?? [];
 }
 
 async function readErrorDetail(response: Response, fallback: string): Promise<string> {

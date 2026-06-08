@@ -158,3 +158,40 @@ export type SkillSummary = {
 export type SkillDetail = SkillSummary & {
   body: string;
 };
+
+export type MarketSkill = {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  icon: string;
+  downloads: number;
+  rating: number;
+  source: string;
+  installed: boolean;
+};
+
+export type Expert = {
+  name: string;
+  role: string;
+  description: string;
+  author: string;
+  category: string;
+  scenario: string;
+  skills: string[];
+  badge: string;
+};
+
+export type ScenarioGroup = {
+  scenario: string;
+  experts: Expert[];
+};
+
+export type ExpertTeam = {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  members: string[];
+  member_experts: Expert[];
+};

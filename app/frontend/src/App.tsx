@@ -9,11 +9,8 @@ import {
   FileText,
   Menu,
   Loader2,
-  PanelLeftClose,
-  Plus,
   Settings2,
   Sparkles,
-  Trash2,
   X,
   Wrench,
 } from "lucide-react";
@@ -27,6 +24,9 @@ import {
   type ThinkingMode,
 } from "./components/Composer";
 import { SkillsManager } from "./components/SkillsManager";
+import { AppNav, type AppView, type NavSpace } from "./components/AppNav";
+import { SkillsPage } from "./components/SkillsPage";
+import { ExpertsPage } from "./components/ExpertsPage";
 import { createEmptyTrace, reduceTraceEvent } from "./traceReducer";
 import {
   fetchCapabilities,
@@ -39,6 +39,8 @@ import { translateError } from "./friendlyErrors";
 import type {
   CapabilitySummary,
   ErrorPayload,
+  Expert,
+  ExpertTeam,
   ReportFileSummary,
   RunTrace,
   SkillSummary,
@@ -61,7 +63,11 @@ type ChatTurn = {
   submittedQuery: string;
   files: ReportFileSummary[];
   trace: RunTrace;
+  // For expert-team runs: a label like "成员 1/2 · 股票研究专家" shown above the turn.
+  memberLabel?: string;
 };
+
+type TeamMember = { name: string; role: string };
 
 type ChatSession = {
   id: string;
@@ -69,6 +75,14 @@ type ChatSession = {
   query: string;
   turns: ChatTurn[];
   isRunning: boolean;
+  // The agent/expert this session runs with. Defaults to deep_research to
+  // preserve the previous hard-coded behaviour; set when starting from an expert.
+  agentName?: string;
+  expertRole?: string;
+  // For expert-team sessions: the team name and its ordered members. When set,
+  // submitting a message runs the members as a sequential relay pipeline.
+  teamName?: string;
+  teamMembers?: TeamMember[];
 };
 
 const ARTIFACT_WIDTH_MIN = 480;
@@ -83,6 +97,7 @@ export function App() {
   const [capabilities, setCapabilities] = useState<CapabilitySummary | null>(null);
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [showSkillsManager, setShowSkillsManager] = useState(false);
+  const [activeView, setActiveView] = useState<AppView>("chat");
   const [closedArtifactId, setClosedArtifactId] = useState<string | null>(null);
   const [reportFiles, setReportFiles] = useState<ReportFileSummary[]>([]);
   const [previewFile, setPreviewFile] = useState<ReportFileSummary | null>(null);
@@ -138,7 +153,7 @@ export function App() {
     : activeArtifact?.id === closedArtifactId || !artifactHasOutput
       ? null
       : activeArtifact;
-  const hasRightPanel = Boolean(visibleArtifact || previewFile);
+  const hasRightPanel = activeView === "chat" && Boolean(visibleArtifact || previewFile);
   const appClassName = [
     "app-layout",
     sidebarOpen ? "" : "sidebar-collapsed",
@@ -288,11 +303,124 @@ export function App() {
         stopMapRef.current.delete(runSessionId);
         setSessionRunning(runSessionId, false);
       },
-      "deep_research",
+      activeSession.agentName ?? "deep_research",
       runSessionId,
       selectedSkill,
     );
     stopMapRef.current.set(runSessionId, stop);
+  }
+
+  function startExpertChat(expert: Expert) {
+    const id = crypto.randomUUID();
+    setSessions((current) => [
+      {
+        ...createChatSession(id, expert.role),
+        agentName: expert.name,
+        expertRole: expert.role,
+      },
+      ...current,
+    ]);
+    setActiveSessionId(id);
+    setSelectedSkill("chat");
+    setReportFiles([]);
+    setComposerUploadError("");
+    setPreviewFile(null);
+    setClosedArtifactId(null);
+    setActiveView("chat");
+  }
+
+  function startTeamChat(team: ExpertTeam) {
+    const id = crypto.randomUUID();
+    const members: TeamMember[] = team.member_experts.map((expert) => ({
+      name: expert.name,
+      role: expert.role,
+    }));
+    setSessions((current) => [
+      {
+        ...createChatSession(id, team.name),
+        teamName: team.name,
+        teamMembers: members,
+      },
+      ...current,
+    ]);
+    setActiveSessionId(id);
+    setSelectedSkill("chat");
+    setReportFiles([]);
+    setComposerUploadError("");
+    setPreviewFile(null);
+    setClosedArtifactId(null);
+    setActiveView("chat");
+  }
+
+  // Run a team's members as a sequential relay: each member is its own turn,
+  // and the previous member's answer is threaded into the next member's query.
+  // Built entirely on the single-agent runAgentTrace — no engine changes.
+  function runTeamPipeline(sessionId: string, userQuery: string, members: TeamMember[]) {
+    setSessionRunning(sessionId, true);
+
+    const runMember = (index: number, priorOutput: string, priorRole: string) => {
+      if (index >= members.length) {
+        stopMapRef.current.delete(sessionId);
+        setSessionRunning(sessionId, false);
+        return;
+      }
+      const member = members[index];
+      const turnId = crypto.randomUUID();
+      const memberLabel = `成员 ${index + 1}/${members.length} · ${member.role}`;
+      const memberQuery =
+        index === 0
+          ? userQuery
+          : `下面是「${priorRole}」给出的分析：\n\n${priorOutput}\n\n` +
+            `请你作为「${member.role}」在此基础上继续，针对原始诉求给出你的专业意见：${userQuery}`;
+
+      // Each member is a fresh turn (own trace) — sidesteps the start-reset
+      // behaviour that would otherwise wipe earlier members' output.
+      setSessions((current) =>
+        updateSession(current, sessionId, (session) => ({
+          ...session,
+          turns: [
+            ...session.turns,
+            {
+              id: turnId,
+              submittedQuery: index === 0 ? userQuery : `（接力）${member.role}`,
+              files: [],
+              trace: createEmptyTrace(),
+              memberLabel,
+            },
+          ],
+        })),
+      );
+
+      let latestTrace = createEmptyTrace();
+      const stop = runAgentTrace(
+        memberQuery,
+        (event) => {
+          setSessions((current) =>
+            updateSession(current, sessionId, (session) => ({
+              ...session,
+              turns: session.turns.map((turn) => {
+                if (turn.id !== turnId) {
+                  return turn;
+                }
+                latestTrace = reduceTraceEvent(turn.trace, event);
+                return { ...turn, trace: latestTrace };
+              }),
+            })),
+          );
+        },
+        () => {
+          // Member finished: thread its output into the next member.
+          const output = extractTraceText(latestTrace);
+          runMember(index + 1, output, member.role);
+        },
+        member.name,
+        sessionId,
+        "chat",
+      );
+      stopMapRef.current.set(sessionId, stop);
+    };
+
+    runMember(0, "", "");
   }
 
   function startReportDemo(nextIntent = query) {
@@ -437,6 +565,16 @@ export function App() {
       stopRun();
       return;
     }
+    // Expert-team session: run the members as a sequential relay pipeline.
+    if (activeSession.teamMembers && activeSession.teamMembers.length > 0) {
+      const cleaned = query.trim();
+      if (!cleaned) {
+        return;
+      }
+      updateActiveQuery("");
+      runTeamPipeline(activeSessionId, cleaned, activeSession.teamMembers);
+      return;
+    }
     if (selectedSkill === "data_analysis") {
       startReportDemo(query);
       return;
@@ -555,89 +693,120 @@ export function App() {
     canSubmit,
   };
 
+  const navSpaces = useMemo<NavSpace[]>(
+    () => [
+      { id: "agentengine", name: "AgentEngine", sessionIds: [] },
+    ],
+    [],
+  );
+
+  function navigate(view: AppView) {
+    setActiveView(view);
+    if (view !== "chat") {
+      setPreviewFile(null);
+    }
+  }
+
   return (
     <main className={appClassName} style={appStyle}>
-      <aside className="sidebar" aria-label="会话历史">
-        <div className="sidebar-top">
-          <button className="sidebar-icon" type="button" onClick={() => setSidebarOpen(false)} title="收起侧栏">
-            <PanelLeftClose size={18} />
-          </button>
-          <button className="new-chat-button" type="button" onClick={newSession}>
-            <Plus size={17} />
-            <span>新会话</span>
-          </button>
-        </div>
-        <div className="history-list">
-          {sessions.map((session) => (
-            <div
-              key={session.id}
-              className={session.id === activeSessionId ? "history-item is-active" : "history-item"}
-            >
-              <button
-                className="history-title"
-                type="button"
-                onClick={() => selectSession(session.id)}
-                title={session.title}
-              >
-                {session.title}
-              </button>
-              <button
-                className="history-delete"
-                type="button"
-                onClick={() => deleteSession(session.id)}
-                title="删除会话"
-                aria-label={`删除会话 ${session.title}`}
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
-          ))}
-        </div>
-        <CapabilityPanel
-          capabilities={capabilities}
-          skillCount={skills.length}
-          onManageSkills={() => setShowSkillsManager(true)}
-        />
-      </aside>
-
-      <section className="chat-shell">
-        {!sidebarOpen ? (
-          <button className="floating-sidebar-toggle" type="button" onClick={() => setSidebarOpen(true)} title="展开侧栏">
-            <Menu size={19} />
-          </button>
-        ) : null}
-
-        <section className="message-lane" aria-label="Chat">
-          {activeSession.turns.length === 0 ? (
-            <EmptyChat
+      {sidebarOpen ? (
+        <AppNav
+          version="0.2.0"
+          activeView={activeView}
+          onNavigate={navigate}
+          onNewTask={() => {
+            navigate("chat");
+            newSession();
+          }}
+          onCollapse={() => setSidebarOpen(false)}
+          sessions={sessions.map((session) => ({ id: session.id, title: session.title }))}
+          spaces={navSpaces}
+          activeSessionId={activeSessionId}
+          onSelectSession={(id) => {
+            navigate("chat");
+            selectSession(id);
+          }}
+          onDeleteSession={deleteSession}
+          footer={
+            <CapabilityPanel
               capabilities={capabilities}
-              composer={<Composer variant="center" {...composerProps} />}
-              onPick={(prompt) => {
-                updateActiveQuery(prompt);
-                startRun(prompt);
-              }}
+              skillCount={skills.length}
+              onManageSkills={() => navigate("skills")}
             />
-          ) : (
-            <Conversation
-              turns={activeSession.turns}
-              isRunning={isRunning}
-              onOpenArtifact={() => {
-                setPreviewFile(null);
-                setClosedArtifactId(null);
-              }}
-              onPreviewFile={setPreviewFile}
-            />
-          )}
+          }
+        />
+      ) : null}
+
+      {activeView === "chat" ? (
+        <section className="chat-shell">
+          {!sidebarOpen ? (
+            <button className="floating-sidebar-toggle" type="button" onClick={() => setSidebarOpen(true)} title="展开侧栏">
+              <Menu size={19} />
+            </button>
+          ) : null}
+
+          <section className="message-lane" aria-label="Chat">
+            {activeSession.turns.length === 0 ? (
+              <EmptyChat
+                capabilities={capabilities}
+                expertRole={activeSession.expertRole}
+                teamName={activeSession.teamName}
+                teamMembers={activeSession.teamMembers}
+                composer={<Composer variant="center" {...composerProps} />}
+                onPick={(prompt) => {
+                  if (activeSession.teamMembers && activeSession.teamMembers.length > 0) {
+                    runTeamPipeline(activeSessionId, prompt, activeSession.teamMembers);
+                    return;
+                  }
+                  updateActiveQuery(prompt);
+                  startRun(prompt);
+                }}
+              />
+            ) : (
+              <Conversation
+                turns={activeSession.turns}
+                isRunning={isRunning}
+                onOpenArtifact={() => {
+                  setPreviewFile(null);
+                  setClosedArtifactId(null);
+                }}
+                onPreviewFile={setPreviewFile}
+              />
+            )}
+          </section>
+
+          {activeSession.turns.length > 0 ? (
+            <div className="composer-dock">
+              <Composer variant="docked" {...composerProps} />
+            </div>
+          ) : null}
         </section>
+      ) : activeView === "skills" ? (
+        <SkillsPage
+          skills={skills}
+          onNavigate={navigate}
+          onSkillsChanged={handleSkillsChanged}
+          onOpenImport={() => setShowSkillsManager(true)}
+          sidebarOpen={sidebarOpen}
+          onExpandSidebar={() => setSidebarOpen(true)}
+        />
+      ) : activeView === "experts" ? (
+        <ExpertsPage
+          onNavigate={navigate}
+          onStartExpert={startExpertChat}
+          onStartTeam={startTeamChat}
+          sidebarOpen={sidebarOpen}
+          onExpandSidebar={() => setSidebarOpen(true)}
+        />
+      ) : (
+        <PlaceholderView
+          view={activeView}
+          sidebarOpen={sidebarOpen}
+          onExpandSidebar={() => setSidebarOpen(true)}
+        />
+      )}
 
-        {activeSession.turns.length > 0 ? (
-          <div className="composer-dock">
-            <Composer variant="docked" {...composerProps} />
-          </div>
-        ) : null}
-      </section>
-
-      {hasRightPanel ? (
+      {activeView === "chat" && hasRightPanel ? (
         <>
           <button
             className="artifact-resizer"
@@ -705,6 +874,7 @@ function Conversation({
           trace={turn.trace}
           submittedQuery={turn.submittedQuery}
           files={turn.files}
+          memberLabel={turn.memberLabel}
           isRunning={isRunning && turn.id === lastTurnId}
           onOpenArtifact={onOpenArtifact}
           onPreviewFile={onPreviewFile}
@@ -718,6 +888,7 @@ function ConversationTurn({
   trace,
   submittedQuery,
   files,
+  memberLabel,
   isRunning,
   onOpenArtifact,
   onPreviewFile,
@@ -725,6 +896,7 @@ function ConversationTurn({
   trace: RunTrace;
   submittedQuery: string;
   files: ReportFileSummary[];
+  memberLabel?: string;
   isRunning: boolean;
   onOpenArtifact: () => void;
   onPreviewFile: (file: ReportFileSummary) => void;
@@ -733,6 +905,12 @@ function ConversationTurn({
 
   return (
     <section className="conversation-turn">
+      {memberLabel ? (
+        <div className="team-member-label">
+          <Sparkles size={13} />
+          <span>{memberLabel}</span>
+        </div>
+      ) : null}
       <article className="message-row user-row">
         <div className="user-message">
           <div className="user-bubble">{submittedQuery || trace.query}</div>
@@ -1219,22 +1397,72 @@ function QuestionPrompt({ question }: { question: UserQuestion }) {
   );
 }
 
+const PLACEHOLDER_LABELS: Record<string, { title: string; hint: string }> = {
+  experts: { title: "专家", hint: "专家与专家团即将上线，敬请期待。" },
+  connectors: { title: "连接器", hint: "外部工具连接器即将上线，敬请期待。" },
+  automation: { title: "自动化", hint: "定时任务与自动化即将上线，敬请期待。" },
+  more: { title: "更多", hint: "资料库与灵感即将上线，敬请期待。" },
+};
+
+function PlaceholderView({
+  view,
+  sidebarOpen,
+  onExpandSidebar,
+}: {
+  view: AppView;
+  sidebarOpen: boolean;
+  onExpandSidebar: () => void;
+}) {
+  const meta = PLACEHOLDER_LABELS[view] ?? { title: "敬请期待", hint: "该功能正在开发中。" };
+  return (
+    <section className="placeholder-view">
+      {!sidebarOpen ? (
+        <button className="floating-sidebar-toggle" type="button" onClick={onExpandSidebar} title="展开侧栏">
+          <Menu size={19} />
+        </button>
+      ) : null}
+      <div className="placeholder-card">
+        <Sparkles size={28} />
+        <h1>{meta.title}</h1>
+        <p>{meta.hint}</p>
+      </div>
+    </section>
+  );
+}
+
 function EmptyChat({
   capabilities,
   composer,
   onPick,
+  expertRole,
+  teamName,
+  teamMembers,
 }: {
   capabilities: CapabilitySummary | null;
   composer: ReactNode;
   onPick: (prompt: string) => void;
+  expertRole?: string;
+  teamName?: string;
+  teamMembers?: TeamMember[];
 }) {
+  const title = teamName ?? expertRole ?? "AgentEngine";
   return (
     <div className="empty-chat">
       <div className="empty-mark">
         <Sparkles size={22} />
       </div>
-      <h1>AgentEngine</h1>
-      <CapabilityStats capabilities={capabilities} />
+      <h1>{title}</h1>
+      {teamName && teamMembers ? (
+        <div className="chat-expert-hint">
+          <Sparkles size={14} /> 专家团接力：{teamMembers.map((m) => m.role).join(" → ")}
+        </div>
+      ) : expertRole ? (
+        <div className="chat-expert-hint">
+          <Sparkles size={14} /> 正在与「{expertRole}」对话
+        </div>
+      ) : (
+        <CapabilityStats capabilities={capabilities} />
+      )}
       <div className="empty-composer">{composer}</div>
       <div className="prompt-grid">
         {samplePrompts.map((prompt) => (
@@ -1398,12 +1626,24 @@ function normalizePersistedSession(value: unknown, index: number): ChatSession |
         .map((turn) => normalizePersistedTurn(turn))
         .filter((turn): turn is ChatTurn => Boolean(turn))
     : [];
+  const agentName = stringStorageValue(value.agentName);
+  const expertRole = stringStorageValue(value.expertRole);
+  const teamName = stringStorageValue(value.teamName);
+  const teamMembers = Array.isArray(value.teamMembers)
+    ? (value.teamMembers as TeamMember[]).filter(
+        (m) => m && typeof m.name === "string" && typeof m.role === "string",
+      )
+    : undefined;
   return {
     id: stringStorageValue(value.id) || `session-${index}`,
     title: stringStorageValue(value.title) || "新会话",
     query: stringStorageValue(value.query),
     turns,
     isRunning: false,
+    ...(agentName ? { agentName } : {}),
+    ...(expertRole ? { expertRole } : {}),
+    ...(teamName ? { teamName } : {}),
+    ...(teamMembers && teamMembers.length ? { teamMembers } : {}),
   };
 }
 
@@ -1414,11 +1654,13 @@ function normalizePersistedTurn(value: unknown): ChatTurn | null {
   const trace = isStorageRecord(value.trace)
     ? normalizePersistedTrace(value.trace)
     : createEmptyTrace();
+  const memberLabel = stringStorageValue(value.memberLabel);
   return {
     id: stringStorageValue(value.id) || crypto.randomUUID(),
     submittedQuery: stringStorageValue(value.submittedQuery),
     files: Array.isArray(value.files) ? (value.files as ReportFileSummary[]) : [],
     trace,
+    ...(memberLabel ? { memberLabel } : {}),
   };
 }
 
@@ -1523,4 +1765,17 @@ function formatBytes(bytes: number): string {
 function titleFromQuery(query: string): string {
   const title = query.length > 28 ? `${query.slice(0, 28)}...` : query;
   return title || "新会话";
+}
+
+// The answer a member produced: prefer streamed step text (how chat models
+// reply here), fall back to the final-result summary.
+function extractTraceText(trace: RunTrace): string {
+  const stepText = trace.steps
+    .map((step) => step.text.join(""))
+    .join("\n")
+    .trim();
+  if (stepText) {
+    return stepText;
+  }
+  return (trace.finalText ?? "").trim();
 }
