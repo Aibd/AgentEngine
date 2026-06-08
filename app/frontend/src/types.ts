@@ -195,3 +195,14 @@ export type ExpertTeam = {
   members: string[];
   member_experts: Expert[];
 };
+
+export type McpConnector = {
+  id: string;
+  name: string;
+  transport: "stdio" | "sse";
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  url: string;
+  enabled: boolean;
+};

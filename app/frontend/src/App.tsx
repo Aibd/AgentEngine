@@ -27,6 +27,7 @@ import { SkillsManager } from "./components/SkillsManager";
 import { AppNav, type AppView, type NavSpace } from "./components/AppNav";
 import { SkillsPage } from "./components/SkillsPage";
 import { ExpertsPage } from "./components/ExpertsPage";
+import { ConnectorsPage } from "./components/ConnectorsPage";
 import { createEmptyTrace, reduceTraceEvent } from "./traceReducer";
 import {
   fetchCapabilities,
@@ -727,13 +728,12 @@ export function App() {
             selectSession(id);
           }}
           onDeleteSession={deleteSession}
-          footer={
-            <CapabilityPanel
-              capabilities={capabilities}
-              skillCount={skills.length}
-              onManageSkills={() => navigate("skills")}
-            />
-          }
+          onOpenSettings={() => navigate("skills")}
+          onLogout={() => {
+            setActiveSessionId("");
+            setSessions([]);
+            setSidebarOpen(false);
+          }}
         />
       ) : null}
 
@@ -798,6 +798,8 @@ export function App() {
           sidebarOpen={sidebarOpen}
           onExpandSidebar={() => setSidebarOpen(true)}
         />
+      ) : activeView === "connectors" ? (
+        <ConnectorsPage />
       ) : (
         <PlaceholderView
           view={activeView}

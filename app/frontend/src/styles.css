@@ -2857,10 +2857,401 @@ button:disabled {
 
 .app-nav-footer {
   flex: 0 0 auto;
+  border-top: 1px solid #e5e7df;
 }
 
-.app-nav-footer .capability-panel {
-  margin-top: 0;
+/* -- User menu ----------------------------------------------------------- */
+
+.app-nav-user {
+  position: relative;
+}
+
+.app-nav-user-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 10px 14px;
+  cursor: pointer;
+  color: #3c4238;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.app-nav-user-btn:hover {
+  background: #f3f4ee;
+}
+
+.app-nav-user-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #dce1d8;
+  flex: 0 0 auto;
+}
+
+.app-nav-user-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* popover above the user button */
+
+.app-nav-user-popover {
+  position: absolute;
+  bottom: 100%;
+  left: 10px;
+  right: 10px;
+  margin-bottom: 6px;
+  background: #fff;
+  border: 1px solid #e5e7df;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  padding: 6px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+}
+
+.user-popover-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: #3c4238;
+  border-radius: 6px;
+  width: 100%;
+  text-align: left;
+}
+
+.user-popover-item:hover {
+  background: #f7f8f2;
+}
+
+.user-popover-item--danger {
+  color: #c84c3c;
+}
+
+.user-popover-item--danger:hover {
+  background: #fef5f4;
+}
+
+.user-popover-extra {
+  margin-left: auto;
+  font-size: 11px;
+  color: #9ba196;
+}
+
+.user-popover-divider {
+  height: 1px;
+  background: #e5e7df;
+  margin: 4px 0;
+}
+
+/* -- Connectors page ------------------------------------------------------ */
+
+.connectors-page {
+  min-width: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 36px 40px;
+  background: #fbfbf8;
+}
+
+.connectors-page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.connectors-page-head h2 {
+  margin: 0 0 6px 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: #2d3329;
+}
+
+.connectors-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: #8a9487;
+}
+
+.connector-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding: 9px 18px;
+  border: none;
+  border-radius: 8px;
+  background: #1a1f16;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.connector-add-btn:hover {
+  background: #2d3329;
+}
+
+.connectors-error {
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #fef5f4;
+  color: #c84c3c;
+  font-size: 13px;
+  margin: 0 0 16px 0;
+}
+
+.connectors-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 60px 20px;
+  color: #9ba196;
+  font-size: 14px;
+}
+
+/* -- Connector list ------------------------------------------------------- */
+
+.connector-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.connector-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid #e9ece4;
+}
+
+.connector-card.is-disabled {
+  opacity: 0.55;
+}
+
+.connector-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: #f3f4ee;
+  color: #5a655c;
+  flex-shrink: 0;
+}
+
+.connector-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.connector-card-name {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: #2d3329;
+  margin-bottom: 2px;
+}
+
+.connector-card-detail {
+  display: block;
+  font-size: 12px;
+  color: #9ba196;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "SF Mono", "Consolas", monospace;
+}
+
+.connector-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.connector-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  padding: 4px;
+  cursor: pointer;
+  border-radius: 6px;
+  color: #9ba196;
+}
+
+.connector-action-btn:hover {
+  background: #f3f4ee;
+  color: #3c4238;
+}
+
+.connector-action-btn .toggle-on {
+  color: #10a37f;
+}
+
+.connector-action-btn .toggle-off {
+  color: #c4c9bf;
+}
+
+.connector-delete-btn:hover {
+  color: #c84c3c;
+  background: #fef5f4;
+}
+
+/* -- Connector add form (modal) ------------------------------------------- */
+
+.connector-form-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.connector-form {
+  background: #fff;
+  border-radius: 14px;
+  padding: 28px;
+  width: 440px;
+  max-width: 94vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.15);
+}
+
+.connector-form-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.connector-form-head h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #2d3329;
+}
+
+.connector-form-close {
+  display: flex;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  color: #9ba196;
+}
+
+.connector-form-close:hover {
+  background: #f3f4ee;
+  color: #3c4238;
+}
+
+.connector-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 14px;
+}
+
+.connector-field span {
+  font-size: 12px;
+  font-weight: 600;
+  color: #5a655c;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.connector-field input,
+.connector-field select,
+.connector-field textarea {
+  padding: 8px 12px;
+  border: 1px solid #e5e7df;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #2d3329;
+  background: #fbfbf8;
+  resize: vertical;
+}
+
+.connector-field input:focus,
+.connector-field select:focus,
+.connector-field textarea:focus {
+  outline: none;
+  border-color: #10a37f;
+  box-shadow: 0 0 0 3px rgba(16, 163, 127, 0.1);
+}
+
+.connector-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.connector-form-cancel {
+  padding: 8px 18px;
+  border: 1px solid #e5e7df;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  color: #5a655c;
+}
+
+.connector-form-cancel:hover {
+  background: #f7f8f2;
+}
+
+.connector-form-submit {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 8px;
+  background: #10a37f;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.connector-form-submit:hover {
+  background: #0d8c6a;
+}
+
+.connector-form-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* -- Placeholder views --------------------------------------------------- */

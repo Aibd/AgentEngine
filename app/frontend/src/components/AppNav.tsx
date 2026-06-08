@@ -1,18 +1,26 @@
-import { useState, type ReactNode } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
 import {
   Bot,
+  Cable,
   ChevronDown,
   ChevronRight,
+  CircleUserRound,
   Clock3,
   Grid2x2,
+  Globe,
+  HelpCircle,
+  LogOut,
   PanelLeftClose,
   Plus,
   Search,
+  Settings,
   SlidersHorizontal,
   Sparkles,
   Trash2,
   Users,
+  Zap,
 } from "lucide-react";
+import { useI18n, localeLabel } from "../i18n";
 
 export type AppView =
   | "chat"
@@ -44,20 +52,22 @@ type AppNavProps = {
   activeSessionId: string;
   onSelectSession: (id: string) => void;
   onDeleteSession: (id: string) => void;
-  footer?: ReactNode;
+  onOpenSettings?: () => void;
+  onLogout?: () => void;
 };
 
 const NAV_ITEMS: Array<{
   view: AppView;
-  label: string;
+  labelKey: string;
   hint: string;
   icon: ReactNode;
 }> = [
-  { view: "chat", label: "新建任务", hint: "", icon: <Plus size={18} /> },
-  { view: "chat", label: "助理", hint: "Claw", icon: <Bot size={18} /> },
-  { view: "experts", label: "专家", hint: "技能/连接器", icon: <Users size={18} /> },
-  { view: "automation", label: "自动化", hint: "定时任务", icon: <Clock3 size={18} /> },
-  { view: "more", label: "更多", hint: "资料库·灵感", icon: <Grid2x2 size={18} /> },
+  { view: "chat", labelKey: "nav.newTask", hint: "", icon: <Plus size={18} /> },
+  { view: "chat", labelKey: "nav.assistant", hint: "默认", icon: <Bot size={18} /> },
+  { view: "experts", labelKey: "nav.experts", hint: "技能", icon: <Users size={18} /> },
+  { view: "connectors", labelKey: "nav.connectors", hint: "MCP", icon: <Cable size={18} /> },
+  { view: "automation", labelKey: "nav.automation", hint: "定时任务", icon: <Clock3 size={18} /> },
+  { view: "more", labelKey: "nav.more", hint: "资料库·灵感", icon: <Grid2x2 size={18} /> },
 ];
 
 export function AppNav(props: AppNavProps) {
@@ -72,14 +82,57 @@ export function AppNav(props: AppNavProps) {
     activeSessionId,
     onSelectSession,
     onDeleteSession,
-    footer,
+    onOpenSettings,
+    onLogout,
   } = props;
 
+  const { locale, t, toggleLocale } = useI18n();
   const [tasksOpen, setTasksOpen] = useState(true);
   const [spacesOpen, setSpacesOpen] = useState(true);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  const langLabel = localeLabel(locale);
+
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    }
+    if (userMenuOpen) {
+      document.addEventListener("mousedown", onClick);
+      return () => document.removeEventListener("mousedown", onClick);
+    }
+  }, [userMenuOpen]);
+
+  function handleMenuAction(action: string) {
+    switch (action) {
+      case "settings":
+        setUserMenuOpen(false);
+        onOpenSettings?.();
+        break;
+      case "locale":
+        toggleLocale();
+        // Keep the popover open so the user sees the language switch.
+        break;
+      case "usage":
+        setUserMenuOpen(false);
+        // TODO: navigate to usage/billing page
+        break;
+      case "learn":
+        setUserMenuOpen(false);
+        window.open("https://github.com/agentengine/docs", "_blank", "noopener");
+        break;
+      case "logout":
+        setUserMenuOpen(false);
+        onLogout?.();
+        break;
+    }
+  }
 
   function handleNavClick(item: (typeof NAV_ITEMS)[number]) {
-    if (item.label === "新建任务") {
+    if (item.labelKey === "nav.newTask") {
       onNewTask();
       return;
     }
@@ -97,13 +150,13 @@ export function AppNav(props: AppNavProps) {
           </div>
         </div>
         <div className="app-nav-brand-actions">
-          <button type="button" className="app-nav-icon" onClick={onCollapse} title="收起侧栏" aria-label="收起侧栏">
+          <button type="button" className="app-nav-icon" onClick={onCollapse} title={t("nav.collapse")} aria-label={t("nav.collapse")}>
             <PanelLeftClose size={17} />
           </button>
-          <button type="button" className="app-nav-icon" title="搜索" aria-label="搜索">
+          <button type="button" className="app-nav-icon" title={t("nav.search")} aria-label={t("nav.search")}>
             <Search size={17} />
           </button>
-          <button type="button" className="app-nav-icon" title="筛选" aria-label="筛选">
+          <button type="button" className="app-nav-icon" title={t("nav.filter")} aria-label={t("nav.filter")}>
             <SlidersHorizontal size={17} />
           </button>
         </div>
@@ -112,16 +165,16 @@ export function AppNav(props: AppNavProps) {
       <nav className="app-nav-rows">
         {NAV_ITEMS.map((item, index) => {
           const isActive =
-            item.label !== "新建任务" && activeView === item.view;
+            item.labelKey !== "nav.newTask" && activeView === item.view;
           return (
             <button
-              key={`${item.label}-${index}`}
+              key={`${item.labelKey}-${index}`}
               type="button"
               className={isActive ? "nav-row is-active" : "nav-row"}
               onClick={() => handleNavClick(item)}
             >
               <span className="nav-row-icon">{item.icon}</span>
-              <span className="nav-row-label">{item.label}</span>
+              <span className="nav-row-label">{t(item.labelKey)}</span>
               {item.hint ? <span className="nav-row-hint">{item.hint}</span> : null}
             </button>
           );
@@ -130,7 +183,7 @@ export function AppNav(props: AppNavProps) {
 
       <div className="app-nav-scroll">
         <NavGroup
-          title={`任务 (${sessions.length})`}
+          title={`${t("nav.tasks")} (${sessions.length})`}
           open={tasksOpen}
           onToggle={() => setTasksOpen((value) => !value)}
         >
@@ -146,7 +199,7 @@ export function AppNav(props: AppNavProps) {
         </NavGroup>
 
         <NavGroup
-          title={`空间 (${spaces.length})`}
+          title={`${t("nav.spaces")} (${spaces.length})`}
           open={spacesOpen}
           onToggle={() => setSpacesOpen((value) => !value)}
         >
@@ -158,7 +211,69 @@ export function AppNav(props: AppNavProps) {
         </NavGroup>
       </div>
 
-      {footer ? <div className="app-nav-footer">{footer}</div> : null}
+      <div className="app-nav-footer">
+        <div className="app-nav-user" ref={userMenuRef}>
+          <button
+            type="button"
+            className="app-nav-user-btn"
+            onClick={() => setUserMenuOpen((v) => !v)}
+            title={t("user.menu")}
+          >
+            <span className="app-nav-user-avatar">
+              <CircleUserRound size={22} />
+            </span>
+            <span className="app-nav-user-name">
+              {t("user.name")}
+            </span>
+          </button>
+          {userMenuOpen ? (
+            <div className="app-nav-user-popover">
+              <button
+                type="button"
+                className="user-popover-item"
+                onClick={() => handleMenuAction("settings")}
+              >
+                <Settings size={15} />
+                <span>{t("user.settings")}</span>
+              </button>
+              <button
+                type="button"
+                className="user-popover-item"
+                onClick={() => handleMenuAction("locale")}
+              >
+                <Globe size={15} />
+                <span>{t("user.language")}</span>
+                <span className="user-popover-extra">{langLabel}</span>
+              </button>
+              <button
+                type="button"
+                className="user-popover-item"
+                onClick={() => handleMenuAction("usage")}
+              >
+                <Zap size={15} />
+                <span>{t("user.usage")}</span>
+              </button>
+              <button
+                type="button"
+                className="user-popover-item"
+                onClick={() => handleMenuAction("learn")}
+              >
+                <HelpCircle size={15} />
+                <span>{t("user.learnMore")}</span>
+              </button>
+              <div className="user-popover-divider" />
+              <button
+                type="button"
+                className="user-popover-item user-popover-item--danger"
+                onClick={() => handleMenuAction("logout")}
+              >
+                <LogOut size={15} />
+                <span>{t("user.signOut")}</span>
+              </button>
+            </div>
+          ) : null}
+        </div>
+      </div>
     </aside>
   );
 }
@@ -196,6 +311,7 @@ function NavSessionRow({
   onSelect: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className={active ? "nav-session is-active" : "nav-session"}>
       <button type="button" className="nav-session-title" onClick={onSelect} title={session.title}>
@@ -205,8 +321,8 @@ function NavSessionRow({
         type="button"
         className="nav-session-delete"
         onClick={onDelete}
-        title="删除任务"
-        aria-label={`删除任务 ${session.title}`}
+        title={t("nav.deleteTask")}
+        aria-label={`${t("nav.deleteTask")} ${session.title}`}
       >
         <Trash2 size={13} />
       </button>
