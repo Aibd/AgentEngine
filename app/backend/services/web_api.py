@@ -44,6 +44,7 @@ from agentengine.tools.builtin import build_default_tools, ReadFileTool, SkillTo
 from app.backend.services.reporting.file_store import ReportFileStore
 from app.backend.services.agent_orchestration_service import AgentOrchestrationService
 from app.backend.services.expert_catalog import ExpertCatalog
+from app.backend.services.mcp_connectors import McpConnector, McpConnectorStore
 from app.backend.services.reporting.db import ReportMetadataDB
 from app.backend.services.reporting.docx_renderer import render_docx
 from app.backend.services.reporting.jobs import ReportJobStore, stream_report_artifact
@@ -93,6 +94,7 @@ EXPERT_CATALOG = ExpertCatalog(
     registry=AGENT_REGISTRY,
     teams_path=REPO_ROOT / "app" / "backend" / "services" / "experts_data" / "teams.json",
 )
+MCP_STORE = McpConnectorStore(REPO_ROOT / ".agent" / "mcp_connectors.json")
 
 MAX_SKILL_ZIP_BYTES = 20 * 1024 * 1024  # 20MB ceiling for an uploaded skill pack.
 
@@ -330,6 +332,55 @@ async def expert_team_detail(team_id: str) -> dict[str, Any]:
     if team is None:
         raise HTTPException(status_code=404, detail="expert team not found")
     return team.snapshot()
+
+
+# -- MCP connectors (CRUD) ------------------------------------------------
+
+
+@app.get("/api/connectors")
+async def list_connectors() -> dict[str, Any]:
+    """List all MCP connector configurations."""
+    connectors = MCP_STORE.list_all()
+    return {"connectors": [c.snapshot() for c in connectors]}
+
+
+@app.post("/api/connectors")
+async def add_connector(body: dict[str, Any]) -> dict[str, Any]:
+    """Add a new MCP connector configuration."""
+    name = str(body.get("name", "")).strip()
+    transport = str(body.get("transport", "stdio")).strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="connector name is required")
+    if transport not in ("stdio", "sse"):
+        raise HTTPException(status_code=400, detail="transport must be 'stdio' or 'sse'")
+    connector = McpConnector(
+        id="",
+        name=name,
+        transport=transport,
+        command=str(body.get("command", "")).strip(),
+        args=[str(a) for a in body.get("args", []) or []],
+        env={str(k): str(v) for k, v in (body.get("env") or {}).items()},
+        url=str(body.get("url", "")).strip(),
+    )
+    added = MCP_STORE.add(connector)
+    return added.snapshot()
+
+
+@app.delete("/api/connectors/{connector_id}")
+async def delete_connector(connector_id: str) -> dict[str, Any]:
+    """Remove an MCP connector configuration."""
+    if not MCP_STORE.delete(connector_id):
+        raise HTTPException(status_code=404, detail="connector not found")
+    return {"deleted": True}
+
+
+@app.patch("/api/connectors/{connector_id}/toggle")
+async def toggle_connector(connector_id: str) -> dict[str, Any]:
+    """Enable or disable an MCP connector."""
+    updated = MCP_STORE.toggle(connector_id)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="connector not found")
+    return updated.snapshot()
 
 
 @app.get("/api/conversations/{conversation_id}/messages")
