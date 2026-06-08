@@ -11,6 +11,7 @@ import {
   Loader2,
   PanelLeftClose,
   Plus,
+  Settings2,
   Sparkles,
   Trash2,
   X,
@@ -22,16 +23,25 @@ import {
   detectFileKind,
   type ComposerFile,
   type ComposerSkill,
+  type ComposerSkillOption,
   type ThinkingMode,
 } from "./components/Composer";
+import { SkillsManager } from "./components/SkillsManager";
 import { createEmptyTrace, reduceTraceEvent } from "./traceReducer";
-import { fetchCapabilities, runAgentTrace, runReportTrace, uploadReportFile } from "./traceTransport";
+import {
+  fetchCapabilities,
+  fetchSkills,
+  runAgentTrace,
+  runReportTrace,
+  uploadReportFile,
+} from "./traceTransport";
 import { translateError } from "./friendlyErrors";
 import type {
   CapabilitySummary,
   ErrorPayload,
   ReportFileSummary,
   RunTrace,
+  SkillSummary,
   StepTrace,
   TodoItem,
   ToolTrace,
@@ -71,6 +81,8 @@ const MAX_PERSISTED_SESSIONS = 30;
 export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [capabilities, setCapabilities] = useState<CapabilitySummary | null>(null);
+  const [skills, setSkills] = useState<SkillSummary[]>([]);
+  const [showSkillsManager, setShowSkillsManager] = useState(false);
   const [closedArtifactId, setClosedArtifactId] = useState<string | null>(null);
   const [reportFiles, setReportFiles] = useState<ReportFileSummary[]>([]);
   const [previewFile, setPreviewFile] = useState<ReportFileSummary | null>(null);
@@ -155,7 +167,42 @@ export function App() {
     fetchCapabilities()
       .then(setCapabilities)
       .catch(() => setCapabilities(null));
+    refreshSkills();
   }, []);
+
+  function refreshSkills() {
+    fetchSkills()
+      .then(setSkills)
+      .catch(() => setSkills([]));
+  }
+
+  function handleSkillsChanged() {
+    refreshSkills();
+    // Enable-state changes affect which skills the agent can use, so keep the
+    // sidebar capability counts in sync.
+    fetchCapabilities()
+      .then(setCapabilities)
+      .catch(() => undefined);
+  }
+
+  const enabledSkillOptions = useMemo<ComposerSkillOption[]>(
+    () =>
+      skills
+        .filter((skill) => skill.enabled)
+        .map((skill) => ({ name: skill.name, description: skill.description })),
+    [skills],
+  );
+
+  // If the selected skill gets disabled or removed, fall back to plain chat so
+  // the composer never shows a dangling selection.
+  useEffect(() => {
+    if (selectedSkill === "chat") {
+      return;
+    }
+    if (skills.length && !enabledSkillOptions.some((option) => option.name === selectedSkill)) {
+      setSelectedSkill("chat");
+    }
+  }, [enabledSkillOptions, selectedSkill, skills.length]);
 
   useEffect(() => {
     localStorage.setItem("artifactWidth", String(artifactWidth));
@@ -243,6 +290,7 @@ export function App() {
       },
       "deep_research",
       runSessionId,
+      selectedSkill,
     );
     stopMapRef.current.set(runSessionId, stop);
   }
@@ -493,6 +541,8 @@ export function App() {
     onStop: stopRun,
     skill: selectedSkill,
     onSkillChange: setSelectedSkill,
+    skillOptions: enabledSkillOptions,
+    onManageSkills: () => setShowSkillsManager(true),
     thinkingMode,
     onThinkingModeChange: setThinkingMode,
     files: composerFiles,
@@ -543,7 +593,11 @@ export function App() {
             </div>
           ))}
         </div>
-        <CapabilityPanel capabilities={capabilities} />
+        <CapabilityPanel
+          capabilities={capabilities}
+          skillCount={skills.length}
+          onManageSkills={() => setShowSkillsManager(true)}
+        />
       </aside>
 
       <section className="chat-shell">
@@ -605,6 +659,14 @@ export function App() {
             />
           ) : null}
         </>
+      ) : null}
+
+      {showSkillsManager ? (
+        <SkillsManager
+          skills={skills}
+          onClose={() => setShowSkillsManager(false)}
+          onChanged={handleSkillsChanged}
+        />
       ) : null}
     </main>
   );
@@ -1185,17 +1247,35 @@ function EmptyChat({
   );
 }
 
-function CapabilityPanel({ capabilities }: { capabilities: CapabilitySummary | null }) {
+function CapabilityPanel({
+  capabilities,
+  skillCount,
+  onManageSkills,
+}: {
+  capabilities: CapabilitySummary | null;
+  skillCount: number;
+  onManageSkills: () => void;
+}) {
   const toolCount = capabilities?.tools.length ?? 0;
-  const skillCount = capabilities?.skills.length ?? 0;
+  const enabledSkillCount = capabilities?.skills.length ?? 0;
   return (
     <section className="capability-panel">
       <div className="capability-panel-head">
         <Wrench size={15} />
         <span>能力</span>
+        <button
+          className="capability-manage-button"
+          type="button"
+          onClick={onManageSkills}
+          title="管理技能"
+        >
+          <Settings2 size={13} />
+          <span>技能</span>
+        </button>
       </div>
       <p>
-        {toolCount} tools / {skillCount} skills
+        {toolCount} tools / {enabledSkillCount} skills 已启用
+        {skillCount > enabledSkillCount ? `（共 ${skillCount}）` : ""}
       </p>
       <CapabilityMiniList title="Tools" items={capabilities?.tools} />
       <CapabilityMiniList title="Skills" items={capabilities?.skills} emptyText="未发现本地 skill" />

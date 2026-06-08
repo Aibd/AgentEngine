@@ -8,11 +8,20 @@ import {
   Paperclip,
   Plus,
   Send,
+  Settings2,
+  Sparkles,
   X,
 } from "lucide-react";
 
-export type ComposerSkill = "chat" | "data_analysis";
+// A skill selection is either the sentinel "chat" (no specific skill) or a
+// skill name surfaced by the backend registry.
+export type ComposerSkill = string;
 export type ThinkingMode = "fast" | "auto";
+
+export type ComposerSkillOption = {
+  name: string;
+  description: string;
+};
 
 export type ComposerFile = {
   id: string;
@@ -31,6 +40,8 @@ type ComposerProps = {
   onStop: () => void;
   skill: ComposerSkill;
   onSkillChange: (value: ComposerSkill) => void;
+  skillOptions: ComposerSkillOption[];
+  onManageSkills: () => void;
   thinkingMode: ThinkingMode;
   onThinkingModeChange: (value: ThinkingMode) => void;
   files: ComposerFile[];
@@ -40,6 +51,8 @@ type ComposerProps = {
   uploadError: string;
   canSubmit: boolean;
 };
+
+const CHAT_SKILL = "chat";
 
 const ACCEPT_TYPES = ".csv,.xlsx,.pdf,.png,.jpg,.jpeg,.gif,.webp";
 
@@ -53,6 +66,8 @@ export function Composer(props: ComposerProps) {
     onStop,
     skill,
     onSkillChange,
+    skillOptions,
+    onManageSkills,
     thinkingMode,
     onThinkingModeChange,
     files,
@@ -177,14 +192,18 @@ export function Composer(props: ComposerProps) {
   }
 
   function chooseSkill(next: ComposerSkill) {
-    onSkillChange(next);
+    // Toggle off when re-selecting the active skill.
+    onSkillChange(skill === next ? CHAT_SKILL : next);
     setMenuOpen(false);
   }
+
+  const activeSkillOption = skillOptions.find((option) => option.name === skill);
+  const hasActiveSkill = skill !== CHAT_SKILL;
 
   const className = [
     "composer-shell",
     variant === "center" ? "composer-center" : "composer-docked",
-    skill !== "chat" ? "has-active-skill" : "",
+    hasActiveSkill ? "has-active-skill" : "",
     dragActive ? "is-dragging" : "",
     isRunning ? "is-running" : "",
   ]
@@ -241,14 +260,40 @@ export function Composer(props: ComposerProps) {
               <span>Add photos & files</span>
             </button>
             <div className="composer-menu-separator" role="separator" />
+            <div className="composer-menu-label">技能</div>
+            {skillOptions.length === 0 ? (
+              <div className="composer-menu-empty">暂无已启用技能</div>
+            ) : (
+              skillOptions.map((option) => (
+                <button
+                  key={option.name}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={skill === option.name}
+                  className={skill === option.name ? "is-active" : ""}
+                  onClick={() => chooseSkill(option.name)}
+                  title={option.description}
+                >
+                  {option.name === "data_analysis" ? (
+                    <BarChart3 size={16} />
+                  ) : (
+                    <Sparkles size={16} />
+                  )}
+                  <span>{skillLabel(option)}</span>
+                </button>
+              ))
+            )}
+            <div className="composer-menu-separator" role="separator" />
             <button
               type="button"
               role="menuitem"
-              className={skill === "data_analysis" ? "is-active" : ""}
-              onClick={() => chooseSkill("data_analysis")}
+              onClick={() => {
+                setMenuOpen(false);
+                onManageSkills();
+              }}
             >
-              <BarChart3 size={16} />
-              <span>数据分析</span>
+              <Settings2 size={16} />
+              <span>管理技能…</span>
             </button>
           </div>
         ) : null}
@@ -261,10 +306,10 @@ export function Composer(props: ComposerProps) {
           disabled={isRunning}
         />
 
-        {skill !== "chat" ? (
+        {hasActiveSkill ? (
           <button className="composer-skill-pill" type="button" onClick={() => setMenuOpen(true)}>
-            <BarChart3 size={15} />
-            <span>{skillLabel(skill)}</span>
+            {skill === "data_analysis" ? <BarChart3 size={15} /> : <Sparkles size={15} />}
+            <span>{activeSkillOption ? skillLabel(activeSkillOption) : skill}</span>
             <ChevronDown size={13} />
           </button>
         ) : null}
@@ -376,8 +421,12 @@ function labelForThinkingMode(value: ThinkingMode): string {
   return value === "fast" ? "Fast" : "Thinking";
 }
 
-function skillLabel(value: ComposerSkill): string {
-  return value === "data_analysis" ? "数据分析" : "通用对话";
+const SKILL_DISPLAY_NAMES: Record<string, string> = {
+  data_analysis: "数据分析",
+};
+
+function skillLabel(option: ComposerSkillOption): string {
+  return SKILL_DISPLAY_NAMES[option.name] ?? option.name;
 }
 
 export function detectFileKind(filename: string): ComposerFile["kind"] {
