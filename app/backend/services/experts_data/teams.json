@@ -1,0 +1,37 @@
+[
+  {
+    "id": "investment_team",
+    "name": "腾讯自选股股票投研专家团",
+    "description": "从基本面研报到交易研判，多位专家接力，给出兼顾价值与时机的投资分析。",
+    "category": "金融投资",
+    "members": ["stock_research_expert", "trading_analyst"]
+  },
+  {
+    "id": "content_team",
+    "name": "内容创作专家团",
+    "description": "内容策略 + 平台落地，先定方向再产出爆款笔记，让品牌故事触达受众。",
+    "category": "内容创作",
+    "members": ["content_creator_expert", "xiaohongshu_expert"]
+  },
+  {
+    "id": "data_decision_team",
+    "name": "数据决策专家团",
+    "description": "数据分析师出洞察，研究员把洞察落成可执行的决策建议。",
+    "category": "数据智能",
+    "members": ["data_report_expert", "stock_research_expert"]
+  },
+  {
+    "id": "compliance_team",
+    "name": "财税合规专家团",
+    "description": "法律合规审查 + 创业落地，帮小微企业把风险点变成可执行清单。",
+    "category": "法律合规",
+    "members": ["legal_compliance_expert", "startup_coach_expert"]
+  },
+  {
+    "id": "tech_product_team",
+    "name": "技术产品专家团",
+    "description": "高级工程师评估可行性，创业教练校准商业价值与优先级。",
+    "category": "技术工程",
+    "members": ["senior_engineer_expert", "startup_coach_expert"]
+  }
+]
