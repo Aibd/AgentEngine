@@ -144,3 +144,17 @@ export type CapabilitySummary = {
   tools: CapabilityItem[];
   skills: CapabilityItem[];
 };
+
+export type SkillSource = "builtin" | "imported";
+
+export type SkillSummary = {
+  name: string;
+  description: string;
+  enabled: boolean;
+  source: SkillSource;
+  origin?: string;
+};
+
+export type SkillDetail = SkillSummary & {
+  body: string;
+};

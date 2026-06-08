@@ -1,4 +1,11 @@
-import type { CapabilitySummary, ReportFileSummary, ResponseType, SseEvent } from "./types";
+import type {
+  CapabilitySummary,
+  ReportFileSummary,
+  ResponseType,
+  SkillDetail,
+  SkillSummary,
+  SseEvent,
+} from "./types";
 
 type TraceHandler = (event: SseEvent) => void;
 type DoneHandler = () => void;
@@ -37,6 +44,7 @@ export function runAgentTrace(
   onDone: DoneHandler,
   agentName = "deep_research",
   conversationId = "web-conversation",
+  skill = "",
 ): () => void {
   const controller = new AbortController();
   const params = new URLSearchParams({
@@ -44,6 +52,9 @@ export function runAgentTrace(
     agent_name: agentName,
     conversation_id: conversationId,
   });
+  if (skill && skill !== "chat") {
+    params.set("skill", skill);
+  }
 
   void consumeSse(`/api/runs/stream?${params.toString()}`, controller.signal, onEvent)
     .catch((error: unknown) => {
@@ -122,6 +133,73 @@ export async function fetchCapabilities(): Promise<CapabilitySummary> {
     throw new Error(`capabilities request failed: ${response.status}`);
   }
   return (await response.json()) as CapabilitySummary;
+}
+
+export async function fetchSkills(): Promise<SkillSummary[]> {
+  const response = await fetch("/api/skills");
+  if (!response.ok) {
+    throw new Error(`skills request failed: ${response.status}`);
+  }
+  const body = (await response.json()) as { skills?: SkillSummary[] };
+  return body.skills ?? [];
+}
+
+export async function fetchSkillDetail(name: string): Promise<SkillDetail> {
+  const response = await fetch(`/api/skills/${encodeURIComponent(name)}`);
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "skill detail request failed"));
+  }
+  return (await response.json()) as SkillDetail;
+}
+
+export async function importSkillZip(file: File): Promise<SkillSummary> {
+  const params = new URLSearchParams({ filename: file.name });
+  const response = await fetch(`/api/skills/import?${params.toString()}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/zip" },
+    body: file,
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "导入失败"));
+  }
+  return (await response.json()) as SkillSummary;
+}
+
+export async function setSkillEnabled(name: string, enabled: boolean): Promise<SkillSummary> {
+  const response = await fetch(`/api/skills/${encodeURIComponent(name)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "更新失败"));
+  }
+  return (await response.json()) as SkillSummary;
+}
+
+export async function deleteSkill(name: string): Promise<void> {
+  const response = await fetch(`/api/skills/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, "删除失败"));
+  }
+}
+
+export function skillExportUrl(name: string): string {
+  return `/api/skills/${encodeURIComponent(name)}/export`;
+}
+
+async function readErrorDetail(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await response.json()) as { detail?: unknown };
+    if (typeof body.detail === "string" && body.detail.trim()) {
+      return body.detail;
+    }
+  } catch {
+    // Non-JSON body; fall through to the generic message.
+  }
+  return `${fallback} (${response.status})`;
 }
 
 export function connectEventSource(url: string, onEvent: TraceHandler): () => void {
