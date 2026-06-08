@@ -200,3 +200,159 @@ async def test_approval_decision_rejects_unknown_id() -> None:
         )
 
     assert response.status_code == 404
+
+
+# -- Skills management API ---------------------------------------------------
+
+
+import io
+import zipfile
+from pathlib import Path
+
+from agentengine.skills.registry import SkillRegistry
+
+
+def _skill_zip(name: str, description: str = "demo") -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            f"{name}/SKILL.md",
+            f"---\nname: {name}\ndescription: {description}\n---\nBody for {name}",
+        )
+    return buffer.getvalue()
+
+
+@pytest.fixture
+def isolated_skill_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point ``web_api.SKILL_REGISTRY`` at a temp skills dir + DB.
+
+    Seeds one builtin-style skill so list/capabilities have something to return
+    without touching the repository's real ``.agent/skills``.
+    """
+    skills_dir = tmp_path / ".agent" / "skills"
+    builtin = skills_dir / "seeded"
+    builtin.mkdir(parents=True)
+    (builtin / "SKILL.md").write_text(
+        "---\nname: seeded\ndescription: Seeded builtin\n---\nBody",
+        encoding="utf-8",
+    )
+    registry = SkillRegistry(cwd=tmp_path, db_path=tmp_path / "skills_meta.db")
+    monkeypatch.setattr(web_api, "SKILL_REGISTRY", registry)
+    return skills_dir
+
+
+async def test_list_skills_returns_seeded_skill(isolated_skill_registry: Path) -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/skills")
+
+    assert response.status_code == 200
+    skills = response.json()["skills"]
+    seeded = next(s for s in skills if s["name"] == "seeded")
+    assert seeded["enabled"] is True
+    assert seeded["source"] == "builtin"
+
+
+async def test_import_then_export_skill(isolated_skill_registry: Path) -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        imported = await client.post(
+            "/api/skills/import?filename=translator.zip",
+            content=_skill_zip("translator", "Translate text"),
+            headers={"Content-Type": "application/zip"},
+        )
+        assert imported.status_code == 200
+        body = imported.json()
+        assert body["name"] == "translator"
+        assert body["source"] == "imported"
+
+        listed = await client.get("/api/skills")
+        assert "translator" in {s["name"] for s in listed.json()["skills"]}
+
+        export = await client.get("/api/skills/translator/export")
+        assert export.status_code == 200
+        assert export.headers["content-type"] == "application/zip"
+        with zipfile.ZipFile(io.BytesIO(export.content)) as archive:
+            assert "translator/SKILL.md" in archive.namelist()
+
+
+async def test_import_duplicate_returns_409(isolated_skill_registry: Path) -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        first = await client.post(
+            "/api/skills/import?filename=dup.zip",
+            content=_skill_zip("dup"),
+            headers={"Content-Type": "application/zip"},
+        )
+        assert first.status_code == 200
+        second = await client.post(
+            "/api/skills/import?filename=dup.zip",
+            content=_skill_zip("dup"),
+            headers={"Content-Type": "application/zip"},
+        )
+    assert second.status_code == 409
+
+
+async def test_import_without_skill_md_returns_400(isolated_skill_registry: Path) -> None:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("notes.txt", "no skill")
+
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/skills/import?filename=bad.zip",
+            content=buffer.getvalue(),
+            headers={"Content-Type": "application/zip"},
+        )
+    assert response.status_code == 400
+
+
+async def test_patch_enable_toggles_and_filters_capabilities(
+    isolated_skill_registry: Path,
+) -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        disable = await client.patch("/api/skills/seeded", json={"enabled": False})
+        assert disable.status_code == 200
+        assert disable.json()["enabled"] is False
+
+        caps = await client.get("/api/capabilities")
+        assert "seeded" not in {s["name"] for s in caps.json()["skills"]}
+
+        enable = await client.patch("/api/skills/seeded", json={"enabled": True})
+        assert enable.json()["enabled"] is True
+        caps2 = await client.get("/api/capabilities")
+        assert "seeded" in {s["name"] for s in caps2.json()["skills"]}
+
+
+async def test_patch_unknown_skill_returns_404(isolated_skill_registry: Path) -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.patch("/api/skills/ghost", json={"enabled": False})
+    assert response.status_code == 404
+
+
+async def test_delete_builtin_returns_403_imported_ok(isolated_skill_registry: Path) -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        protected = await client.delete("/api/skills/seeded")
+        assert protected.status_code == 403
+
+        await client.post(
+            "/api/skills/import?filename=temp.zip",
+            content=_skill_zip("temp"),
+            headers={"Content-Type": "application/zip"},
+        )
+        removed = await client.delete("/api/skills/temp")
+        assert removed.status_code == 200
+        listed = await client.get("/api/skills")
+        assert "temp" not in {s["name"] for s in listed.json()["skills"]}
+
+
+async def test_skill_detail_returns_body(isolated_skill_registry: Path) -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/skills/seeded")
+    assert response.status_code == 200
+    assert "Body" in response.json()["body"]

@@ -31,6 +31,10 @@ from agentengine.enterprise import (
 from agentengine.errors import error_to_dict
 from agentengine.persistence import SqlitePersistence
 from agentengine.skills.loader import SkillLoader
+from agentengine.skills.registry import (
+    SkillImportError,
+    SkillRegistry,
+)
 from agentengine.tools.builtin import build_default_tools, ReadFileTool, SkillTool
 from app.backend.services.reporting.file_store import ReportFileStore
 from app.backend.services.agent_orchestration_service import AgentOrchestrationService
@@ -76,6 +80,9 @@ REPORT_STORE = ReportJobStore(
     reports_dir=DEFAULT_UPLOAD_ROOT / "reports",
 )
 REPORT_FILE_STORE = ReportFileStore(DEFAULT_UPLOAD_ROOT)
+SKILL_REGISTRY = SkillRegistry(cwd=REPO_ROOT, db_path=DEFAULT_DB_PATH)
+
+MAX_SKILL_ZIP_BYTES = 20 * 1024 * 1024  # 20MB ceiling for an uploaded skill pack.
 
 app = FastAPI(title="AgentEngine Web API")
 app.add_middleware(
@@ -114,11 +121,16 @@ async def approval_decision(
 
 @app.get("/api/capabilities")
 async def capabilities() -> dict[str, Any]:
-    """Return the agents, tools, and skills that the web UI can surface."""
+    """Return the agents, tools, and *enabled* skills the web UI can surface.
+
+    Disabled skills are deliberately omitted here — this endpoint feeds the
+    "currently active capabilities" sidebar. The full list (enabled +
+    disabled) is served by ``GET /api/skills`` for the management UI.
+    """
     skill_loader = SkillLoader(cwd=REPO_ROOT)
-    skills = skill_loader.discover()
     tools = build_default_tools(workspace_root=REPO_ROOT)
     tools.append(SkillTool(skill_loader))
+    skills = [view for view in await SKILL_REGISTRY.list() if view.enabled]
     return {
         "agents": [
             {"name": name, "description": spec.description}
@@ -129,10 +141,91 @@ async def capabilities() -> dict[str, Any]:
             for tool in tools
         ],
         "skills": [
-            {"name": skill.name, "description": skill.description}
-            for skill in sorted(skills.values(), key=lambda item: item.name)
+            {"name": view.name, "description": view.description}
+            for view in skills
         ],
     }
+
+
+@app.get("/api/skills")
+async def list_skills() -> dict[str, Any]:
+    """List every installed skill with its enable state and provenance."""
+    views = await SKILL_REGISTRY.list()
+    return {"skills": [view.snapshot() for view in views]}
+
+
+@app.get("/api/skills/{name}")
+async def skill_detail(name: str) -> dict[str, Any]:
+    """Return a single skill including its SKILL.md body for preview."""
+    detail = await SKILL_REGISTRY.get(name)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="skill not found")
+    return detail.snapshot()
+
+
+@app.post("/api/skills/import")
+async def import_skill(
+    request: Request,
+    filename: str = Query("", min_length=0),
+) -> dict[str, Any]:
+    """Install a skill from an uploaded ``.zip`` (raw bytes in the body)."""
+    data = await request.body()
+    if not data:
+        raise HTTPException(status_code=400, detail="请求体为空，请上传 .zip 文件")
+    if len(data) > MAX_SKILL_ZIP_BYTES:
+        raise HTTPException(status_code=413, detail="skill 包超过 20MB 上限")
+    try:
+        view = await SKILL_REGISTRY.import_zip(data, original_filename=filename)
+    except FileExistsError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"技能「{exc.args[0] if exc.args else filename}」已存在，请先删除再导入",
+        ) from exc
+    except SkillImportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return view.snapshot()
+
+
+@app.patch("/api/skills/{name}")
+async def update_skill(name: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Enable or disable an installed skill."""
+    if "enabled" not in body:
+        raise HTTPException(status_code=400, detail="缺少 enabled 字段")
+    enabled = bool(body["enabled"])
+    try:
+        view = await SKILL_REGISTRY.set_enabled(name, enabled)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="skill not found") from exc
+    return view.snapshot()
+
+
+@app.delete("/api/skills/{name}")
+async def delete_skill(name: str) -> dict[str, Any]:
+    """Delete an imported skill (builtin skills are protected)."""
+    try:
+        await SKILL_REGISTRY.delete(name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="skill not found") from exc
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail="内建技能不可删除，只能禁用",
+        ) from exc
+    return {"ok": True, "name": name}
+
+
+@app.get("/api/skills/{name}/export")
+async def export_skill(name: str) -> Response:
+    """Download an installed skill as a ``.zip`` archive."""
+    try:
+        data = await SKILL_REGISTRY.export_zip(name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="skill not found") from exc
+    return Response(
+        data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{name}.zip"'},
+    )
 
 
 @app.get("/api/conversations/{conversation_id}/messages")
@@ -340,6 +433,7 @@ async def run_stream(
     tenant_id: str = Query("default", min_length=1),
     user_id: str = Query("", min_length=0),
     scopes: str = Query("", min_length=0),
+    skill: str = Query("", min_length=0),
 ) -> StreamingResponse:
     query = query.strip()
     if not query:
@@ -355,6 +449,7 @@ async def run_stream(
             user_id=user_id,
             scopes=_parse_scopes(scopes),
             request_id=request_id,
+            skill=skill.strip(),
         ):
             yield _format_sse_frame(frame)
 
@@ -381,6 +476,7 @@ async def _run_agent_events(
     user_id: str = "",
     scopes: list[str] | None = None,
     request_id: str | None = None,
+    skill: str = "",
 ) -> AsyncIterator[dict[str, Any]]:
     service = AgentOrchestrationService(
         persistence=PERSISTENCE,
@@ -389,9 +485,17 @@ async def _run_agent_events(
     )
     request_id = request_id or f"web-{uuid.uuid4().hex[:12]}"
     scoped_conversation_id = _scoped_conversation_id(conversation_id, tenant_id)
+
+    # Resolve the enable-list once so disabled skills can't be invoked, and so a
+    # skill the user explicitly selected but later disabled is ignored rather
+    # than silently used.
+    enabled_skills = await SKILL_REGISTRY.enabled_names()
+    selected_skill = skill if skill and skill in enabled_skills else ""
+    effective_query = _apply_skill_directive(query, selected_skill)
+
     context, event_stream = service.create_streaming_context(
         request_id=request_id,
-        query=query,
+        query=effective_query,
         conversation_id=scoped_conversation_id,
     )
     if context.printer is not None:
@@ -408,11 +512,13 @@ async def _run_agent_events(
     if context.tool_collection.get("read_file") is None:
         context.tool_collection.add(ReadFileTool(workspace_root=REPO_ROOT))
     if context.tool_collection.get("Skill") is None:
-        context.tool_collection.add(SkillTool(SkillLoader(cwd=REPO_ROOT)))
+        context.tool_collection.add(
+            SkillTool(SkillLoader(cwd=REPO_ROOT), enabled_names=enabled_skills)
+        )
 
     async def run_and_close() -> None:
         try:
-            await service.run(agent_name=agent_name, query=query, context=context)
+            await service.run(agent_name=agent_name, query=effective_query, context=context)
         except Exception as exc:
             if context.printer and "agent" not in context.extras:
                 await context.printer.error(error_to_dict(exc))
@@ -483,6 +589,21 @@ def _configure_quota_from_env(store: QuotaStore) -> None:
 def _env_int(name: str) -> int:
     raw = os.getenv(name, "0").strip()
     return int(raw) if raw.isdigit() else 0
+
+
+def _apply_skill_directive(query: str, skill: str) -> str:
+    """Prefix the query so the model invokes the selected skill via the Skill tool.
+
+    ``chat`` (or empty) means "no specific skill" — the query is untouched.
+    Otherwise we nudge the agent to call ``Skill(skill=<name>)`` first. The
+    SkillTool itself enforces enable state, so a stale name degrades gracefully.
+    """
+    if not skill or skill == "chat":
+        return query
+    return (
+        f"请先调用 Skill 工具（skill=\"{skill}\"）加载该技能，并严格按其说明处理以下请求：\n\n"
+        f"{query}"
+    )
 
 
 def _parse_scopes(raw: str) -> list[str]:
