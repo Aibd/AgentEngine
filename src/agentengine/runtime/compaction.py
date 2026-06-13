@@ -35,8 +35,15 @@ class LLMSummaryCompactor:
             if msg.role is Role.SYSTEM and not msg.metadata.get("compaction_summary")
         ]
         non_system = [msg for msg in messages if msg.role is not Role.SYSTEM]
-        recent = _safe_recent_tail(non_system, keep_recent=self.keep_recent)
-        history = non_system[: max(0, len(non_system) - len(recent))]
+
+        # Protected messages (e.g. activated skill content) are kept verbatim
+        # and never summarized. They stay in the message list alongside system
+        # messages so the agent always has access to skill instructions.
+        protected = [msg for msg in non_system if msg.metadata.get("protected")]
+        summarizable = [msg for msg in non_system if not msg.metadata.get("protected")]
+
+        recent = _safe_recent_tail(summarizable, keep_recent=self.keep_recent)
+        history = summarizable[: max(0, len(summarizable) - len(recent))]
 
         previous_summaries = [
             msg.content
@@ -72,7 +79,7 @@ class LLMSummaryCompactor:
             "Conversation summary so far:\n" + summary,
             metadata={"compaction_summary": True},
         )
-        return system_messages + [summary_message] + recent
+        return system_messages + protected + [summary_message] + recent
 
 
 def _render_transcript(messages: list[Message]) -> str:

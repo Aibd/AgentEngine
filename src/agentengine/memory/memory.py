@@ -91,8 +91,13 @@ class Memory:
             )
         )
 
-    def add_tool_message(self, content: str, *, tool_call_id: str) -> None:
-        self.append(Message.tool(content, tool_call_id=tool_call_id))
+    def add_tool_message(
+        self, content: str, *, tool_call_id: str, metadata: dict[str, Any] | None = None
+    ) -> None:
+        msg = Message.tool(content, tool_call_id=tool_call_id)
+        if metadata:
+            msg.metadata.update(metadata)
+        self.append(msg)
 
     def last_user_message(self) -> str:
         with self._lock:

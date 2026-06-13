@@ -40,7 +40,9 @@ from agentengine.skills.registry import (
     SkillImportError,
     SkillRegistry,
 )
+from agentengine.sandbox import SandboxConfig, SandboxManager, SandboxedBashTool, SandboxedPythonTool
 from agentengine.tools.builtin import build_default_tools, ReadFileTool, SkillTool
+from agentengine.tools.policy_presets import HOST_DEFAULT as DEFAULT_EXEC_POLICY
 from app.backend.services.reporting.file_store import ReportFileStore
 from app.backend.services.agent_orchestration_service import AgentOrchestrationService
 from app.backend.services.expert_catalog import ExpertCatalog
@@ -79,6 +81,17 @@ DEFAULT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 DEFAULT_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 PERSISTENCE = SqlitePersistence(DEFAULT_DB_PATH)
 LOCK_MANAGER = InMemoryConversationLockManager()
+SANDBOX_MANAGER: SandboxManager | None = None
+try:
+    _sandbox_sessions = REPO_ROOT / "data" / "sandbox-sessions"
+    SANDBOX_MANAGER = SandboxManager(sessions_root=_sandbox_sessions)
+    import logging
+    _logger = logging.getLogger(__name__)
+    _logger.info("sandbox_manager_ready sessions_root=%s", _sandbox_sessions)
+except Exception:
+    import logging
+    _logger = logging.getLogger(__name__)
+    _logger.warning("sandbox_manager_unavailable — bash/python will run on host")
 QUOTA_STORE = QuotaStore()
 APPROVAL_GATE = ApprovalGate(timeout_seconds=float(os.getenv("APPROVAL_TIMEOUT_SECONDS", "300")))
 REPORT_FILES_DB = ReportMetadataDB(DEFAULT_UPLOAD_ROOT / "index.db")
@@ -105,6 +118,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("shutdown")
+async def _shutdown_sandbox() -> None:
+    if SANDBOX_MANAGER is not None:
+        SANDBOX_MANAGER.shutdown()
 
 
 @app.get("/api/health")
@@ -664,12 +683,46 @@ async def _run_agent_events(
     context.extras["secrets"] = EnvSecrets()
     context.extras["public_conversation_id"] = conversation_id
 
+    # -- sandbox wiring ---------------------------------------------------
+    sandbox = SANDBOX_MANAGER
+    sandbox_ws: str | None = None
+    if sandbox is not None:
+        try:
+            sandbox_ws = str(sandbox.host_workspace_for(scoped_conversation_id))
+            context.extras["sandbox_manager"] = sandbox
+            context.extras["workspace_root"] = sandbox_ws
+        except Exception:
+            sandbox = None
+
+    # File tools: use sandbox workspace as extra root so /workspace paths resolve.
     if context.tool_collection.get("read_file") is None:
-        context.tool_collection.add(ReadFileTool(workspace_root=REPO_ROOT))
+        extra_roots = [sandbox_ws] if sandbox_ws else []
+        context.tool_collection.add(ReadFileTool(
+            workspace_root=REPO_ROOT,
+            extra_roots=extra_roots,
+        ))
     if context.tool_collection.get("Skill") is None:
         context.tool_collection.add(
             SkillTool(SkillLoader(cwd=REPO_ROOT), enabled_names=enabled_skills)
         )
+
+    # Shell tools: sandboxed when available, fallback to host (Phase 3).
+    if sandbox is not None and sandbox_ws is not None:
+        if context.tool_collection.get("bash") is None:
+            context.tool_collection.add(
+                SandboxedBashTool(manager=sandbox, conversation_id=scoped_conversation_id)
+            )
+        if context.tool_collection.get("python") is None:
+            context.tool_collection.add(
+                SandboxedPythonTool(manager=sandbox, conversation_id=scoped_conversation_id)
+            )
+    # When sandbox is unavailable, the agent preset's setup hook may still add
+    # host-level BashTool — that's the graceful degradation path.
+
+    # ExecPolicy: soft safety net. Sandbox is the real boundary; this catches
+    # obviously malicious patterns even inside the container.
+    if "exec_policy" not in context.extras:
+        context.extras["exec_policy"] = DEFAULT_EXEC_POLICY
 
     async def run_and_close() -> None:
         try:
@@ -693,6 +746,9 @@ async def _run_agent_events(
                 pass
         else:
             await task
+        # Note: sandbox is NOT released here — containers persist across runs
+        # within a conversation (acquired on first use, reused thereafter).
+        # Idle containers are cleaned up by SandboxManager.reap_idle().
         await service.close()
 
 

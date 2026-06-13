@@ -157,6 +157,8 @@ def build_default_tools_for_context(
     emit = context.extras.get("emit")
     run_id = context.extras.get("run_id", "") or ""
     turn_id = context.extras.get("turn_id", "") or ""
+    sandbox_manager = context.extras.get("sandbox_manager")
+    conversation_id = context.conversation_id or ""
 
     per_tool: dict[str, dict[str, Any]] = {}
     if tracker is not None:
@@ -173,9 +175,27 @@ def build_default_tools_for_context(
         "run_id": run_id,
         "turn_id": turn_id,
     }
-    return _build(
+
+    tools = _build(
         workspace_root=workspace_root,
         include=include,
         exclude=exclude,
         per_tool_kwargs=per_tool,
     )
+
+    # When a sandbox manager is available, swap host-level BashTool for
+    # SandboxedBashTool. SandboxedPythonTool has no host-level counterpart
+    # and must be added explicitly by the caller (e.g. web_api).
+    if sandbox_manager is not None and conversation_id:
+        try:
+            from agentengine.sandbox.tools import SandboxedBashTool  # noqa: F811
+        except ImportError:
+            pass
+        else:
+            tools = [
+                SandboxedBashTool(manager=sandbox_manager, conversation_id=conversation_id)
+                if isinstance(t, BashTool)
+                else t
+                for t in tools
+            ]
+    return tools

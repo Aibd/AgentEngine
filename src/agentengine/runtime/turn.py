@@ -770,4 +770,8 @@ async def _execute_tool_calls(
                 # Tool already executed; abort here just stops the chain.
                 pass
 
-        agent.memory.add_tool_message(result.content, tool_call_id=tc.get("id", ""))
+        agent.memory.add_tool_message(
+            result.content,
+            tool_call_id=tc.get("id", ""),
+            metadata={"protected": True} if tool_name == "Skill" else None,
+        )
