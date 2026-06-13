@@ -43,7 +43,7 @@ class AgentOrchestrationService(AgentEngine):
         middleware: MiddlewareChain | None = None,
     ) -> None:
         super().__init__(
-            presets=presets or AGENT_REGISTRY,
+            definitions=presets or AGENT_REGISTRY,
             llm_factory=llm_factory or _default_llm_factory,
             require_llm=require_llm,
             max_query_chars=max_query_chars,

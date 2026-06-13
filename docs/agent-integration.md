@@ -11,7 +11,7 @@ AgentEngine 作为 Agent 运行底座，负责 Agent 的运行循环、LLM 调�
 业务系统建议只依赖包根公开 API：
 
 ```python
-from agentengine import AgentContext, AgentEngine, AgentPreset, Tool
+from agentengine import AgentContext, AgentEngine, AgentDefinition, Tool
 ```
 
 需要完整公开对象和签名时，参考根目录 [PUBLIC_API.md](../PUBLIC_API.md)。
@@ -19,7 +19,7 @@ from agentengine import AgentContext, AgentEngine, AgentPreset, Tool
 ## 最小接入示例
 
 ```python
-from agentengine import AgentContext, AgentEngine, AgentPreset
+from agentengine import AgentContext, AgentEngine, AgentDefinition
 from agentengine.llm.openai_compat import OpenAICompatibleClient
 
 llm = OpenAICompatibleClient(
@@ -30,7 +30,7 @@ llm = OpenAICompatibleClient(
 
 engine = AgentEngine(
     presets={
-        "assistant": AgentPreset(
+        "assistant": AgentDefinition(
             name="assistant",
             instructions="你是业务助手，请基于用户问题给出准确回答。",
         )
@@ -111,15 +111,15 @@ class UserProfileTool(Tool):
         return f"用户 {user_id} 的资料"
 ```
 
-注册方式建议放在 `AgentPreset.setup`：
+注册方式建议放在 `AgentDefinition.setup`：
 
 ```python
-from agentengine import AgentContext, AgentPreset
+from agentengine import AgentContext, AgentDefinition
 
 async def setup_tools(context: AgentContext) -> None:
     context.tool_collection.add(UserProfileTool())
 
-preset = AgentPreset(
+preset = AgentDefinition(
     name="profile_agent",
     instructions="需要用户资料时调用 lookup_user_profile。",
     setup=setup_tools,

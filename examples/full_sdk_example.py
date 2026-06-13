@@ -7,7 +7,7 @@ from __future__ import annotations
 1. 从 .env 或命令行参数读取 LLM 配置
 2. 创建 OpenAI 兼容的 LLM 客户端
 3. 声明一个自定义工具 UserProfileTool
-4. 通过 AgentPreset 注册 Agent 的系统指令和启动钩子
+4. 通过 AgentDefinition 注册 Agent 的系统指令和启动钩子
 5. 使用 AgentEngine 创建流式上下文并运行 Agent
 6. 将会话消息和运行记录保存到 SQLite
 
@@ -38,7 +38,7 @@ for path in (ROOT, SRC):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from agentengine import AgentContext, AgentEngine, AgentPreset, Tool  # noqa: E402
+from agentengine import AgentContext, AgentEngine, AgentDefinition, Tool  # noqa: E402
 from agentengine.llm.openai_compat import OpenAICompatibleClient  # noqa: E402
 from agentengine.persistence import SqlitePersistence  # noqa: E402
 
@@ -105,7 +105,7 @@ class UserProfileTool(Tool):
 
 
 async def setup_tools(context: AgentContext) -> None:
-    """AgentPreset.setup 钩子：每次 run 开始前，把本次运行可用的工具注册进去"""
+    """AgentDefinition.setup 钩子：每次 run 开始前，把本次运行可用的工具注册进去"""
 
     context.tool_collection.add(UserProfileTool())
 
@@ -161,7 +161,7 @@ def parse_args() -> argparse.Namespace:
         default="请先调用用户资料查询工具获取用户 U-100 的资料，然后总结查询结果。",
     )
 
-    # agent-name 必须和 build_engine() 中注册到 presets 的 key 一致。
+    # agent-name 必须和 build_engine() 中注册到 definitions 的 key 一致。
     parser.add_argument("--agent-name", default="profile_agent")
 
     # conversation-id 非空时会启用会话历史加载、保存和会话锁。
@@ -203,14 +203,14 @@ def build_llm_client(args: argparse.Namespace) -> OpenAICompatibleClient:
 
 
 def build_engine(persistence: SqlitePersistence, agent_name: str) -> AgentEngine:
-    """创建 AgentPreset，并把它注册到 AgentEngine"""
+    """创建 AgentDefinition，并把它注册到 AgentEngine"""
 
-    # AgentPreset 是业务侧声明 Agent 的主要入口：
+    # AgentDefinition 是业务侧声明 Agent 的主要入口：
     # - name：Agent 名称
     # - instructions：业务系统提示词
     # - setup：运行前钩子，用于注册工具或初始化上下文
     # - max_messages / auto_compact_tokens：控制历史消息管理
-    preset = AgentPreset(
+    definition = AgentDefinition(
         name=agent_name,
         description="带有一个自定义工具的用户资料演示 Agent。",
         instructions=(
@@ -223,9 +223,9 @@ def build_engine(persistence: SqlitePersistence, agent_name: str) -> AgentEngine
         setup=setup_tools,
     )
 
-    # presets 是一个 name -> AgentPreset 的映射。engine.run(agent_name=...) 会按名称取配置。
+    # definitions 是一个 name -> AgentDefinition 的映射。engine.run(agent_name=...) 会按名称取配置。
     # persistence 注入后，conversation_id 非空时引擎会自动加载/保存会话消息。
-    return AgentEngine(presets={agent_name: preset}, persistence=persistence)
+    return AgentEngine(definitions={agent_name: definition}, persistence=persistence)
 
 
 def print_stream_frame(frame: dict[str, Any], *, show_thinking: bool) -> None:

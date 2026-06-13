@@ -33,9 +33,9 @@ from agentengine import (
     # ── 核心引擎 ──────────────────────────────────────────
     AgentEngine,                         # 引擎门面：Agent 调度、ReAct 循环、事件分发
     AgentContext,                        # 请求上下文：承载 LLM、工具、用户等运行时依赖
-    AgentPreset,                         # Agent 预设：声明名称、系统提示词和生命周期钩子
-    load_preset,                         # 从 Markdown(frontmatter) 加载单个 AgentPreset
-    load_presets,                        # 扫描目录加载多个 AgentPreset，返回 {name: preset}
+    AgentDefinition,                         # Agent 预设：声明名称、系统提示词和生命周期钩子
+    load_definition,                         # 从 Markdown(frontmatter) 加载单个 AgentDefinition
+    load_definitions,                        # 扫描目录加载多个 AgentDefinition，返回 {name: definition}
     RunConfig,                           # 运行配置：不可变的执行参数
 
     # ── 工具系统 ──────────────────────────────────────────
@@ -100,9 +100,9 @@ class AgentEngine:
     def __init__(
         self,
         *,
-        presets: dict[str, AgentPreset | SupportsRunConfig] | None = None,
+        definitions: dict[str, AgentDefinition | SupportsRunConfig] | None = None,
         # Agent 预设注册表，key 为 agent_name，run() 时引用
-        # 与 config_resolver 二选一，都提供则 presets 优先
+        # 与 config_resolver 二选一，都提供则 definitions 优先
 
         config_resolver: Callable[[str], RunConfig] | None = None,
         # 动态 RunConfig 解析器，每个 run() 调用时通过 agent_name 查询
@@ -135,7 +135,7 @@ class AgentEngine:
         self,
         *,
         agent_name: str,
-        # 要运行的 Agent 名称，对应 presets 中的 key
+        # 要运行的 Agent 名称，对应 definitions 中的 key
 
         query: str,
         # 用户输入的问题/指令
@@ -148,7 +148,7 @@ class AgentEngine:
         # 全局工具执行超时（秒），会被单个 Tool 的 timeout_seconds 覆盖
 
         agent_kwargs: dict[str, Any] | None = None,
-        # 传递给 AgentPreset.setup 和 RunConfig 的额外参数
+        # 传递给 AgentDefinition.setup 和 RunConfig 的额外参数
 
         on_event: Callable[[RuntimeEvent], Awaitable[None]] | None = None,
         # 事件回调，每次引擎产生事件时调用，用于旁路推送到 SSE/WebSocket
@@ -258,13 +258,13 @@ class AgentContext:
 
 ## 3. Agent 预设与运行配置
 
-### AgentPreset
+### AgentDefinition
 
 业务系统声明 Agent 的入口，是一个不可变 dataclass，通过 `to_run_config()` 编译为 `RunConfig`
 
 ```python
 @dataclass(frozen=True, slots=True)
-class AgentPreset:
+class AgentDefinition:
     name: str
     # Agent 名称，run() 时通过 agent_name 引用
     # 全局唯一，建议使用小写下划线命名（如 "customer_support"）
@@ -305,7 +305,7 @@ class AgentPreset:
 
 #### 用 Markdown 声明 Agent（推荐）
 
-除了在 Python 里构造 `AgentPreset`，还可以把 Agent 写成 Markdown 文件（YAML frontmatter + 正文），格式与 Claude Code 的 subagent 一致。这样非程序员也能改 Agent，且不必为每个 Agent 写代码。
+除了在 Python 里构造 `AgentDefinition`，还可以把 Agent 写成 Markdown 文件（YAML frontmatter + 正文），格式与 Claude Code 的 subagent 一致。这样非程序员也能改 Agent，且不必为每个 Agent 写代码。
 
 ```markdown
 ---
@@ -317,7 +317,7 @@ You are a deep research assistant. Break the task into clear questions,
 use tools to gather evidence, and then synthesize a grounded answer.
 ```
 
-frontmatter 字段映射到 `AgentPreset`：
+frontmatter 字段映射到 `AgentDefinition`：
 
 | frontmatter 键 | 含义 |
 | --- | --- |
@@ -325,33 +325,33 @@ frontmatter 字段映射到 `AgentPreset`：
 | `description` | 可读描述 |
 | `instructions` | 系统提示词；**省略时用正文（body）作为指令**——推荐写法 |
 | `tools` | 内置工具名列表（如 `[read_file, Skill]`），自动编译成 `setup` 钩子按名注册，无需手写 |
-| `max_messages` / `auto_compact_tokens` / `compaction_keep_recent` | 同 `AgentPreset` 对应字段 |
+| `max_messages` / `auto_compact_tokens` / `compaction_keep_recent` | 同 `AgentDefinition` 对应字段 |
 
 `tools` 也支持逗号分隔字符串（`tools: read_file, Skill`）。可用的内置工具名见[第 4 节](#4-工具系统)的 `BUILTIN_TOOL_FACTORIES`：`bash` / `glob` / `grep` / `read_file` / `write_file` / `edit_file` / `TodoWrite` / `AskUserQuestion` / `Skill`。
 
 ```python
-from agentengine import load_preset, load_presets
+from agentengine import load_definition, load_definitions
 
 # 单个文件
-preset = load_preset("agents/deep_research.md")
+definition = load_definition("agents/deep_research.md")
 
-# 整个目录（扫描 *.md，返回 {name: AgentPreset}）
-registry = load_presets("agents/")
-engine = AgentEngine(presets=registry)
+# 整个目录（扫描 *.md，返回 {name: AgentDefinition}）
+registry = load_definitions("agents/")
+engine = AgentEngine(definitions=registry)
 ```
 
-本仓库的示例 preset 即为此形式，位于 `app/backend/agents/markdown/`（`general_chat.md`、`deep_research.md`），由 `app/backend/agents/__init__.py` 调用 `load_presets` 构建 `REGISTRY`。
+本仓库的示例 definition 即为此形式，位于 `app/backend/agents/markdown/`（`general_chat.md`、`deep_research.md`），由 `app/backend/agents/__init__.py` 调用 `load_definitions` 构建 `REGISTRY`。
 
-> **边界**：Markdown 只能表达「数据」。需要运行时依赖注入的高级钩子——例如自定义 `Compactor`、或像 `sandboxed_coder` 那样从 `context.extras` 取 `sandbox_manager` 再构造工具的 `setup`——仍需写 Python。这类场景可在加载后用 `dataclasses.replace()` 给 preset 补上钩子。`load_presets` 扫描时会跳过缺少 frontmatter 的文件（记录警告而非中断），名称冲突时先扫到的优先。
+> **边界**：Markdown 只能表达「数据」。需要运行时依赖注入的高级钩子——例如自定义 `Compactor`、或像 `sandboxed_coder` 那样从 `context.extras` 取 `sandbox_manager` 再构造工具的 `setup`——仍需写 Python。这类场景可在加载后用 `dataclasses.replace()` 给 definition 补上钩子。`load_definitions` 扫描时会跳过缺少 frontmatter 的文件（记录警告而非中断），名称冲突时先扫到的优先。
 
 ### RunConfig
 
-编译后的不可变运行配置，通常不直接创建，由 `AgentPreset.to_run_config()` 生成
+编译后的不可变运行配置，通常不直接创建，由 `AgentDefinition.to_run_config()` 生成
 
 ```python
 @dataclass(frozen=True, slots=True)
 class RunConfig:
-    name: str                              # Agent 名称（同 AgentPreset.name）
+    name: str                              # Agent 名称（同 AgentDefinition.name）
     initial_messages: tuple[Message, ...]  # 初始消息（至少包含 system 消息）
     max_messages: int = 0                  # 消息上限
     auto_compact_tokens: int = 0           # 压缩阈值
@@ -922,7 +922,7 @@ chain = MiddlewareChain([
     # retry_middleware(RetryConfig(max_retries=3)),
 ])
 
-engine = AgentEngine(presets=presets, middleware=chain)
+engine = AgentEngine(definitions=definitions, middleware=chain)
 ```
 
 `agentengine.enterprise` 子模块还导出以下公开类型：
@@ -1042,7 +1042,7 @@ DEFAULT_AGENT_SYSTEM_PROMPT: str
 # "You are an AI assistant. Continue working until the task is complete."
 ```
 
-此常量通过 `_compose_system_prompt()` 拼接到 `AgentPreset.instructions` 之后，如果 `instructions` 为非空字符串，结果为 `"{instructions}\n\n{DEFAULT_AGENT_SYSTEM_PROMPT}"`；否则直接返回默认指令
+此常量通过 `_compose_system_prompt()` 拼接到 `AgentDefinition.instructions` 之后，如果 `instructions` 为非空字符串，结果为 `"{instructions}\n\n{DEFAULT_AGENT_SYSTEM_PROMPT}"`；否则直接返回默认指令
 
 ---
 

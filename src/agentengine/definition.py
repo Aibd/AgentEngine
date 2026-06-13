@@ -1,6 +1,6 @@
-"""Public agent preset declaration.
+"""Public agent definition declaration.
 
-Presets are a small SDK-facing adapter layer: application code can describe an
+Definitions are a small SDK-facing adapter layer: application code can describe an
 agent in business-friendly terms, then compile it into the runtime's
 ``RunConfig`` before execution.
 """
@@ -23,7 +23,7 @@ DEFAULT_AGENT_SYSTEM_PROMPT = (
 
 
 @dataclass(frozen=True, slots=True)
-class AgentPreset:
+class AgentDefinition:
     """Declarative agent configuration for host applications."""
 
     name: str
@@ -60,4 +60,4 @@ def _compose_system_prompt(instructions: str) -> str:
     return DEFAULT_AGENT_SYSTEM_PROMPT
 
 
-__all__ = ["AgentPreset", "DEFAULT_AGENT_SYSTEM_PROMPT"]
+__all__ = ["AgentDefinition", "DEFAULT_AGENT_SYSTEM_PROMPT"]

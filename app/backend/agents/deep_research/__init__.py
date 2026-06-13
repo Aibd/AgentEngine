@@ -1,3 +1,3 @@
-from app.backend.agents.deep_research.preset import PRESET
+from app.backend.agents.deep_research.preset import DEFINITION
 
-__all__ = ["PRESET"]
+__all__ = ["DEFINITION"]

@@ -1,6 +1,6 @@
 """Expert directory: the "专家" page, built on top of agent presets.
 
-An *expert* is an :class:`~agentengine.preset.AgentPreset` with extra,
+An *expert* is an :class:`~agentengine.definition.AgentDefinition` with extra,
 presentation-only frontmatter — ``role``, ``author``, ``category``,
 ``scenario``, ``skills``, ``badge``. The same Markdown file is both:
 
@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Mapping
 
-from agentengine.preset_loader import PRESET_FILE_SUFFIX, _split_frontmatter
+from agentengine.definition_loader import DEFINITION_FILE_SUFFIX, PRESET_FILE_SUFFIX, _split_frontmatter
 
 logger = logging.getLogger(__name__)
 

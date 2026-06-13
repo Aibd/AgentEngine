@@ -1,9 +1,9 @@
-"""Example preset import.
+"""Example definition import.
 
-The public declaration lives in ``agentengine.preset``. This module is kept so
+The public declaration lives in ``agentengine.definition``. This module is kept so
 the examples can keep their local imports concise.
 """
 
-from agentengine.preset import AgentPreset
+from agentengine.definition import AgentDefinition
 
-__all__ = ["AgentPreset"]
+__all__ = ["AgentDefinition"]

@@ -1,4 +1,4 @@
-"""Example preset: a code agent whose bash/python run inside a sandbox.
+"""Example definition: a code agent whose bash/python run inside a sandbox.
 
 This shows the *only* integration seam you need. Instead of adding the
 in-process ``BashTool``, the ``setup`` hook adds ``SandboxedBashTool`` /
@@ -23,9 +23,9 @@ from __future__ import annotations
 from agentengine.base.context import AgentContext
 from agentengine.sandbox import SandboxedBashTool, SandboxedPythonTool
 
-# AgentPreset import path depends on your layout; here it lives under the
+# AgentDefinition import path depends on your layout; here it lives under the
 # app backend tree (app/backend/agents). Adjust if you copy this elsewhere.
-from app.backend.agents.preset import AgentPreset
+from app.backend.agents.preset import AgentDefinition
 
 _INSTRUCTIONS = (
     "You are a coding assistant that runs code to answer questions.\n"
@@ -56,7 +56,7 @@ async def _setup(context: AgentContext) -> None:
         context.tool_collection.add(SandboxedPythonTool(manager=manager, conversation_id=conv))
 
 
-PRESET = AgentPreset(
+DEFINITION = AgentDefinition(
     name="sandboxed_coder",
     description="Code agent whose bash/python execute inside a per-conversation sandbox.",
     instructions=_INSTRUCTIONS,

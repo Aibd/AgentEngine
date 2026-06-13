@@ -9,7 +9,7 @@
 |---|---|
 | `src/agentengine/sandbox/` | 核心实现（配置、会话沙盒、生命周期管理、工具适配） |
 | `deploy/sandbox/Dockerfile.session` | 会话沙盒镜像 |
-| `app/backend/agents/sandboxed_coder/` | 接入示例 preset |
+| `app/backend/agents/sandboxed_coder/` | 接入示例 definition |
 | `tests/test_sandbox.py` | 单元测试（使用 fake Docker client，不依赖真实容器） |
 
 ---
@@ -216,9 +216,9 @@ async def _cleanup():
     SANDBOX_MANAGER.shutdown()
 ```
 
-### 7.5 preset 接入
+### 7.5 definition 接入
 
-在 preset 的 `setup` 钩子中，以沙盒工具替代内置 `BashTool`，参见
+在 definition 的 `setup` 钩子中，以沙盒工具替代内置 `BashTool`，参见
 `app/backend/agents/sandboxed_coder/preset.py`。由于工具同名，对 `ToolExecutor` 与模型透明。
 
 ---

@@ -29,12 +29,12 @@ from agentengine.stream.sse_queue import SseEventQueue
 from agentengine.stream.sse_sink import SseSink
 from agentengine.tools.base import Tool
 from agentengine.tools.collection import ToolCollection
-from app.backend.agents.general_chat.preset import PRESET as GENERAL_CHAT_PRESET
+from app.backend.agents.general_chat.preset import DEFINITION as GENERAL_CHAT_DEFINITION
 from mock_llm import MockLLMClient
 
 
 def _make_agent(context: AgentContext) -> AgentRun:
-    config = GENERAL_CHAT_PRESET.to_run_config()
+    config = GENERAL_CHAT_DEFINITION.to_run_config()
     return AgentRun(config=config, context=context)
 
 

@@ -1,3 +1,3 @@
-from app.backend.agents.sandboxed_coder.preset import PRESET
+from app.backend.agents.sandboxed_coder.preset import DEFINITION
 
-__all__ = ["PRESET"]
+__all__ = ["DEFINITION"]

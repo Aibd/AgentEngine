@@ -10,8 +10,15 @@ from agentengine.concurrency import (
 from agentengine.enterprise import MiddlewareChain
 from agentengine.llm.interfaces import LLMChunk, LLMClient, LLMResponse
 from agentengine.persistence import PersistencePort
-from agentengine.preset import AgentPreset, DEFAULT_AGENT_SYSTEM_PROMPT
-from agentengine.preset_loader import load_preset, load_presets
+from agentengine.definition import AgentDefinition, DEFAULT_AGENT_SYSTEM_PROMPT
+from agentengine.definition_loader import (
+    DEFINITION_FILE_SUFFIX,
+    PRESET_FILE_SUFFIX,
+    load_definition,
+    load_definitions,
+    load_preset,
+    load_presets,
+)
 from agentengine.run_config import RunConfig
 from agentengine.runtime.cancellation import CancellationToken
 from agentengine.runtime.compaction import Compactor, LLMSummaryCompactor
@@ -40,8 +47,8 @@ from agentengine.tools.policy import ExecPolicy, ExecPolicyAction, ExecPolicyRul
 
 __all__ = [
     "AgentContext",
+    "AgentDefinition",
     "AgentEngine",
-    "AgentPreset",
     "AgentRun",
     "AgentState",
     "ApprovalRequired",
@@ -49,6 +56,7 @@ __all__ = [
     "Compactor",
     "ConversationLockManager",
     "DEFAULT_AGENT_SYSTEM_PROMPT",
+    "DEFINITION_FILE_SUFFIX",
     "ExecPolicy",
     "ExecPolicyAction",
     "ExecPolicyRule",
@@ -58,9 +66,12 @@ __all__ = [
     "LLMClient",
     "LLMResponse",
     "MiddlewareChain",
+    "load_definition",
+    "load_definitions",
     "load_preset",
     "load_presets",
     "PersistencePort",
+    "PRESET_FILE_SUFFIX",
     "ReasoningDelta",
     "RedisConversationLockManager",
     "RunConfig",

@@ -7,7 +7,7 @@ from typing import AsyncIterator
 
 import pytest
 
-from agentengine import AgentEngine, AgentPreset, DEFAULT_AGENT_SYSTEM_PROMPT
+from agentengine import AgentEngine, AgentDefinition, DEFAULT_AGENT_SYSTEM_PROMPT
 from agentengine.base.context import AgentContext
 from agentengine.llm.interfaces import LLMChunk, LLMResponse
 from agentengine.runtime.events import RunCancelled
@@ -78,10 +78,10 @@ async def test_service_rejects_too_long_query():
         await service.run(agent_name="general_chat", query="hello")
 
 
-async def test_public_engine_uses_explicit_presets_and_llm():
+async def test_public_engine_uses_explicit_definitions_and_llm():
     llm = MockLLMClient([LLMResponse(content="sdk response", finish_reason="stop")])
     engine = AgentEngine(
-        presets={"chat": AgentPreset(name="chat", instructions="Be brief.")},
+        definitions={"chat": AgentDefinition(name="chat", instructions="Be brief.")},
     )
     context = AgentContext(request_id="sdk-1", query="hello", llm=llm)
 
@@ -93,14 +93,14 @@ async def test_public_engine_uses_explicit_presets_and_llm():
 
 
 async def test_public_engine_requires_explicit_llm():
-    engine = AgentEngine(presets={"chat": AgentPreset(name="chat")})
+    engine = AgentEngine(definitions={"chat": AgentDefinition(name="chat")})
 
     with pytest.raises(RuntimeError, match="No LLM client configured"):
         await engine.run(agent_name="chat", query="hello")
 
 
 async def test_public_engine_interrupt_cancels_active_run():
-    engine = AgentEngine(presets={"chat": AgentPreset(name="chat")})
+    engine = AgentEngine(definitions={"chat": AgentDefinition(name="chat")})
     context = AgentContext(request_id="interrupt-me", query="hello", llm=_HangingLLM())
 
     task = asyncio.create_task(

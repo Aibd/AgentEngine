@@ -12,7 +12,7 @@ AgentEngine 0.2 已经把 Agent 运行底座从示例/业务代码中抽离出�
 ### 1. SDK 化核心入口
 
 - 提供 `agentengine.AgentEngine` 作为统一运行入口。
-- 支持 `AgentPreset` / `RunConfig` 声明 Agent 名称、指令、上下文压缩、初始化和清理逻辑。
+- 支持 `AgentDefinition` / `RunConfig` 声明 Agent 名称、指令、上下文压缩、初始化和清理逻辑。
 - 示例层保留 `AgentOrchestrationService` 兼容包装，但新集成建议直接从 `agentengine` 包根导入公开对象。
 
 ### 2. Agent 运行闭环
@@ -80,7 +80,7 @@ AgentEngine 0.2 已经把 Agent 运行底座从示例/业务代码中抽离出�
 业务系统接入时建议只依赖公开 API：
 
 ```python
-from agentengine import AgentContext, AgentEngine, AgentPreset
+from agentengine import AgentContext, AgentEngine, AgentDefinition
 ```
 
 不要直接依赖以下内部模块：
@@ -93,9 +93,9 @@ from agentengine import AgentContext, AgentEngine, AgentPreset
 推荐集成方式：
 
 - 后端服务持有一个 `AgentEngine` 实例或按租户构造实例。
-- 通过 `presets` 注册业务 Agent。
+- 通过 `definitions` 注册业务 Agent。
 - 通过 `llm_factory` 或 `AgentContext.llm` 注入模型客户端。
-- 通过 `AgentContext.tool_collection` 或 `AgentPreset.setup` 注册业务工具。
+- 通过 `AgentContext.tool_collection` 或 `AgentDefinition.setup` 注册业务工具。
 - 前端需要流式体验时，使用 `create_streaming_context()` 获取事件队列，再转 SSE 或 WebSocket。
 - 生产多实例部署时，使用 Redis 会话锁替换内存锁。
 

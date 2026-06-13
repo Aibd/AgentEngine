@@ -18,7 +18,7 @@ from agentengine.concurrency import (
 from agentengine.enterprise.middleware import MiddlewareChain
 from agentengine.llm.interfaces import LLMClient
 from agentengine.persistence.port import PersistencePort
-from agentengine.preset import AgentPreset
+from agentengine.definition import AgentDefinition
 from agentengine.run_config import RunConfig
 from agentengine.runtime.events import RuntimeEvent
 from agentengine.runtime.cancellation import CancellationToken
@@ -34,7 +34,7 @@ DEFAULT_MAX_QUERY_CHARS = 20_000
 EventCallback = Callable[[RuntimeEvent], Awaitable[None] | None]
 LLMFactory = Callable[[], LLMClient | None]
 ConfigResolver = Callable[[str, dict[str, Any] | None], RunConfig]
-PresetLike = AgentPreset | RunConfig
+DefinitionLike = AgentDefinition | RunConfig
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +45,10 @@ class SupportsRunConfig(Protocol):
 
 
 class AgentEngine:
-    """SDK facade for running agent presets inside another application.
+    """SDK facade for running agent definitions inside another application.
 
-    The engine owns runtime concerns: validating inputs, resolving a preset to
-    ``RunConfig``, wiring persistence and locks, and forwarding RuntimeEvents.
+    The engine owns runtime concerns: validating inputs, resolving a definition
+    to ``RunConfig``, wiring persistence and locks, and forwarding RuntimeEvents.
     Host systems remain responsible for authentication, tenant routing, HTTP
     adapters, and LLM configuration.
     """
@@ -56,7 +56,7 @@ class AgentEngine:
     def __init__(
         self,
         *,
-        presets: Mapping[str, PresetLike | SupportsRunConfig] | None = None,
+        definitions: Mapping[str, DefinitionLike | SupportsRunConfig] | None = None,
         config_resolver: ConfigResolver | None = None,
         llm_factory: LLMFactory | None = None,
         require_llm: bool = True,
@@ -67,9 +67,9 @@ class AgentEngine:
     ) -> None:
         if max_query_chars < 1:
             raise ValueError("max_query_chars must be at least 1")
-        if presets is not None and config_resolver is not None:
-            raise ValueError("pass either presets or config_resolver, not both")
-        self._presets = dict(presets or {})
+        if definitions is not None and config_resolver is not None:
+            raise ValueError("pass either definitions or config_resolver, not both")
+        self._definitions = dict(definitions or {})
         self._config_resolver = config_resolver
         self._llm_factory = llm_factory
         self._require_llm = require_llm
@@ -166,10 +166,10 @@ class AgentEngine:
         if self._config_resolver is not None:
             config = self._config_resolver(agent_name, agent_kwargs)
         else:
-            preset = self._presets.get(agent_name)
-            if preset is None:
+            definition = self._definitions.get(agent_name)
+            if definition is None:
                 raise KeyError(f"Agent not registered: {agent_name}")
-            config = self._preset_to_config(preset)
+            config = self._definition_to_config(definition)
 
         kwargs = agent_kwargs or {}
         unsupported = {"max_turns", "max_steps"} & set(kwargs)
@@ -179,12 +179,12 @@ class AgentEngine:
         return config
 
     @staticmethod
-    def _preset_to_config(preset: PresetLike | SupportsRunConfig) -> RunConfig:
-        if isinstance(preset, RunConfig):
-            return preset
-        to_run_config = getattr(preset, "to_run_config", None)
+    def _definition_to_config(definition: DefinitionLike | SupportsRunConfig) -> RunConfig:
+        if isinstance(definition, RunConfig):
+            return definition
+        to_run_config = getattr(definition, "to_run_config", None)
         if to_run_config is None:
-            raise TypeError("agent presets must be RunConfig or expose to_run_config()")
+            raise TypeError("agent definitions must be RunConfig or expose to_run_config()")
         return cast(RunConfig, to_run_config())
 
     def _record_agent_finish(
@@ -289,10 +289,15 @@ class AgentEngine:
         return _emit
 
 
+# Backward-compatible alias
+PresetLike = DefinitionLike
+
+
 __all__ = [
     "AgentEngine",
     "ConfigResolver",
     "DEFAULT_MAX_QUERY_CHARS",
+    "DefinitionLike",
     "EventCallback",
     "LLMFactory",
     "PresetLike",

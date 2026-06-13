@@ -1,3 +1,3 @@
-from app.backend.agents.general_chat.preset import PRESET
+from app.backend.agents.general_chat.preset import DEFINITION
 
-__all__ = ["PRESET"]
+__all__ = ["DEFINITION"]

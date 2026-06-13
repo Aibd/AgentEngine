@@ -23,7 +23,7 @@ flowchart LR
 
 ### 安全层
 
-1. `AgentPreset` 追加默认"持续工作直到完成"指令
+1. `AgentDefinition` 追加默认"持续工作直到完成"指令
 2. 自动压缩：通过可插拔 `Compactor` 摘要过长历史
 3. 结构化错误：区分上下文窗口超限和用量限制
 4. Hook：拦截会话开始、用户输入、工具调用、轮后检查、终止
@@ -93,11 +93,11 @@ llm_client = OpenAICompatibleClient(
 
 ```python
 import asyncio
-from agentengine import AgentContext, AgentEngine, AgentPreset
+from agentengine import AgentContext, AgentEngine, AgentDefinition
 
 # ── 1. 定义 Agent ────────────────────────────────────────────
 engine = AgentEngine(presets={
-    "assistant": AgentPreset(
+    "assistant": AgentDefinition(
         name="assistant",                               # Agent 名称，run 时引用
         instructions="你是一个专业的助手，简洁地回答用户问题。",  # 系统提示词
         auto_compact_tokens=120_000,                    # 超过 12 万 token 自动压缩历史
@@ -142,7 +142,7 @@ async for frame in event_stream:
 answer = await task  # 完整最终回答字符串
 ```
 
-> 也可以把 Agent 写成 Markdown 文件（YAML frontmatter + 正文，格式同 Claude Code subagent），用 `load_presets("agents/")` 批量加载。frontmatter 的 `tools: [read_file, Skill]` 会自动装配内置工具，无需手写 `setup`。详见 [PUBLIC_API.md](PUBLIC_API.md) 的「用 Markdown 声明 Agent」。
+> 也可以把 Agent 写成 Markdown 文件（YAML frontmatter + 正文，格式同 Claude Code subagent），用 `load_definitions("agents/")` 批量加载。frontmatter 的 `tools: [read_file, Skill]` 会自动装配内置工具，无需手写 `setup`。详见 [PUBLIC_API.md](PUBLIC_API.md) 的「用 Markdown 声明 Agent」。
 
 全部公开 API 见 **[PUBLIC_API.md](PUBLIC_API.md)**（含完整类签名、事件契约、错误层次结构和集成说明）。
 

@@ -1,4 +1,4 @@
-"""Load :class:`AgentPreset` definitions from Markdown + YAML frontmatter.
+"""Load :class:`AgentDefinition` definitions from Markdown + YAML frontmatter.
 
 This mirrors the Claude Code subagent format: a ``.md`` file whose YAML
 frontmatter carries the agent's metadata and whose body is the system
@@ -15,7 +15,7 @@ Example ``deep_research.md``::
     You are a deep research assistant. Break the task into clear questions,
     use tools to gather evidence, and then synthesize a grounded answer.
 
-Frontmatter keys map onto :class:`AgentPreset` fields:
+Frontmatter keys map onto :class:`AgentDefinition` fields:
 
 ==================== =========================================================
 Key                  Meaning
@@ -26,14 +26,14 @@ Key                  Meaning
                      used instead — the idiomatic form.
 ``tools``            List of builtin tool names to attach. Compiled into a
                      ``setup`` hook that registers each tool by name.
-``max_messages``     Forwarded to :class:`AgentPreset`.
-``auto_compact_tokens``      Forwarded to :class:`AgentPreset`.
-``compaction_keep_recent``   Forwarded to :class:`AgentPreset`.
+``max_messages``     Forwarded to :class:`AgentDefinition`.
+``auto_compact_tokens``      Forwarded to :class:`AgentDefinition`.
+``compaction_keep_recent``   Forwarded to :class:`AgentDefinition`.
 ==================== =========================================================
 
 Hooks that cannot be expressed as data (a custom ``compactor`` or a bespoke
 ``setup`` that does more than attach named tools) still require code; callers
-can post-process the returned preset with :func:`dataclasses.replace`.
+can post-process the returned definition with :func:`dataclasses.replace`.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from agentengine.preset import AgentPreset
+from agentengine.definition import AgentDefinition
 from agentengine.run_config import SetupHook
 
 if TYPE_CHECKING:
@@ -53,14 +53,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-PRESET_FILE_SUFFIX = ".md"
+DEFINITION_FILE_SUFFIX = ".md"
 
-# Frontmatter keys consumed directly as AgentPreset scalar fields.
+# Frontmatter keys consumed directly as AgentDefinition scalar fields.
 _SCALAR_FIELDS = ("max_messages", "auto_compact_tokens", "compaction_keep_recent")
 
 
-def load_preset(path: str | Path) -> AgentPreset:
-    """Load a single Markdown preset file into an :class:`AgentPreset`.
+def load_definition(path: str | Path) -> AgentDefinition:
+    """Load a single Markdown definition file into an :class:`AgentDefinition`.
 
     Raises:
         FileNotFoundError: the path does not exist.
@@ -70,52 +70,52 @@ def load_preset(path: str | Path) -> AgentPreset:
     content = file_path.read_text(encoding="utf-8")
     frontmatter, body = _split_frontmatter(content)
     if frontmatter is None:
-        raise ValueError(f"Preset file has no YAML frontmatter: {file_path}")
-    return _build_preset(frontmatter, body, default_name=file_path.stem)
+        raise ValueError(f"Definition file has no YAML frontmatter: {file_path}")
+    return _build_definition(frontmatter, body, default_name=file_path.stem)
 
 
-def load_presets(directory: str | Path) -> dict[str, AgentPreset]:
-    """Load every ``*.md`` preset in *directory*, keyed by preset name.
+def load_definitions(directory: str | Path) -> dict[str, AgentDefinition]:
+    """Load every ``*.md`` definition in *directory*, keyed by definition name.
 
     The scan is single-layer (no recursion) and skips dotfiles. Files without
     valid frontmatter are logged and skipped rather than aborting the scan, so
     one malformed file does not take down the whole registry.
     """
     root = Path(directory)
-    presets: dict[str, AgentPreset] = {}
+    definitions: dict[str, AgentDefinition] = {}
     if not root.is_dir():
-        logger.warning("preset_dir_missing dir=%s", root)
-        return presets
+        logger.warning("definition_dir_missing dir=%s", root)
+        return definitions
 
     for entry in sorted(root.iterdir()):
-        if entry.name.startswith(".") or entry.suffix != PRESET_FILE_SUFFIX:
+        if entry.name.startswith(".") or entry.suffix != DEFINITION_FILE_SUFFIX:
             continue
         if not entry.is_file():
             continue
         try:
-            preset = load_preset(entry)
+            definition = load_definition(entry)
         except (OSError, ValueError):
-            logger.warning("preset_load_failed path=%s", entry, exc_info=True)
+            logger.warning("definition_load_failed path=%s", entry, exc_info=True)
             continue
-        if preset.name in presets:
-            logger.warning("preset_name_collision name=%s path=%s", preset.name, entry)
+        if definition.name in definitions:
+            logger.warning("definition_name_collision name=%s path=%s", definition.name, entry)
             continue
-        presets[preset.name] = preset
-        logger.debug("preset_loaded name=%s path=%s", preset.name, entry)
+        definitions[definition.name] = definition
+        logger.debug("definition_loaded name=%s path=%s", definition.name, entry)
 
-    logger.info("preset_scan_complete count=%d dir=%s", len(presets), root)
-    return presets
+    logger.info("definition_scan_complete count=%d dir=%s", len(definitions), root)
+    return definitions
 
 
-def _build_preset(
+def _build_definition(
     frontmatter: dict[str, Any],
     body: str,
     *,
     default_name: str,
-) -> AgentPreset:
+) -> AgentDefinition:
     name = str(frontmatter.get("name") or default_name).strip()
     if not name:
-        raise ValueError("Preset 'name' must not be empty")
+        raise ValueError("Definition 'name' must not be empty")
 
     instructions = frontmatter.get("instructions")
     if instructions is None:
@@ -136,7 +136,7 @@ def _build_preset(
         kwargs["setup"] = _make_tool_setup(tools)
         kwargs["extras"] = {"tools": tools}
 
-    return AgentPreset(**kwargs)
+    return AgentDefinition(**kwargs)
 
 
 def _normalize_tools(raw: Any) -> tuple[str, ...]:
@@ -157,12 +157,12 @@ def _make_tool_setup(tool_names: tuple[str, ...]) -> SetupHook:
 
     Tools already present on the context are left untouched, matching the
     idempotent guard hand-written setups used. Construction is deferred to
-    call time so importing a preset never forces the tool modules to load.
+    call time so importing a definition never forces the tool modules to load.
     """
 
     async def _setup(context: "AgentContext") -> None:
         # Imported lazily to avoid a circular import (builtin tools depend on
-        # several runtime modules that may import preset machinery).
+        # several runtime modules that may import definition machinery).
         from agentengine.tools.builtin import build_default_tools_for_context
 
         collection = context.tool_collection
@@ -196,4 +196,17 @@ def _split_frontmatter(content: str) -> tuple[dict[str, Any] | None, str]:
     return fm, match.group(2)
 
 
-__all__ = ["load_preset", "load_presets", "PRESET_FILE_SUFFIX"]
+# Backward-compatible aliases
+PRESET_FILE_SUFFIX = DEFINITION_FILE_SUFFIX
+load_preset = load_definition
+load_presets = load_definitions
+
+
+__all__ = [
+    "DEFINITION_FILE_SUFFIX",
+    "PRESET_FILE_SUFFIX",
+    "load_definition",
+    "load_definitions",
+    "load_preset",
+    "load_presets",
+]

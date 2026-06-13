@@ -2,7 +2,7 @@ from agentengine.base.context import AgentContext
 from agentengine.skills.loader import SkillLoader
 from agentengine.tools.builtin.read_file_tool import ReadFileTool
 from agentengine.tools.builtin.skill_tool import SkillTool
-from app.backend.agents.preset import AgentPreset
+from app.backend.agents.preset import AgentDefinition
 
 _INSTRUCTIONS = (
     "You are a deep research assistant. Break the task into clear questions, "
@@ -27,7 +27,7 @@ async def _setup(context: AgentContext) -> None:
         context.tool_collection.add(SkillTool(SkillLoader()))
 
 
-PRESET = AgentPreset(
+DEFINITION = AgentDefinition(
     name="deep_research",
     description="Deep research agent with model-native planning.",
     instructions=_INSTRUCTIONS,
