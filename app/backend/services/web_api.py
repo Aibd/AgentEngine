@@ -41,7 +41,13 @@ from agentengine.skills.registry import (
     SkillRegistry,
 )
 from agentengine.sandbox import SandboxConfig, SandboxManager, SandboxedBashTool, SandboxedPythonTool
-from agentengine.tools.builtin import build_default_tools, ReadFileTool, SkillTool
+from agentengine.tools.builtin import (
+    build_default_tools,
+    ReadFileTool,
+    ReadSkillResource,
+    RunSkillScript,
+    SkillTool,
+)
 from agentengine.tools.policy_presets import HOST_DEFAULT as DEFAULT_EXEC_POLICY
 from app.backend.services.reporting.file_store import ReportFileStore
 from app.backend.services.agent_orchestration_service import AgentOrchestrationService
@@ -163,6 +169,14 @@ async def capabilities() -> dict[str, Any]:
     skill_loader = SkillLoader(cwd=REPO_ROOT)
     tools = build_default_tools(workspace_root=REPO_ROOT)
     tools.append(SkillTool(skill_loader))
+    tools.append(ReadSkillResource(skill_loader))
+    if SANDBOX_MANAGER is not None:
+        tools.append(RunSkillScript(
+            loader=skill_loader,
+            sandbox_manager=SANDBOX_MANAGER,
+            conversation_id="capabilities",
+            workspace_root=SANDBOX_MANAGER.sessions_root,
+        ))
     skills = [view for view in await SKILL_REGISTRY.list() if view.enabled]
     return {
         "agents": [
@@ -402,6 +416,23 @@ async def toggle_connector(connector_id: str) -> dict[str, Any]:
     return updated.snapshot()
 
 
+def _public_message_dto(message: dict[str, Any]) -> dict[str, Any]:
+    """Return only the fields safe to expose to the web UI.
+
+    Internal ``metadata`` and large ``base64_image`` payloads are deliberately
+    stripped.
+    """
+    dto: dict[str, Any] = {
+        "role": message.get("role"),
+        "content": message.get("content"),
+    }
+    for key in ("reasoning_content", "name", "tool_call_id", "tool_calls"):
+        value = message.get(key)
+        if value:
+            dto[key] = value
+    return dto
+
+
 @app.get("/api/conversations/{conversation_id}/messages")
 async def conversation_messages(
     conversation_id: str,
@@ -416,7 +447,7 @@ async def conversation_messages(
         raise HTTPException(status_code=400, detail="conversation_id is required")
     scoped_conversation_id = _scoped_conversation_id(conversation_id, tenant_id)
     messages = await PERSISTENCE.load_messages(scoped_conversation_id)
-    visible = [m for m in messages if m.get("role") != "system"]
+    visible = [_public_message_dto(m) for m in messages if m.get("role") != "system"]
     return {"conversation_id": conversation_id, "messages": visible}
 
 
@@ -701,13 +732,28 @@ async def _run_agent_events(
             workspace_root=REPO_ROOT,
             extra_roots=extra_roots,
         ))
+    skill_loader = SkillLoader(cwd=REPO_ROOT)
     if context.tool_collection.get("Skill") is None:
         context.tool_collection.add(
-            SkillTool(SkillLoader(cwd=REPO_ROOT), enabled_names=enabled_skills)
+            SkillTool(skill_loader, enabled_names=enabled_skills)
+        )
+    if context.tool_collection.get("ReadSkillResource") is None:
+        context.tool_collection.add(
+            ReadSkillResource(skill_loader, enabled_names=enabled_skills)
         )
 
     # Shell tools: sandboxed when available, fallback to host (Phase 3).
     if sandbox is not None and sandbox_ws is not None:
+        if context.tool_collection.get("RunSkillScript") is None:
+            context.tool_collection.add(
+                RunSkillScript(
+                    loader=skill_loader,
+                    sandbox_manager=sandbox,
+                    conversation_id=scoped_conversation_id,
+                    enabled_names=enabled_skills,
+                    workspace_root=sandbox_ws,
+                )
+            )
         if context.tool_collection.get("bash") is None:
             context.tool_collection.add(
                 SandboxedBashTool(manager=sandbox, conversation_id=scoped_conversation_id)
