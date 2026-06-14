@@ -1,4 +1,4 @@
-from app.backend.agents.preset import AgentDefinition
+from app.backend.agents.definition import AgentDefinition
 
 DEFINITION = AgentDefinition(
     name="general_chat",

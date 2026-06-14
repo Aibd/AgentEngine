@@ -1,8 +1,7 @@
 from agentengine.base.context import AgentContext
 from agentengine.skills.loader import SkillLoader
-from agentengine.tools.builtin.read_file_tool import ReadFileTool
 from agentengine.tools.builtin.skill_tool import SkillTool
-from app.backend.agents.preset import AgentDefinition
+from app.backend.agents.definition import AgentDefinition
 
 _INSTRUCTIONS = (
     "You are a deep research assistant. Break the task into clear questions, "
@@ -13,7 +12,7 @@ _INSTRUCTIONS = (
     "3. Do not guess when evidence is missing; gather more context instead.\n"
     "4. Keep the final answer concise, structured, and tied to evidence.\n\n"
     "Available tools:\n"
-    "- `read_file`: read repository files.\n"
+    "- `bash` / `python`: run code to gather and process information.\n"
     "- `Skill`: check for a task-specific workflow."
 )
 
@@ -21,8 +20,6 @@ _INSTRUCTIONS = (
 async def _setup(context: AgentContext) -> None:
     if context.tool_collection is None:
         return
-    if context.tool_collection.get("read_file") is None:
-        context.tool_collection.add(ReadFileTool())
     if context.tool_collection.get("Skill") is None:
         context.tool_collection.add(SkillTool(SkillLoader()))
 

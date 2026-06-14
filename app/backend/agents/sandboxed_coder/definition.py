@@ -9,13 +9,7 @@ Two things the host must provide before a run reaches this hook:
   * ``context.extras["sandbox_manager"]`` — the shared SandboxManager singleton
   * ``context.conversation_id``           — the isolation key
 
-The host should also point the file tools at the same workspace the container
-mounts, so bash/python and read_file/write_file share one filesystem:
-
-    host_ws = manager.host_workspace_for(conversation_id)
-    context.extras["workspace_root"] = host_ws
-
-See docs/sandbox-deployment.md for the full host wiring + container release.
+See docs/sandbox/sandbox-deployment.md for the full host wiring + container release.
 """
 
 from __future__ import annotations
@@ -23,9 +17,7 @@ from __future__ import annotations
 from agentengine.base.context import AgentContext
 from agentengine.sandbox import SandboxedBashTool, SandboxedPythonTool
 
-# AgentDefinition import path depends on your layout; here it lives under the
-# app backend tree (app/backend/agents). Adjust if you copy this elsewhere.
-from app.backend.agents.preset import AgentDefinition
+from app.backend.agents.definition import AgentDefinition
 
 _INSTRUCTIONS = (
     "You are a coding assistant that runs code to answer questions.\n"

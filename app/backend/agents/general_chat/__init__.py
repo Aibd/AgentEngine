@@ -1,3 +1,3 @@
-from app.backend.agents.general_chat.preset import DEFINITION
+from app.backend.agents.general_chat.definition import DEFINITION
 
 __all__ = ["DEFINITION"]
