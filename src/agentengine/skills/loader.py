@@ -8,6 +8,7 @@ Design (Claude Code pattern):
 
 from __future__ import annotations
 
+import html
 import logging
 import re
 from dataclasses import dataclass
@@ -20,6 +21,19 @@ import yaml
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True, slots=True)
+class SkillResources:
+    """Bundled resources discovered inside a skill directory."""
+
+    scripts: tuple[str, ...] = ()
+    references: tuple[str, ...] = ()
+    assets: tuple[str, ...] = ()
+
+
+class SkillResourceLimitError(ValueError):
+    """Raised when a skill's bundled resources exceed the configured maximum."""
+
+
 @dataclass
 class Skill:
     """A loaded skill ready for injection into the agent context."""
@@ -28,11 +42,135 @@ class Skill:
     description: str
     path: Path
     body: str  # SKILL.md body after frontmatter
+    base_dir: Path | None = None
+    resources: SkillResources | None = None
+
+    MAX_RESOURCE_FILES: int = 100
+    RESOURCE_DIRS: frozenset[str] = frozenset({"scripts", "references", "assets"})
+
+    def __post_init__(self) -> None:
+        # Backfill base_dir from path when not provided (keeps existing callers working).
+        if self.base_dir is None:
+            object.__setattr__(self, "base_dir", self.path.parent)
+        if self.resources is None and self.base_dir is not None:
+            object.__setattr__(
+                self,
+                "resources",
+                self._list_resources(self.base_dir, max_files=self.MAX_RESOURCE_FILES),
+            )
 
     @cached_property
     def prompt(self) -> str:
-        """Full prompt injected when the skill is invoked."""
+        """Full prompt injected when the skill is invoked.
+
+        Kept for backwards compatibility. New code should prefer
+        :meth:`activation_content` for Agent Skills standard output.
+        """
         return f"Base directory: {self.path.parent}\n\n{self.body}"
+
+    def activation_content(self, args: str = "") -> str:
+        """Return a structured XML activation block following Agent Skills conventions.
+
+        The content includes the skill directory, instructions (with ``${ARGUMENTS}``
+        replaced), and a manifest of bundled resources. Resource contents are not
+        eagerly loaded.
+        """
+        base = str(self.path.parent)
+        name = html.escape(self.name)
+        description = html.escape(self.description)
+        instructions = self.body.replace("${ARGUMENTS}", args)
+        instructions = html.escape(instructions)
+
+        resources = self.resources or SkillResources()
+
+        def _resource_section(tag: str, paths: tuple[str, ...]) -> str:
+            if not paths:
+                return f"    <{tag}/>"
+            lines = [f"    <{tag}>"]
+            for path in paths:
+                lines.append(f"      <file>{html.escape(path)}</file>")
+            lines.append(f"    </{tag}>")
+            return "\n".join(lines)
+
+        return (
+            f'<skill_content name="{name}" description="{description}">\n'
+            f"  <skill_directory>{html.escape(base)}</skill_directory>\n"
+            "  <instructions>\n"
+            f"{instructions}\n"
+            "  </instructions>\n"
+            "  <skill_resources>\n"
+            f"{_resource_section('scripts', resources.scripts)}\n"
+            f"{_resource_section('references', resources.references)}\n"
+            f"{_resource_section('assets', resources.assets)}\n"
+            "  </skill_resources>\n"
+            f"  <note>Relative paths in this skill are relative to: {html.escape(base)}</note>\n"
+            "</skill_content>"
+        )
+
+    @classmethod
+    def _list_resources(cls, skill_dir: Path, *, max_files: int = 100) -> SkillResources:
+        """Discover bundled resources under ``scripts/``, ``references/`` and ``assets/``.
+
+        Returns stable, sorted POSIX relative paths. Hidden files, cache directories
+        and ``SKILL.md`` itself are ignored. Paths that escape ``skill_dir`` after
+        resolving symlinks are rejected.
+        """
+        scripts: list[str] = []
+        references: list[str] = []
+        assets: list[str] = []
+
+        resolved_skill_dir = skill_dir.resolve()
+        total = 0
+        limit_reached = False
+
+        for subdir_name in sorted(cls.RESOURCE_DIRS):
+            if limit_reached:
+                break
+            subdir = skill_dir / subdir_name
+            if not subdir.is_dir():
+                continue
+            for path in sorted(subdir.rglob("*")):
+                if limit_reached:
+                    break
+                if not path.is_file():
+                    continue
+                if path.name.startswith("."):
+                    continue
+                if path.name == "SKILL.md":
+                    continue
+                # Skip common cache / metadata directories.
+                if any(part.startswith(".") or part in {"__pycache__", "node_modules"} for part in path.relative_to(skill_dir).parts):
+                    continue
+                try:
+                    resolved = path.resolve()
+                    resolved.relative_to(resolved_skill_dir)
+                except (ValueError, OSError):
+                    logger.warning(
+                        "skill_resource_escape_rejected skill_dir=%s path=%s",
+                        skill_dir,
+                        path,
+                    )
+                    continue
+
+                total += 1
+                if total > max_files:
+                    raise SkillResourceLimitError(
+                        f"Skill at {skill_dir} exceeds the maximum of {max_files} resource files"
+                    )
+
+                rel = path.relative_to(skill_dir).as_posix()
+                if subdir_name == "scripts":
+                    scripts.append(rel)
+                elif subdir_name == "references":
+                    references.append(rel)
+                elif subdir_name == "assets":
+                    assets.append(rel)
+
+        return SkillResources(
+            scripts=tuple(sorted(scripts)),
+            references=tuple(sorted(references)),
+            assets=tuple(sorted(assets)),
+        )
 
 
 class SkillLoader:
@@ -101,7 +239,11 @@ class SkillLoader:
         root: Path | None = None,
         overwrite: bool = False,
     ) -> Path:
-        """Create a skill directory with a starter SKILL.md and return its path."""
+        """Create a skill directory with a starter SKILL.md and return its path.
+
+        By default the skill is written to the first configured root, which is
+        the project-level ``.agents/skills/`` directory.
+        """
         skill_name = self._normalize_skill_name(name)
         target_root = root or self._roots[0]
         skill_dir = target_root / skill_name
@@ -122,8 +264,12 @@ class SkillLoader:
 
     @staticmethod
     def _default_roots(cwd: Path) -> list[Path]:
+        # Standard Agent Skills convention uses `.agents/skills/` for cross-client
+        # interoperability; `.agent/skills/` is kept for backwards compatibility.
         return [
+            cwd / ".agents" / "skills",
             cwd / ".agent" / "skills",
+            Path.home() / ".agents" / "skills",
             Path.home() / ".agent" / "skills",
         ]
 
@@ -166,12 +312,29 @@ class SkillLoader:
         if "allowed-tools" in frontmatter:
             logger.warning("skill_allowed_tools_ignored path=%s", path)
 
-        return Skill(
-            name=name,
-            description=description,
-            path=path,
-            body=body,
-        )
+        # Warn when the declared name diverges from the parent directory name,
+        # but keep loading with the declared name for backwards compatibility.
+        expected_dir_name = self._normalize_skill_name(name)
+        actual_dir_name = path.parent.name
+        if actual_dir_name != expected_dir_name:
+            logger.warning(
+                "skill_name_directory_mismatch path=%s name=%s directory=%s",
+                path,
+                name,
+                actual_dir_name,
+            )
+
+        try:
+            return Skill(
+                name=name,
+                description=description,
+                path=path,
+                body=body,
+                base_dir=path.parent,
+            )
+        except SkillResourceLimitError as exc:
+            logger.error("skill_resource_limit_exceeded path=%s error=%s", path, exc)
+            return None
 
     @staticmethod
     def _split_frontmatter(content: str) -> tuple[dict[str, Any] | None, str]:

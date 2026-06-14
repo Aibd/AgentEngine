@@ -97,12 +97,28 @@ class SessionSandbox:
         in-memory variables do not persist; write outputs to the workspace."""
         return self._exec(["python", "-c", code], timeout=timeout, label="python")
 
+    def exec_argv(
+        self,
+        argv: list[str],
+        *,
+        timeout: float | None = None,
+        workdir: str | None = None,
+    ) -> dict[str, Any]:
+        """Run a command specified as an argv array inside the container.
+
+        Prefer this over :meth:`exec_shell` when arguments come from a model or
+        other untrusted source to avoid shell injection. The optional *workdir*
+        must be a path under the configured workspace mount.
+        """
+        return self._exec(argv, timeout=timeout, label="argv", workdir=workdir)
+
     def _exec(
         self,
         argv: list[str],
         *,
         timeout: float | None,
         label: str,
+        workdir: str | None = None,
     ) -> dict[str, Any]:
         if self._container is None:
             self.start()
@@ -111,7 +127,11 @@ class SessionSandbox:
         t = int(timeout if timeout is not None else self.cfg.default_exec_timeout)
         wrapped = ["timeout", str(t), *argv]
         started = time.perf_counter()
-        result = self._container.exec_run(wrapped, demux=True, workdir=self.cfg.workspace_mount)
+
+        container_workdir = self._resolve_workdir(workdir)
+        result = self._container.exec_run(
+            wrapped, demux=True, workdir=container_workdir
+        )
         elapsed = time.perf_counter() - started
         out, err = result.output if isinstance(result.output, tuple) else (result.output, None)
         exit_code = result.exit_code if result.exit_code is not None else -1
@@ -127,3 +147,26 @@ class SessionSandbox:
             self.conversation_id, label, exit_code, payload["timed_out"], elapsed,
         )
         return payload
+
+    def _resolve_workdir(self, workdir: str | None) -> str:
+        """Return a safe container workdir path.
+
+        *workdir* is relative to the configured workspace mount. Empty/None means
+        the workspace root. Paths attempting to escape the workspace are rejected.
+        """
+        if not workdir:
+            return self.cfg.workspace_mount
+
+        # Normalise to POSIX-style container path.
+        base = self.cfg.workspace_mount.rstrip("/")
+        candidate = f"{base}/{workdir.lstrip('/')}"
+
+        # Reject attempts to escape the workspace via '..'.
+        resolved = Path(candidate).resolve()
+        base_path = Path(base).resolve()
+        try:
+            resolved.relative_to(base_path)
+        except ValueError as exc:
+            raise ValueError(f"workdir escapes workspace: {workdir}") from exc
+
+        return candidate

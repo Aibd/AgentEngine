@@ -60,6 +60,37 @@ class TestMessage:
         d = msg.to_openai()
         assert d["content"][1]["image_url"]["url"] == "data:image/png;base64,abc123"
 
+    def test_to_openai_does_not_include_metadata(self):
+        msg = Message.user("hello", metadata={"secret": "value"})
+        d = msg.to_openai()
+        assert "metadata" not in d
+
+    def test_to_persistent_includes_metadata(self):
+        msg = Message.tool("result", tool_call_id="c1", metadata={"skill_activation": True})
+        d = msg.to_persistent()
+        assert d["metadata"] == {"skill_activation": True}
+        assert d["tool_call_id"] == "c1"
+
+    def test_from_persistent_restores_metadata(self):
+        data = {
+            "role": "tool",
+            "content": "result",
+            "tool_call_id": "c1",
+            "metadata": {"skill_activation": True},
+        }
+        msg = Message.from_persistent(data)
+        assert msg.metadata == {"skill_activation": True}
+
+    def test_from_persistent_handles_missing_metadata(self):
+        data = {"role": "user", "content": "hello"}
+        msg = Message.from_persistent(data)
+        assert msg.metadata == {}
+
+    def test_tool_accepts_metadata(self):
+        msg = Message.tool("result", tool_call_id="c1", metadata={"skill_activation": True})
+        assert msg.role == Role.TOOL
+        assert msg.metadata == {"skill_activation": True}
+
 
 class TestMemory:
     def test_append_and_iterate(self):

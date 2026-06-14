@@ -111,6 +111,28 @@ class TestMessages:
         loaded = await store.load_messages("conv-order")
         assert [m["content"] for m in loaded] == [f"msg {i}" for i in range(20)]
 
+    async def test_round_trip_preserves_metadata(self, store: SqlitePersistence) -> None:
+        original = [
+            {"role": "tool", "content": "activated", "tool_call_id": "c1", "metadata": {"skill_activation": True}}
+        ]
+        await store.save_messages("conv-meta", original)
+        loaded = await store.load_messages("conv-meta")
+        assert loaded == original
+
+    async def test_memory_save_and_load_preserves_metadata(self, store: SqlitePersistence) -> None:
+        memory = Memory()
+        memory.add_system_message("sys")
+        memory.add_tool_message("activated", tool_call_id="c1")
+        memory.messages[-1].metadata = {"skill_activation": True}
+
+        await memory.save_to_db(store, "conv-mem")
+        loaded = Memory()
+        await loaded.load_from_db(store, "conv-mem")
+
+        tool_msg = loaded.messages[-1]
+        assert tool_msg.role == Role.TOOL
+        assert tool_msg.metadata == {"skill_activation": True}
+
 
 class TestRuns:
     async def test_save_and_list(self, store: SqlitePersistence) -> None:

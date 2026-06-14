@@ -41,6 +41,7 @@ from agentengine import (
     # ── 工具系统 ──────────────────────────────────────────
     Tool,                                # 工具基类：实现 schema + run() 即可注册
     StreamingTool,                        # 流式工具基类：支持逐步输出中间结果
+    ToolResult,                           # 带 metadata 的工具返回结果
     ToolStreamEvent,                      # 工具流式事件：StreamingTool 的中间产物
     ToolCollection,                       # 工具注册表：管理 Agent 可用的工具集合
     ExecPolicy,                           # 执行策略：白名单/黑名单规则引擎
@@ -74,6 +75,14 @@ from agentengine import (
     CancellationToken,                    # 取消令牌：协程协作式取消
     Compactor,                            # 压缩协议：可插拔的历史摘要器
     LLMSummaryCompactor,                  # LLM 压缩实现：用模型总结历史
+
+    # ── Skill 系统 ────────────────────────────────────────
+    Skill,                                # Skill 能力包
+    SkillLoader,                          # Skill 加载器
+    SkillResources,                       # Skill 资源清单（scripts/references/assets）
+    SkillCatalogPrompt,                   # 生成 enabled skill catalog
+    ReadSkillResource,                    # 读取 skill 声明的资源
+    RunSkillScript,                       # 在 Sandbox 中执行 skill 脚本
 
     # ── 企业中间件 ────────────────────────────────────────
     MiddlewareChain,                      # 中间件链：洋葱模型组合多个中间件
@@ -127,6 +136,12 @@ class AgentEngine:
 
         middleware: MiddlewareChain | None = None,
         # 企业中间件链，按需注入配额、审批、追踪、重试等横切关注点
+
+        skill_loader: SkillLoader | None = None,
+        # Skill 加载器，启用 skill catalog 系统提示词注入时必需
+
+        enable_skill_catalog: bool = False,
+        # 是否在运行开始时把 enabled skills 的 catalog 注入 system prompt
     ): ...
 
     # ── 核心方法 ──────────────────────────────────────────

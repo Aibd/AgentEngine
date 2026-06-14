@@ -7,7 +7,7 @@ import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from agentengine.runtime.events import (
@@ -18,7 +18,7 @@ from agentengine.runtime.events import (
     ToolCallStarted,
     ToolStreamEventEmitted,
 )
-from agentengine.tools.base import StreamingTool, Tool, ToolStreamEvent
+from agentengine.tools.base import StreamingTool, Tool, ToolResult, ToolStreamEvent
 from agentengine.tools.policy import ExecPolicy, ExecPolicyAction
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,7 @@ class ToolExecutionResult:
     truncated: bool = False
     elapsed_seconds: float = 0.0
     tool_call_id: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class ToolExecutor:
@@ -111,11 +112,18 @@ class ToolExecutor:
             )
 
         elapsed = time.perf_counter() - started_at
-        content, truncated = self._summarize(raw, tool)
+        metadata: dict[str, Any] = {}
+        if isinstance(raw, ToolResult):
+            metadata = dict(raw.metadata)
+            raw_for_summary = raw.content
+        else:
+            raw_for_summary = raw
+        content, truncated = self._summarize(raw_for_summary, tool)
         await self._emit_completed(call_id, tool.name, content, elapsed)
         return ToolExecutionResult(
-            tool_name=tool.name, ok=True, content=content, raw=raw,
+            tool_name=tool.name, ok=True, content=content, raw=raw_for_summary,
             truncated=truncated, elapsed_seconds=elapsed, tool_call_id=call_id,
+            metadata=metadata,
         )
 
     # -- Streaming execution ----------------------------------------------
@@ -175,17 +183,27 @@ class ToolExecutor:
         elapsed = time.perf_counter() - started_at
 
         # Build the final content: prefer final_data, fallback to accumulated.
-        if final_data is not None:
-            content, truncated = self._summarize(final_data, tool)
+        metadata: dict[str, Any] = {}
+        if isinstance(final_data, ToolResult):
+            metadata = dict(final_data.metadata)
+            final_data_for_summary = final_data.content
+        else:
+            final_data_for_summary = final_data
+
+        if final_data_for_summary is not None:
+            content, truncated = self._summarize(final_data_for_summary, tool)
+            raw_value: Any = final_data_for_summary
         else:
             raw_text = "\n".join(accumulated_parts)
             content, truncated = self._summarize(raw_text, tool)
+            raw_value = accumulated_parts
 
         await self._emit_completed(call_id, tool.name, content, elapsed)
         return ToolExecutionResult(
             tool_name=tool.name, ok=True, content=content,
-            raw=final_data if final_data is not None else accumulated_parts,
+            raw=raw_value,
             truncated=truncated, elapsed_seconds=elapsed, tool_call_id=call_id,
+            metadata=metadata,
         )
 
     # -- Event emission helpers -------------------------------------------

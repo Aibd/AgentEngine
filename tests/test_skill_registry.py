@@ -28,7 +28,11 @@ def _make_zip(files: dict[str, str]) -> bytes:
 
 def _registry(tmp_path: Path) -> SkillRegistry:
     (tmp_path / ".agent" / "skills").mkdir(parents=True)
-    return SkillRegistry(cwd=tmp_path, db_path=tmp_path / "meta.db")
+    return SkillRegistry(
+        cwd=tmp_path,
+        db_path=tmp_path / "meta.db",
+        loader=SkillLoader(roots=[tmp_path / ".agent" / "skills"]),
+    )
 
 
 def _write_builtin(tmp_path: Path, name: str, description: str = "builtin") -> None:
@@ -249,7 +253,7 @@ async def test_skill_tool_allows_enabled_skill(tmp_path: Path) -> None:
 
     result = await tool.run(skill="ok")
 
-    assert "[Skill: ok]" in result
+    assert '<skill_content name="ok"' in result.content
 
 
 async def test_skill_tool_callable_enabled_names(tmp_path: Path) -> None:
@@ -258,11 +262,18 @@ async def test_skill_tool_callable_enabled_names(tmp_path: Path) -> None:
     state = {"dyn"}
     tool = SkillTool(loader, enabled_names=lambda: state)
 
-    assert "[Skill: dyn]" in await tool.run(skill="dyn")
+    result = await tool.run(skill="dyn")
+    assert '<skill_content name="dyn"' in result.content
     state.clear()
-    assert "disabled" in (await tool.run(skill="dyn")).lower()
+    blocked = await tool.run(skill="dyn")
+    content = blocked.content if hasattr(blocked, "content") else blocked
+    assert "disabled" in content.lower()
 
 
 def _registry_existing(tmp_path: Path) -> SkillRegistry:
     """Registry whose skills dir already exists (builtin written by the test)."""
-    return SkillRegistry(cwd=tmp_path, db_path=tmp_path / "meta.db")
+    return SkillRegistry(
+        cwd=tmp_path,
+        db_path=tmp_path / "meta.db",
+        loader=SkillLoader(roots=[tmp_path / ".agent" / "skills"]),
+    )

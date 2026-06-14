@@ -207,8 +207,11 @@ class SkillRegistry:
         self._cwd = cwd or Path.cwd()
         self._loader = loader or SkillLoader(cwd=self._cwd)
         self._db = SkillMetadataDB(db_path)
-        # First configured root is where imports land (project ``.agent/skills``).
-        self._install_root = self._loader._roots[0]
+        # Prefer the first existing root for imports so that existing projects
+        # using ``.agent/skills/`` continue to work unchanged. If none exist,
+        # default to the first configured root (standard ``.agents/skills/``).
+        existing_root = next((r for r in self._loader._roots if r.is_dir()), None)
+        self._install_root = existing_root or self._loader._roots[0]
 
     # -- listing ----------------------------------------------------------
 

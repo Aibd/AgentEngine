@@ -99,6 +99,10 @@ async def run_turn(
         if context.persistence and context.conversation_id:
             await agent.memory.load_from_db(context.persistence, context.conversation_id)
 
+        injector = context.extras.get("_inject_skill_catalog")
+        if callable(injector):
+            injector(agent)
+
         result = await _loop(
             agent,
             context,
@@ -261,7 +265,7 @@ async def _loop(
             prompt_tokens_total += int(response.usage.get("prompt_tokens", 0) or 0)
             completion_tokens_total += int(response.usage.get("completion_tokens", 0) or 0)
 
-        agent.memory.add_assistant_message(
+        assistant_msg = Message.assistant(
             response.content or "",
             reasoning_content=response.reasoning_content or "",
             tool_calls=response.tool_calls or None,
@@ -276,7 +280,7 @@ async def _loop(
         if has_tool_calls:
             if cancellation_token is not None:
                 cancellation_token.throw_if_cancelled()
-            await _execute_tool_calls(
+            tool_messages = await _execute_tool_calls(
                 agent,
                 context,
                 response.tool_calls,
@@ -285,6 +289,9 @@ async def _loop(
                 run_id=run_id,
                 turn_id=turn_id,
             )
+            agent.memory.extend_atomic([assistant_msg, *tool_messages])
+        else:
+            agent.memory.append(assistant_msg)
 
         await emit(
             TurnEnded(
@@ -525,7 +532,8 @@ async def _execute_tool_calls(
     emit: Callable[[RuntimeEvent], Awaitable[None]],
     run_id: str,
     turn_id: str,
-) -> None:
+) -> list[Message]:
+    tool_messages: list[Message] = []
     executor = ToolExecutor(
         run_id=run_id,
         turn_id=turn_id,
@@ -604,9 +612,11 @@ async def _execute_tool_calls(
                         elapsed_seconds=0.0,
                     )
                 )
-                agent.memory.add_tool_message(
-                    f"Tool '{tool_name}' denied by approval gate: {denied}",
-                    tool_call_id=tc.get("id", ""),
+                tool_messages.append(
+                    Message.tool(
+                        f"Tool '{tool_name}' denied by approval gate: {denied}",
+                        tool_call_id=tc.get("id", ""),
+                    )
                 )
                 continue
 
@@ -638,7 +648,7 @@ async def _execute_tool_calls(
                     elapsed_seconds=0.0,
                 )
             )
-            agent.memory.add_tool_message(rendered, tool_call_id=tool_call_id)
+            tool_messages.append(Message.tool(rendered, tool_call_id=tool_call_id))
             continue
 
         logger.info(
@@ -675,7 +685,7 @@ async def _execute_tool_calls(
                         elapsed_seconds=0.0,
                     )
                 )
-                agent.memory.add_tool_message(rendered, tool_call_id=tool_call_id)
+                tool_messages.append(Message.tool(rendered, tool_call_id=tool_call_id))
                 continue
 
         # PreToolUse fires after the approval gate has accepted the call but
@@ -719,7 +729,7 @@ async def _execute_tool_calls(
                         elapsed_seconds=0.0,
                     )
                 )
-                agent.memory.add_tool_message(rendered, tool_call_id=tool_call_id)
+                tool_messages.append(Message.tool(rendered, tool_call_id=tool_call_id))
                 continue
 
         result = await executor.execute(
@@ -770,8 +780,12 @@ async def _execute_tool_calls(
                 # Tool already executed; abort here just stops the chain.
                 pass
 
-        agent.memory.add_tool_message(
-            result.content,
-            tool_call_id=tc.get("id", ""),
-            metadata={"protected": True} if tool_name == "Skill" else None,
+        tool_messages.append(
+            Message.tool(
+                result.content,
+                tool_call_id=tc.get("id", ""),
+                metadata=result.metadata or None,
+            )
         )
+
+    return tool_messages

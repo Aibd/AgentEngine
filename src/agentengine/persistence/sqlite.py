@@ -201,6 +201,10 @@ class SqlitePersistence:
         and the caller (Memory.save_to_db) always passes the full list. For
         very long conversations this becomes wasteful — switch to incremental
         append via ``position`` watermarks if profiling demands it.
+
+        The ``messages`` list is expected to contain the full persistent
+        payload produced by ``Message.to_persistent()`` so that metadata is
+        preserved across restarts.
         """
         now = _now_ms()
         with self._connect() as conn:

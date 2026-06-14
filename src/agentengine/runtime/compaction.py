@@ -36,11 +36,11 @@ class LLMSummaryCompactor:
         ]
         non_system = [msg for msg in messages if msg.role is not Role.SYSTEM]
 
-        # Protected messages (e.g. activated skill content) are kept verbatim
-        # and never summarized. They stay in the message list alongside system
-        # messages so the agent always has access to skill instructions.
-        protected = [msg for msg in non_system if msg.metadata.get("protected")]
-        summarizable = [msg for msg in non_system if not msg.metadata.get("protected")]
+        # Protected skill activation pairs (assistant tool call + tool result)
+        # are kept verbatim and never summarized.
+        protected_pairs = self._extract_protected_pairs(non_system)
+        protected_ids = {id(msg) for pair in protected_pairs for msg in pair}
+        summarizable = [msg for msg in non_system if id(msg) not in protected_ids]
 
         recent = _safe_recent_tail(summarizable, keep_recent=self.keep_recent)
         history = summarizable[: max(0, len(summarizable) - len(recent))]
@@ -51,7 +51,7 @@ class LLMSummaryCompactor:
             if msg.role is Role.SYSTEM and msg.metadata.get("compaction_summary")
         ]
         if not history and not previous_summaries:
-            return messages
+            return self._reassemble(system_messages, [], protected_pairs, non_system)
 
         transcript = _render_transcript(history)
         if previous_summaries:
@@ -79,7 +79,49 @@ class LLMSummaryCompactor:
             "Conversation summary so far:\n" + summary,
             metadata={"compaction_summary": True},
         )
-        return system_messages + protected + [summary_message] + recent
+        return self._reassemble(
+            system_messages, [summary_message], protected_pairs, recent
+        )
+
+    @staticmethod
+    def _extract_protected_pairs(
+        messages: list[Message],
+    ) -> list[tuple[Message, Message]]:
+        """Find assistant/tool-result pairs where the result is a skill activation."""
+        pairs: list[tuple[Message, Message]] = []
+        for idx, msg in enumerate(messages):
+            if msg.role is not Role.TOOL or not msg.metadata.get("skill_activation"):
+                continue
+            tool_call_id = msg.tool_call_id
+            if not tool_call_id:
+                continue
+            assistant_msg: Message | None = None
+            for prev in reversed(messages[:idx]):
+                if prev.role is not Role.ASSISTANT or not prev.tool_calls:
+                    continue
+                if any(call.get("id") == tool_call_id for call in prev.tool_calls):
+                    assistant_msg = prev
+                    break
+            if assistant_msg is not None:
+                pairs.append((assistant_msg, msg))
+        return pairs
+
+    @staticmethod
+    def _reassemble(
+        system_messages: list[Message],
+        summary_messages: list[Message],
+        protected_pairs: list[tuple[Message, Message]],
+        tail_messages: list[Message],
+    ) -> list[Message]:
+        """Put the final message list together preserving tool-call pairings."""
+        protected_ids = {id(msg) for pair in protected_pairs for msg in pair}
+        tail_without_protected = [m for m in tail_messages if id(m) not in protected_ids]
+
+        result = list(system_messages)
+        result.extend(summary_messages)
+        result.extend(msg for pair in protected_pairs for msg in pair)
+        result.extend(tail_without_protected)
+        return result
 
 
 def _render_transcript(messages: list[Message]) -> str:

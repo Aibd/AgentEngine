@@ -4,6 +4,20 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
+@dataclass(slots=True)
+class ToolResult:
+    """A tool result that carries optional metadata for the runtime.
+
+    Tools may return either a plain string or a ``ToolResult``. Returning a
+    ``ToolResult`` allows the tool to attach metadata (e.g. to mark a message
+    as protected from compaction) without changing the string payload seen by
+    the model.
+    """
+
+    content: str
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 class Tool(ABC):
     name: str
     description: str = ""
@@ -24,7 +38,7 @@ class Tool(ABC):
         }
 
     @abstractmethod
-    async def run(self, **kwargs: Any) -> Any:
+    async def run(self, **kwargs: Any) -> str | ToolResult:
         ...
 
 

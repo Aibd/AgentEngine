@@ -17,9 +17,12 @@ from agentengine.concurrency import (
 )
 from agentengine.enterprise.middleware import MiddlewareChain
 from agentengine.llm.interfaces import LLMClient
+from agentengine.memory.message import Message, Role
 from agentengine.persistence.port import PersistencePort
 from agentengine.definition import AgentDefinition
 from agentengine.run_config import RunConfig
+from agentengine.skills.catalog_prompt import SkillCatalogPrompt
+from agentengine.skills.loader import SkillLoader
 from agentengine.runtime.events import RuntimeEvent
 from agentengine.runtime.cancellation import CancellationToken
 from agentengine.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS
@@ -32,6 +35,7 @@ from agentengine.stream.sse_sink import SseSink
 DEFAULT_MAX_QUERY_CHARS = 20_000
 
 EventCallback = Callable[[RuntimeEvent], Awaitable[None] | None]
+EnabledNames = Callable[[], set[str]] | set[str] | None
 LLMFactory = Callable[[], LLMClient | None]
 ConfigResolver = Callable[[str, dict[str, Any] | None], RunConfig]
 DefinitionLike = AgentDefinition | RunConfig
@@ -64,11 +68,16 @@ class AgentEngine:
         persistence: PersistencePort | None = None,
         lock_manager: ConversationLockManager | None = None,
         middleware: MiddlewareChain | None = None,
+        skill_loader: SkillLoader | None = None,
+        enable_skill_catalog: bool = False,
+        enabled_skills: EnabledNames = None,
     ) -> None:
         if max_query_chars < 1:
             raise ValueError("max_query_chars must be at least 1")
         if definitions is not None and config_resolver is not None:
             raise ValueError("pass either definitions or config_resolver, not both")
+        if enable_skill_catalog and skill_loader is None:
+            raise ValueError("enable_skill_catalog requires a skill_loader")
         self._definitions = dict(definitions or {})
         self._config_resolver = config_resolver
         self._llm_factory = llm_factory
@@ -79,6 +88,9 @@ class AgentEngine:
         self._persistence = persistence
         self._lock_manager = lock_manager or InMemoryConversationLockManager()
         self._middleware = middleware
+        self._skill_loader = skill_loader
+        self._enable_skill_catalog = enable_skill_catalog
+        self._enabled_skills = enabled_skills
 
     async def run(
         self,
@@ -109,6 +121,8 @@ class AgentEngine:
 
         started_at = time.perf_counter()
         agent = AgentRun(config=config, context=context)
+        if self._enable_skill_catalog and self._skill_loader is not None:
+            context.extras["_inject_skill_catalog"] = self._inject_skill_catalog
         cancellation_token = CancellationToken()
         task = asyncio.current_task()
         self._active_runs[context.request_id] = (cancellation_token, task)
@@ -144,6 +158,45 @@ class AgentEngine:
                 started_at=started_at,
                 agent_name=agent_name,
             )
+
+    def _inject_skill_catalog(self, agent: AgentRun) -> None:
+        """Add a system message exposing enabled skills to the model.
+
+        The message is marked with metadata so it can be deduplicated across
+        turns and filtered from public API responses.
+        """
+        if not self._enable_skill_catalog or self._skill_loader is None:
+            return
+
+        if any(
+            message.metadata.get("skill_catalog")
+            for message in agent.memory.snapshot()
+            if message.role == Role.SYSTEM
+        ):
+            return
+
+        skills = self._skill_loader.discover().values()
+        enabled = self._resolve_enabled()
+        if enabled is not None:
+            skills = [skill for skill in skills if skill.name in enabled]
+
+        catalog = SkillCatalogPrompt.render(skills)
+        if catalog:
+            agent.memory.append(
+                Message.system(
+                    catalog,
+                    metadata={"skill_catalog": True, "generated": True},
+                )
+            )
+
+    def _resolve_enabled(self) -> set[str] | None:
+        """Resolve the optional enabled-skills allow-list."""
+        source = self._enabled_skills
+        if source is None:
+            return None
+        if callable(source):
+            return set(source())
+        return set(source)
 
     def interrupt(self, request_id: str, reason: str = "interrupted") -> bool:
         """Request cancellation for an active run by request id."""

@@ -6,7 +6,7 @@ from agentengine.skills.catalog import (
     SkillCatalogError,
     SkillCatalogProvider,
 )
-from agentengine.skills.loader import Skill, SkillLoader
+from agentengine.skills.loader import Skill, SkillLoader, SkillResources
 from agentengine.skills.registry import (
     SkillDetail,
     SkillImportError,
@@ -18,6 +18,7 @@ from agentengine.skills.registry import (
 __all__ = [
     "Skill",
     "SkillLoader",
+    "SkillResources",
     "SkillDetail",
     "SkillImportError",
     "SkillMetadataDB",

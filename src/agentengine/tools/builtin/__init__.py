@@ -26,6 +26,8 @@ from agentengine.tools.builtin.file_write_tool import FileAccessTracker, FileWri
 from agentengine.tools.builtin.glob_tool import GlobTool
 from agentengine.tools.builtin.grep_tool import GrepTool
 from agentengine.tools.builtin.read_file_tool import ReadFileTool
+from agentengine.tools.builtin.skill_resource_tool import ReadSkillResource
+from agentengine.tools.builtin.skill_script_tool import RunSkillScript
 from agentengine.tools.builtin.skill_tool import SkillTool
 from agentengine.tools.builtin.todo_write_tool import TodoWriteTool
 from agentengine.skills.loader import SkillLoader
@@ -41,6 +43,8 @@ __all__ = [
     "GlobTool",
     "GrepTool",
     "ReadFileTool",
+    "ReadSkillResource",
+    "RunSkillScript",
     "SkillTool",
     "TodoWriteTool",
     "FileAccessTracker",
@@ -65,13 +69,17 @@ BUILTIN_TOOL_FACTORIES: dict[str, Callable[..., Tool]] = {
     "TodoWrite": lambda workspace_root, **kw: TodoWriteTool(**kw),
     "AskUserQuestion": lambda workspace_root, **kw: AskUserQuestionTool(**kw),
     "Skill": lambda workspace_root, **kw: SkillTool(kw.pop("loader", None) or SkillLoader()),
+    "ReadSkillResource": lambda workspace_root, **kw: ReadSkillResource(
+        kw.pop("loader", None) or SkillLoader(),
+        enabled_names=kw.pop("enabled_names", None),
+    ),
 }
 
 # Tools resolvable by explicit name but excluded from the implicit "build
-# everything" default (when ``include is None``). ``Skill`` depends on a
-# SkillLoader scanning ``.agent/skills`` and should only attach when a preset
-# asks for it by name, not silently to every agent.
-_DEFAULT_EXCLUDED: frozenset[str] = frozenset({"Skill"})
+# everything" default (when ``include is None``). ``Skill`` and
+# ``ReadSkillResource`` depend on a SkillLoader and should only attach when a
+# preset asks for them by name.
+_DEFAULT_EXCLUDED: frozenset[str] = frozenset({"Skill", "ReadSkillResource"})
 
 
 def _build(
