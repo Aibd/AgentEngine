@@ -35,7 +35,6 @@ from agentengine.runtime.events import (
     RunStarted,
     RuntimeEvent,
 )
-from agentengine.runtime.file_access_tracker import TurnFileAccessTracker
 from agentengine.runtime.run_state import RunState, TerminalReason
 from agentengine.runtime.sinks import RuntimeEventFanout
 from agentengine.runtime.turn import DEFAULT_TOOL_TIMEOUT_SECONDS, run_turn
@@ -94,15 +93,6 @@ class TurnRunner:
                 *([on_event] if on_event is not None else []),
             ]
         )
-        # File-access tracker watches read/write tool calls in this run so
-        # write/edit tools can refuse to overwrite unseen content.
-        # Pre-existing tracker (e.g. supplied by a test) takes precedence.
-        tracker: TurnFileAccessTracker = (
-            context.extras.get("file_access_tracker")
-            or TurnFileAccessTracker(workspace_root=context.extras.get("workspace_root"))
-        )
-        context.extras["file_access_tracker"] = tracker
-
         # Hook manager: explicit > extras > nothing. We deliberately don't
         # fall back to the global default — that's opt-in via setup hook.
         hook_manager: HookManager | None = (

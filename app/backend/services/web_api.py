@@ -43,7 +43,6 @@ from agentengine.skills.registry import (
 from agentengine.sandbox import SandboxConfig, SandboxManager, SandboxedBashTool, SandboxedPythonTool
 from agentengine.tools.builtin import (
     build_default_tools,
-    ReadFileTool,
     ReadSkillResource,
     RunSkillScript,
     SkillTool,
@@ -89,7 +88,8 @@ PERSISTENCE = SqlitePersistence(DEFAULT_DB_PATH)
 LOCK_MANAGER = InMemoryConversationLockManager()
 SANDBOX_MANAGER: SandboxManager | None = None
 try:
-    _sandbox_sessions = REPO_ROOT / "data" / "sandbox-sessions"
+    _sessions_root_env = os.getenv("SANDBOX_SESSIONS_ROOT")
+    _sandbox_sessions = Path(_sessions_root_env) if _sessions_root_env else REPO_ROOT / "data" / "sandbox-sessions"
     SANDBOX_MANAGER = SandboxManager(sessions_root=_sandbox_sessions)
     import logging
     _logger = logging.getLogger(__name__)
@@ -167,7 +167,14 @@ async def capabilities() -> dict[str, Any]:
     disabled) is served by ``GET /api/skills`` for the management UI.
     """
     skill_loader = SkillLoader(cwd=REPO_ROOT)
-    tools = build_default_tools(workspace_root=REPO_ROOT)
+    if SANDBOX_MANAGER is not None:
+        # Sandbox mode: build_default_tools only contains bash/TodoWrite/AskUserQuestion;
+        # swap host bash for sandboxed bash and add sandboxed python.
+        tools = build_default_tools(workspace_root=REPO_ROOT, exclude=["bash"])
+        tools.append(SandboxedBashTool(manager=SANDBOX_MANAGER, conversation_id="capabilities"))
+        tools.append(SandboxedPythonTool(manager=SANDBOX_MANAGER, conversation_id="capabilities"))
+    else:
+        tools = build_default_tools(workspace_root=REPO_ROOT)
     tools.append(SkillTool(skill_loader))
     tools.append(ReadSkillResource(skill_loader))
     if SANDBOX_MANAGER is not None:
@@ -725,13 +732,6 @@ async def _run_agent_events(
         except Exception:
             sandbox = None
 
-    # File tools: use sandbox workspace as extra root so /workspace paths resolve.
-    if context.tool_collection.get("read_file") is None:
-        extra_roots = [sandbox_ws] if sandbox_ws else []
-        context.tool_collection.add(ReadFileTool(
-            workspace_root=REPO_ROOT,
-            extra_roots=extra_roots,
-        ))
     skill_loader = SkillLoader(cwd=REPO_ROOT)
     if context.tool_collection.get("Skill") is None:
         context.tool_collection.add(

@@ -21,11 +21,6 @@ from typing import TYPE_CHECKING, Any
 from agentengine.tools.base import Tool
 from agentengine.tools.builtin.ask_user_question_tool import AskUserQuestionTool
 from agentengine.tools.builtin.bash_tool import BashTool, is_destructive_command
-from agentengine.tools.builtin.file_edit_tool import FileEditTool
-from agentengine.tools.builtin.file_write_tool import FileAccessTracker, FileWriteTool
-from agentengine.tools.builtin.glob_tool import GlobTool
-from agentengine.tools.builtin.grep_tool import GrepTool
-from agentengine.tools.builtin.read_file_tool import ReadFileTool
 from agentengine.tools.builtin.skill_resource_tool import ReadSkillResource
 from agentengine.tools.builtin.skill_script_tool import RunSkillScript
 from agentengine.tools.builtin.skill_tool import SkillTool
@@ -38,16 +33,10 @@ if TYPE_CHECKING:
 __all__ = [
     "AskUserQuestionTool",
     "BashTool",
-    "FileEditTool",
-    "FileWriteTool",
-    "GlobTool",
-    "GrepTool",
-    "ReadFileTool",
     "ReadSkillResource",
     "RunSkillScript",
     "SkillTool",
     "TodoWriteTool",
-    "FileAccessTracker",
     "is_destructive_command",
     "BUILTIN_TOOL_FACTORIES",
     "build_default_tools",
@@ -59,13 +48,13 @@ __all__ = [
 # ``workspace_root`` plus optional kwargs and returns a fresh tool instance.
 # Tools that don't care about workspace_root accept it and ignore it so the
 # factory signatures stay uniform.
+#
+# Host-level file tools (read_file, write_file, edit_file, glob, grep) are
+# intentionally omitted: in sandbox mode all file I/O goes through the sandbox
+# container (bash/python tools). Direct host filesystem access from agents is
+# not part of the SaaS chatbot model.
 BUILTIN_TOOL_FACTORIES: dict[str, Callable[..., Tool]] = {
     "bash": lambda workspace_root, **kw: BashTool(workspace_root=workspace_root, **kw),
-    "glob": lambda workspace_root, **kw: GlobTool(workspace_root=workspace_root, **kw),
-    "grep": lambda workspace_root, **kw: GrepTool(workspace_root=workspace_root, **kw),
-    "read_file": lambda workspace_root, **kw: ReadFileTool(workspace_root=workspace_root, **kw),
-    "write_file": lambda workspace_root, **kw: FileWriteTool(workspace_root=workspace_root, **kw),
-    "edit_file": lambda workspace_root, **kw: FileEditTool(workspace_root=workspace_root, **kw),
     "TodoWrite": lambda workspace_root, **kw: TodoWriteTool(**kw),
     "AskUserQuestion": lambda workspace_root, **kw: AskUserQuestionTool(**kw),
     "Skill": lambda workspace_root, **kw: SkillTool(kw.pop("loader", None) or SkillLoader()),
@@ -78,7 +67,7 @@ BUILTIN_TOOL_FACTORIES: dict[str, Callable[..., Tool]] = {
 # Tools resolvable by explicit name but excluded from the implicit "build
 # everything" default (when ``include is None``). ``Skill`` and
 # ``ReadSkillResource`` depend on a SkillLoader and should only attach when a
-# preset asks for them by name.
+# definition asks for them by name.
 _DEFAULT_EXCLUDED: frozenset[str] = frozenset({"Skill", "ReadSkillResource"})
 
 
@@ -110,9 +99,8 @@ def build_default_tools(
     *,
     include: list[str] | None = None,
     exclude: list[str] | None = None,
-    access_tracker: FileAccessTracker | None = None,
 ) -> list[Tool]:
-    """Construct the standard set of builtin tools for an agent preset.
+    """Construct the standard set of builtin tools for an agent definition.
 
     Args:
         workspace_root: workspace root path; defaults to ``$AGENT_WORKSPACE_ROOT``
@@ -120,26 +108,14 @@ def build_default_tools(
         include: explicit list of tool names to include. If None, every tool
             in :data:`BUILTIN_TOOL_FACTORIES` is built.
         exclude: tool names to skip. Applied after ``include``.
-        access_tracker: shared :class:`FileAccessTracker` injected into
-            write/edit tools so they can enforce the read-before-write rule.
-
-    Note:
-        TodoWrite and AskUserQuestion need an ``emit`` callback and run/turn
-        ids to publish their runtime events. This factory leaves them at
-        their no-op defaults; use :func:`build_default_tools_for_context`
-        when you have a live ``AgentContext``.
     """
     if workspace_root is None:
         workspace_root = Path(os.getenv("AGENT_WORKSPACE_ROOT", os.getcwd()))
-    per_tool: dict[str, dict[str, Any]] = {}
-    if access_tracker is not None:
-        per_tool["write_file"] = {"access_tracker": access_tracker}
-        per_tool["edit_file"] = {"access_tracker": access_tracker}
     return _build(
         workspace_root=workspace_root,
         include=include,
         exclude=exclude,
-        per_tool_kwargs=per_tool,
+        per_tool_kwargs={},
     )
 
 
@@ -151,17 +127,14 @@ def build_default_tools_for_context(
 ) -> list[Tool]:
     """RunConfig-setup-friendly wrapper.
 
-    Pulls ``workspace_root``, the per-run :class:`FileAccessTracker`, the
-    runtime ``emit`` function, and the run/turn ids out of the context's
-    ``extras`` (TurnRunner installs all of them before invoking the agent's
-    setup hook). Falls back gracefully when called outside a TurnRunner —
-    every dependency the tools take is optional, and they degrade to a
-    no-op when missing.
+    Pulls ``workspace_root``, the runtime ``emit`` function, and the run/turn
+    ids out of the context's ``extras`` (TurnRunner installs all of them before
+    invoking the agent's setup hook). Falls back gracefully when called outside
+    a TurnRunner — every dependency the tools take is optional.
     """
     workspace_root = context.extras.get("workspace_root") or Path(
         os.getenv("AGENT_WORKSPACE_ROOT", os.getcwd())
     )
-    tracker = context.extras.get("file_access_tracker")
     emit = context.extras.get("emit")
     run_id = context.extras.get("run_id", "") or ""
     turn_id = context.extras.get("turn_id", "") or ""
@@ -169,9 +142,6 @@ def build_default_tools_for_context(
     conversation_id = context.conversation_id or ""
 
     per_tool: dict[str, dict[str, Any]] = {}
-    if tracker is not None:
-        per_tool["write_file"] = {"access_tracker": tracker}
-        per_tool["edit_file"] = {"access_tracker": tracker}
     per_tool["TodoWrite"] = {
         "store": context.extras,
         "emit": emit,
