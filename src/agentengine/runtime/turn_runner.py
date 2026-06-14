@@ -104,7 +104,6 @@ class TurnRunner:
         started_at = time.perf_counter()
 
         async def emit(event: RuntimeEvent) -> None:
-            tracker.observe(event)
             events.append(event)
             await fanout.consume(event)
 
