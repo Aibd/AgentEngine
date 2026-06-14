@@ -1,9 +1,16 @@
-"""Tool for executing skill scripts inside a sandbox."""
+"""Tool for executing skill scripts inside a sandbox or on the host.
+
+Scripts in skills with ``host_exec: true`` frontmatter run as host subprocesses
+(needed for network access, since the sandbox has network_disabled=True).
+All other scripts run inside the per-conversation sandbox container.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import shlex
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -95,27 +102,69 @@ class RunSkillScript(Tool):
         except SkillPathError as exc:
             return f"Invalid script path: {exc}"
 
-        materialized = self._materializer.materialize(skill)
-        sandbox = self._sandbox_manager.acquire(self._conversation_id)
-
         interpreter = self._infer_interpreter(script_path)
-        workdir = materialized.workspace_path
         argv = [interpreter, script_path, *args]
+        timeout_f = float(timeout) if timeout else 60.0
 
         logger.info(
-            "skill_script_run skill=%s script=%s conv=%s argv=%s",
-            skill_name,
-            script_path,
-            self._conversation_id,
-            argv,
-        )
-        result = sandbox.exec_argv(
-            argv,
-            timeout=float(timeout) if timeout else None,
-            workdir=workdir,
+            "skill_script_run skill=%s script=%s host_exec=%s conv=%s",
+            skill_name, script_path, skill.host_exec, self._conversation_id,
         )
 
+        if skill.host_exec:
+            result = await self._run_on_host(skill, script_path, argv, timeout_f)
+        else:
+            materialized = self._materializer.materialize(skill)
+            sandbox = self._sandbox_manager.acquire(self._conversation_id)
+            result = sandbox.exec_argv(
+                argv,
+                timeout=timeout_f,
+                workdir=materialized.workspace_path,
+            )
+
         return self._format_result(script_path, argv, result)
+
+    @staticmethod
+    async def _run_on_host(
+        skill: Any,
+        script_path: str,
+        argv: list[str],
+        timeout: float,
+    ) -> dict[str, Any]:
+        """Run a skill script as a host subprocess (for network-dependent skills)."""
+        script_full = str(skill.base_dir / script_path)
+        host_argv = [argv[0], script_full, *argv[2:]]  # replace relative path with absolute
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *host_argv,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(skill.base_dir),
+            )
+            try:
+                stdout_b, stderr_b = await asyncio.wait_for(
+                    proc.communicate(), timeout=timeout
+                )
+                timed_out = False
+                exit_code = proc.returncode or 0
+            except asyncio.TimeoutError:
+                proc.kill()
+                stdout_b, stderr_b = await proc.communicate()
+                timed_out = True
+                exit_code = -1
+        except Exception as exc:
+            return {
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": f"host exec error: {exc}",
+                "timed_out": False,
+            }
+        return {
+            "exit_code": exit_code,
+            "stdout": stdout_b.decode("utf-8", errors="replace"),
+            "stderr": stderr_b.decode("utf-8", errors="replace"),
+            "timed_out": timed_out,
+        }
 
     @staticmethod
     def _infer_interpreter(script_path: str) -> str:

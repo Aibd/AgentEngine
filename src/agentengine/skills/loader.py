@@ -44,6 +44,7 @@ class Skill:
     body: str  # SKILL.md body after frontmatter
     base_dir: Path | None = None
     resources: SkillResources | None = None
+    host_exec: bool = False  # When True, scripts run on the host process (not sandbox)
 
     MAX_RESOURCE_FILES: int = 100
     RESOURCE_DIRS: frozenset[str] = frozenset({"scripts", "references", "assets"})
@@ -324,6 +325,8 @@ class SkillLoader:
                 actual_dir_name,
             )
 
+        host_exec = bool(frontmatter.get("host_exec", False))
+
         try:
             return Skill(
                 name=name,
@@ -331,6 +334,7 @@ class SkillLoader:
                 path=path,
                 body=body,
                 base_dir=path.parent,
+                host_exec=host_exec,
             )
         except SkillResourceLimitError as exc:
             logger.error("skill_resource_limit_exceeded path=%s error=%s", path, exc)
