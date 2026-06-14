@@ -133,7 +133,10 @@ class RunSkillScript(Tool):
     ) -> dict[str, Any]:
         """Run a skill script as a host subprocess (for network-dependent skills)."""
         script_full = str(skill.base_dir / script_path)
-        host_argv = [argv[0], script_full, *argv[2:]]  # replace relative path with absolute
+        # Use the current venv's Python so the subprocess inherits os.environ
+        # (including TAVILY_API_KEY loaded via dotenv) and has all installed packages.
+        interpreter = sys.executable if argv[0] == "python" else argv[0]
+        host_argv = [interpreter, script_full, *argv[2:]]  # replace relative path with absolute
         try:
             proc = await asyncio.create_subprocess_exec(
                 *host_argv,
