@@ -19,6 +19,7 @@
 1. [适用范围](#1-适用范围)
 2. [前置条件](#2-前置条件)
 3. [架构落点](#3-架构落点)
+   - [3.1 部署拓扑图解](#31-部署拓扑图解)
 4. [执行引擎：会话容器](#4-执行引擎会话容器)
 5. [隔离模型](#5-隔离模型)
 6. [文件传递](#6-文件传递)
@@ -86,6 +87,144 @@ SandboxManager                 新增：与 ConversationLockManager 同级（按
 设计要点：执行单元与控制端（Agent App）之间隔着一条信任边界。控制端可信、运行于主机；
 不可信代码运行于容器内。隔离能力由容器 runtime 提供，与编排、调度正交——本方案不依赖
 Kubernetes，隔离作为部署期可插拔的实现接入。
+
+---
+
+## 3.1 部署拓扑图解
+
+### 场景 A：App 运行于宿主机（标准部署）
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  宿主机                                                   │
+│                                                           │
+│  ┌─────────────────────────────┐                          │
+│  │  App 进程（可信）            │                          │
+│  │  SandboxManager             │                          │
+│  │  sessions_root =            │                          │
+│  │    /var/agent/sessions/     │                          │
+│  └──────────────┬──────────────┘                          │
+│                 │ Docker SDK                               │
+│                 ▼                                          │
+│  Docker Daemon (/var/run/docker.sock)                     │
+│                 │                                          │
+│                 │ docker run + bind mount                  │
+│                 ▼                                          │
+│  ┌──────────────────────────────────────────┐             │
+│  │  沙盒容器（不可信代码在此运行）            │             │
+│  │  /workspace ←── bind mount ───────────── │ ────────┐  │
+│  └──────────────────────────────────────────┘         │  │
+│                                                        │  │
+│  宿主机文件系统: /var/agent/sessions/{conv_id}/ ◄──────┘  │
+│  （App 进程直接读写此目录，无需 mount）                    │
+└─────────────────────────────────────────────────────────┘
+```
+
+路径流转：App 进程写 `/var/agent/sessions/{id}/data.csv` → 沙盒容器读 `/workspace/data.csv`，一份文件，零拷贝。
+
+---
+
+### 场景 B：App 运行于 Docker 容器（本项目实际部署）
+
+核心约束：Docker daemon 始终运行在**宿主机**，bind mount 路径由 daemon 用**宿主机路径**解析。
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  宿主机                                                           │
+│                                                                   │
+│  Docker Daemon (/var/run/docker.sock)                            │
+│       ▲                          │                                │
+│       │ socket mount             │ docker run + bind mount        │
+│       │                          ▼                                │
+│  ┌────┴────────────────┐   ┌─────────────────────────────────┐   │
+│  │  App 容器（可信）    │   │  沙盒容器（不可信代码在此运行）  │   │
+│  │                     │   │                                  │   │
+│  │  SandboxManager     │   │  /workspace                      │   │
+│  │  sessions_root =    │   │     ▲                            │   │
+│  │  /var/agent/sess/   │   └─────┼────────────────────────────┘   │
+│  │       │             │         │                                 │
+│  └───────┼─────────────┘         │ bind mount（daemon 用宿主机路径）│
+│          │ volume mount          │                                 │
+│          ▼                       ▼                                 │
+│  宿主机文件系统: /var/agent/sessions/{conv_id}/  ◄─── 三方共享    │
+│                                                                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**关键约束：路径字符串必须三方一致**
+
+```
+宿主机路径:          /var/agent/sessions/{conv_id}/
+                          ↑                 ↑
+App 容器 volume:     /var/agent/sessions/   （SANDBOX_SESSIONS_ROOT）
+沙盒容器 bind:       /var/agent/sessions/{conv_id}/  → 挂入 /workspace
+```
+
+`SANDBOX_SESSIONS_ROOT`（容器内路径）必须与 docker-compose 里 volume 的**宿主机侧路径**完全一致，否则 daemon 会找不到目录。
+
+**docker-compose 配置（见 `deploy/docker-compose.yml`）**：
+
+```yaml
+environment:
+  SANDBOX_SESSIONS_ROOT: /var/agent/sandbox-sessions   # ← 容器内路径
+
+volumes:
+  - /var/run/docker.sock:/var/run/docker.sock           # ① daemon 访问
+  - /var/agent/sandbox-sessions:/var/agent/sandbox-sessions  # ② 路径必须左右相同
+```
+
+> **安全说明**：挂载 `docker.sock` 使 App 容器持有接近宿主机 root 的权限。
+> 适用于可信内网环境。公网暴露场景请改用场景 C（沙盒代理）。
+
+#### Windows 开发环境（Docker Desktop）
+
+Windows 上有更简单的选择：
+
+**推荐：直接跑 Python，不容器化 App**
+
+```
+Windows 宿主机
+├── Python 进程（直接运行）
+│   └── SandboxManager → docker.from_env() → Docker Desktop（自动连接，无需配置）
+└── Docker Desktop (WSL2)
+    └── 沙盒容器（Windows 路径由 Docker Desktop 自动转换）
+```
+
+`docker.from_env()` 在 Windows 上自动连接 Docker Desktop 的 named pipe，
+`sessions_root` 用默认 Windows 路径即可，Docker Desktop 自动处理路径转换。**零配置。**
+
+**如果 App 也要容器化（Windows docker-compose）**
+
+Docker Desktop WSL2 backend 中，`/var/run/docker.sock` 在 Linux 容器里可以直接访问。
+但 bind mount 绝对路径（`/var/agent/sandbox-sessions`）在 Windows 上没有对应真实目录，
+改用 **named volume** 让 Docker 自动管理路径：
+
+```yaml
+# docker-compose.override.yml（Windows 本地覆盖，不提交到 git）
+services:
+  backend:
+    environment:
+      SANDBOX_SESSIONS_ROOT: /var/agent/sandbox-sessions
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - sandbox-sessions:/var/agent/sandbox-sessions  # named volume，Docker 自动管理
+      - agent-data:/app/data
+volumes:
+  sandbox-sessions:
+```
+
+Named volume 由 Docker 内部管理，路径在 WSL2 VM 内部，三方（App 容器 / 沙盒容器 / daemon）自动一致，无需手动对齐路径字符串。
+
+---
+
+### 场景 C：跨机器部署（进阶，超出本文范围）
+
+若 App 与 Docker daemon 不在同一台机器，需额外实现：
+
+- Docker Remote API（TCP + TLS）替代 `docker.from_env()`
+- 共享存储（NFS / 对象存储）替代 bind mount
+
+详见文档第 1 节"非目标"说明。
 
 ---
 

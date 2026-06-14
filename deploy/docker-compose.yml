@@ -1,0 +1,69 @@
+# AgentEngine — 容器化部署
+#
+# 沙盒路径约束（重要）：
+#   SANDBOX_SESSIONS_ROOT 必须在宿主机和 app 容器内使用同一字符串路径。
+#   Docker daemon 用宿主机路径解析 bind mount，如路径不一致沙盒容器将无法挂载 workspace。
+#
+# 平台差异：
+#   Linux 宿主机：使用下方默认配置（bind mount 绝对路径）
+#   Windows Docker Desktop（WSL2 backend）：取消注释 "windows-dev" 覆盖段，
+#     或直接用 named volume（sandbox-sessions）— Docker 自动管理路径，无需手动对齐
+#
+# 使用方法：
+#   docker compose -f deploy/docker-compose.yml up -d
+#
+# 首次部署前需构建沙盒镜像（在仓库根目录执行）：
+#   docker build -f deploy/sandbox/Dockerfile.session -t agentengine-sandbox:session .
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile          # 按实际 app Dockerfile 路径调整
+    ports:
+      - "8000:8000"
+    environment:
+      # 沙盒 workspace 根目录；必须与下方 volumes 中的容器内挂载路径完全一致
+      SANDBOX_SESSIONS_ROOT: /var/agent/sandbox-sessions
+      # 其他业务环境变量
+      # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    volumes:
+      # 1. docker.sock
+      #    Linux:   /var/run/docker.sock:/var/run/docker.sock
+      #    Windows Docker Desktop (WSL2): 同上，Docker Desktop 自动代理
+      #    安全说明：持有此 socket 等价于宿主机 root 权限，仅在可信内网环境使用
+      - /var/run/docker.sock:/var/run/docker.sock
+
+      # 2. 沙盒 workspace 共享目录
+      #
+      #    [Linux 生产] bind mount 绝对路径，三方路径字符串完全一致：
+      - /var/agent/sandbox-sessions:/var/agent/sandbox-sessions
+      #
+      #    [Windows 开发] 注释掉上面一行，改用 named volume（取消下行注释）：
+      #    named volume 由 Docker 管理，路径由 Docker daemon 内部分配，自动保证一致。
+      #    同时将 SANDBOX_SESSIONS_ROOT 改为 /sandbox-sessions（见下方 windows-dev 段）
+      # - sandbox-sessions:/var/agent/sandbox-sessions
+
+      # 3. 持久化数据（SQLite DB、上传文件）
+      - agent-data:/app/data
+
+    restart: unless-stopped
+
+  # ── Windows 开发覆盖示例 ──────────────────────────────────────────────────
+  # 在仓库根创建 docker-compose.override.yml 并写入以下内容即可覆盖，无需修改本文件：
+  #
+  # services:
+  #   backend:
+  #     environment:
+  #       SANDBOX_SESSIONS_ROOT: /var/agent/sandbox-sessions
+  #     volumes:
+  #       - /var/run/docker.sock:/var/run/docker.sock
+  #       - sandbox-sessions:/var/agent/sandbox-sessions
+  #       - agent-data:/app/data
+  # volumes:
+  #   sandbox-sessions:
+  # ─────────────────────────────────────────────────────────────────────────
+
+volumes:
+  agent-data:
+  # sandbox-sessions:   # Windows 开发时取消注释
