@@ -46,7 +46,7 @@ export function runAgentTrace(
   query: string,
   onEvent: TraceHandler,
   onDone: DoneHandler,
-  agentName = "deep_research",
+  agentName = "general_chat",
   conversationId = "web-conversation",
   skill = "",
 ): () => void {

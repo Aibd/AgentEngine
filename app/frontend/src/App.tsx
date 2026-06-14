@@ -304,7 +304,7 @@ export function App() {
         stopMapRef.current.delete(runSessionId);
         setSessionRunning(runSessionId, false);
       },
-      activeSession.agentName ?? "deep_research",
+      activeSession.agentName ?? "general_chat",
       runSessionId,
       selectedSkill,
     );

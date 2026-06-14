@@ -640,7 +640,7 @@ async def report_export(report_id: str, export_format: str) -> Response:
 @app.get("/api/runs/stream")
 async def run_stream(
     query: str = Query(..., min_length=1),
-    agent_name: str = Query("deep_research", min_length=1),
+    agent_name: str = Query("general_chat", min_length=1),
     conversation_id: str = Query("web-conversation", min_length=1),
     tenant_id: str = Query("default", min_length=1),
     user_id: str = Query("", min_length=0),
@@ -774,6 +774,8 @@ async def _run_agent_events(
         try:
             await service.run(agent_name=agent_name, query=effective_query, context=context)
         except Exception as exc:
+            import logging as _logging
+            _logging.getLogger(__name__).exception("run_agent_error agent=%s", agent_name)
             if context.printer and "agent" not in context.extras:
                 await context.printer.error(error_to_dict(exc))
         finally:
