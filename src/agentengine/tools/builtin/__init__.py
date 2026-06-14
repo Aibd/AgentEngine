@@ -25,6 +25,8 @@ from agentengine.tools.builtin.skill_resource_tool import ReadSkillResource
 from agentengine.tools.builtin.skill_script_tool import RunSkillScript
 from agentengine.tools.builtin.skill_tool import SkillTool
 from agentengine.tools.builtin.todo_write_tool import TodoWriteTool
+from agentengine.tools.builtin.web_fetch_tool import WebFetchTool
+from agentengine.tools.builtin.web_search_tool import WebSearchTool
 from agentengine.skills.loader import SkillLoader
 
 if TYPE_CHECKING:
@@ -37,6 +39,8 @@ __all__ = [
     "RunSkillScript",
     "SkillTool",
     "TodoWriteTool",
+    "WebFetchTool",
+    "WebSearchTool",
     "is_destructive_command",
     "BUILTIN_TOOL_FACTORIES",
     "build_default_tools",
@@ -55,6 +59,8 @@ __all__ = [
 # not part of the SaaS chatbot model.
 BUILTIN_TOOL_FACTORIES: dict[str, Callable[..., Tool]] = {
     "bash": lambda workspace_root, **kw: BashTool(workspace_root=workspace_root, **kw),
+    "web_search": lambda workspace_root, **kw: WebSearchTool(**kw),
+    "web_fetch": lambda workspace_root, **kw: WebFetchTool(**kw),
     "TodoWrite": lambda workspace_root, **kw: TodoWriteTool(**kw),
     "AskUserQuestion": lambda workspace_root, **kw: AskUserQuestionTool(**kw),
     "Skill": lambda workspace_root, **kw: SkillTool(kw.pop("loader", None) or SkillLoader()),
