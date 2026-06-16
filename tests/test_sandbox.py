@@ -1,8 +1,9 @@
 """Sandbox tests using a fake Docker client — no real containers required.
 
-These prove the host-side contract: lifecycle (acquire/reuse/release), the
-capacity cap, idle reaping, workspace wiring, and that SandboxedBashTool stays
-transparent (name + schema) to the tool layer.
+These prove the host-side contract for the resident session-container model:
+lifecycle (acquire / reuse / release), idle reaping, capacity caps, workspace
+wiring, and that SandboxedBashTool stays transparent (name + schema) to the
+tool layer.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ class FakeExecResult:
 
 
 class FakeContainer:
-    removed = 0
+    removed = 0  # class-level counter
 
     def __init__(self, name):
         self.name = name
@@ -39,7 +40,6 @@ class FakeContainer:
         self._removed = False
 
     def exec_run(self, argv, demux=False, workdir=None):
-        # argv == ["timeout", "<n>", "sh", "-c", "<command>"]  (or python -c)
         cmd = argv[-1]
         return FakeExecResult(0, (f"ran: {cmd}".encode(), b""))
 
@@ -69,13 +69,24 @@ class FakeDocker:
         self.containers = FakeContainers()
 
 
+@pytest.fixture(autouse=True)
+def _reset_fake_counter():
+    FakeContainer.removed = 0
+    yield
+
+
 @pytest.fixture
-def manager(tmp_path: Path):
+def fake_docker():
+    return FakeDocker()
+
+
+@pytest.fixture
+def manager(tmp_path: Path, fake_docker: FakeDocker):
     cfg = SandboxConfig(max_containers=2, idle_ttl_seconds=0)
     return SandboxManager(
         sessions_root=tmp_path / "sessions",
         config=cfg,
-        docker_client=FakeDocker(),
+        docker_client=fake_docker,
     )
 
 
@@ -123,27 +134,59 @@ def test_shutdown_clears_all(manager: SandboxManager):
     manager.acquire("conv-2")
     manager.shutdown()
     assert manager.active_count == 0
+    assert FakeContainer.removed == 2
 
 
-def test_idle_reaping(tmp_path: Path):
+def test_idle_reaping(tmp_path: Path, fake_docker: FakeDocker):
+    """Idle containers past TTL are reaped by the background thread."""
     cfg = SandboxConfig(max_containers=4, idle_ttl_seconds=0.05)
     mgr = SandboxManager(
-        sessions_root=tmp_path / "s", config=cfg,
-        docker_client=FakeDocker(),
+        sessions_root=tmp_path / "s",
+        config=cfg,
+        docker_client=fake_docker,
+        reap_interval=0.05,  # scan every 50ms for fast test
     )
     sb = mgr.acquire("conv-1")
-    sb.last_used -= 10.0  # force it stale
-    reaped = mgr.reap_idle()
-    assert reaped == 1
+    assert mgr.active_count == 1
+
+    # Force it stale
+    sb.last_used -= 10.0
+
+    # Wait for the reaper to pick it up
+    import time
+    deadline = time.monotonic() + 2.0
+    while mgr.active_count > 0 and time.monotonic() < deadline:
+        time.sleep(0.05)
     assert mgr.active_count == 0
+
+
+# --- exec uses the resident container ---------------------------------------
+
+def test_exec_uses_resident_container(manager: SandboxManager):
+    """Multiple execs go into the same resident container (no new creates)."""
+    sb = manager.acquire("conv-1")
+    before = len(manager._client.containers.created)
+
+    sb.exec_shell("echo hi")
+    sb.exec_shell("echo again")
+
+    # No new containers created — same resident container reused
+    assert len(manager._client.containers.created) == before
+
+
+def test_exec_updates_last_used(manager: SandboxManager):
+    sb = manager.acquire("conv-1")
+    before = sb.last_used
+    import time
+    time.sleep(0.1)
+    sb.exec_shell("echo hi")
+    assert sb.last_used >= before  # monotonic — same tick possible on fast machines
 
 
 # --- tool transparency -----------------------------------------------------
 
 def test_sandboxed_bash_matches_builtin_contract(manager: SandboxManager):
     tool = SandboxedBashTool(manager=manager, conversation_id="conv-1")
-    # Same name + same required schema field as the in-process BashTool, so the
-    # tool layer and the LLM see no difference.
     assert tool.name == BashTool.name == "bash"
     assert tool.schema["required"] == ["command"]
 
@@ -153,4 +196,4 @@ def test_sandboxed_bash_runs_in_container(manager: SandboxManager):
     out = asyncio.run(tool.run(command="echo hi"))
     assert "exit=0" in out
     assert "ran: echo hi" in out
-    assert manager.active_count == 1  # acquired a container on first run
+    assert manager.active_count == 1

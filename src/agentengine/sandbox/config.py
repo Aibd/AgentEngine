@@ -74,13 +74,21 @@ class SandboxConfig:
 
     # --- capacity (manager-level) -------------------------------------------
     max_containers: int = 24
-    """Max concurrent live containers. Worst-case sandbox memory is roughly
-    ``max_containers * mem_limit``; size this against the host's memory budget,
-    leaving headroom for the OS, the Agent App, and the LLM client."""
+    """Max concurrent live containers (resident ``sleep infinity`` containers).
+    Worst-case sandbox memory is roughly ``max_containers * mem_limit``; size
+    this against the host's memory budget, leaving headroom for the OS, the
+    Agent App, and the LLM client."""
+
+    max_concurrent_execs: int = 0
+    """Max simultaneous ``exec_run`` calls across all containers. 0 = unlimited.
+    A separate knob from ``max_containers`` — a container can be alive but have
+    zero active execs. Use this to cap CPU/memory spikes during parallel tool
+    calls without limiting the number of resident containers."""
 
     idle_ttl_seconds: float = 900.0
-    """Reap a container after this many seconds with no exec. Stops zombie
-    sessions from pinning memory. 0 disables TTL reaping."""
+    """Reap a container after this many seconds with no exec. A background
+    reaper thread scans every 60s and destroys idle containers, preventing
+    zombie sessions from pinning memory. 0 disables TTL reaping."""
 
     def host_config_kwargs(self) -> dict[str, Any]:
         """Translate this config into ``docker.containers.run`` kwargs shared by

@@ -2,7 +2,8 @@
 
 This is the doc's "会话容器" model — the single execution engine:
 
-* The container stays alive (``sleep infinity``) for the whole conversation.
+* The container stays alive (``sleep infinity``) for the whole conversation so
+  that ``pip install``'d packages and container-local state persist across execs.
 * Each call ``exec``s into it, so the *expensive* create/start cost is paid
   once per session, not once per execution.
 * The workspace is a host directory bind-mounted at ``cfg.workspace_mount`` —
@@ -13,6 +14,9 @@ Each ``python -c`` is a *fresh* process, so in-memory Python variables do NOT
 persist between execs (only files and pip-installed packages do). That keeps
 every execution clean of the previous one's state — produce charts/tables by
 writing them to files under the workspace, which the host then collects.
+
+Idle containers are reaped by ``SandboxManager._reap_loop()`` after
+``cfg.idle_ttl_seconds`` of inactivity.
 """
 
 from __future__ import annotations
