@@ -32,8 +32,6 @@ from agentengine.stream.sse_queue import SseEventQueue
 from agentengine.stream.sse_sink import SseSink
 
 
-DEFAULT_MAX_QUERY_CHARS = 20_000
-
 EventCallback = Callable[[RuntimeEvent], Awaitable[None] | None]
 EnabledNames = Callable[[], set[str]] | set[str] | None
 LLMFactory = Callable[[], LLMClient | None]
@@ -64,7 +62,6 @@ class AgentEngine:
         config_resolver: ConfigResolver | None = None,
         llm_factory: LLMFactory | None = None,
         require_llm: bool = True,
-        max_query_chars: int = DEFAULT_MAX_QUERY_CHARS,
         persistence: PersistencePort | None = None,
         lock_manager: ConversationLockManager | None = None,
         middleware: MiddlewareChain | None = None,
@@ -72,8 +69,6 @@ class AgentEngine:
         enable_skill_catalog: bool = False,
         enabled_skills: EnabledNames = None,
     ) -> None:
-        if max_query_chars < 1:
-            raise ValueError("max_query_chars must be at least 1")
         if definitions is not None and config_resolver is not None:
             raise ValueError("pass either definitions or config_resolver, not both")
         if enable_skill_catalog and skill_loader is None:
@@ -82,7 +77,6 @@ class AgentEngine:
         self._config_resolver = config_resolver
         self._llm_factory = llm_factory
         self._require_llm = require_llm
-        self._max_query_chars = max_query_chars
         self._managed_llms: dict[int, LLMClient] = {}
         self._active_runs: dict[str, tuple[CancellationToken, asyncio.Task[Any] | None]] = {}
         self._persistence = persistence
@@ -292,10 +286,7 @@ class AgentEngine:
             raise TypeError("query must be a string")
         if not query.strip():
             raise ValueError("query must not be empty")
-        if len(query) > self._max_query_chars:
-            raise ValueError(
-                f"query is too long: {len(query)} > {self._max_query_chars}"
-            )
+
 
     def create_streaming_context(
         self,
@@ -349,7 +340,6 @@ PresetLike = DefinitionLike
 __all__ = [
     "AgentEngine",
     "ConfigResolver",
-    "DEFAULT_MAX_QUERY_CHARS",
     "DefinitionLike",
     "EventCallback",
     "LLMFactory",

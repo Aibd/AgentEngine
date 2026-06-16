@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping
 from typing import cast
 
 from app.backend.agents import REGISTRY as AGENT_REGISTRY
-from agentengine.engine import AgentEngine, DEFAULT_MAX_QUERY_CHARS, PresetLike
+from agentengine.engine import AgentEngine, PresetLike
 from agentengine.concurrency import ConversationLockManager
 from agentengine.enterprise.middleware import MiddlewareChain
 from agentengine.llm.interfaces import LLMClient
@@ -37,7 +37,6 @@ class AgentOrchestrationService(AgentEngine):
         presets: Mapping[str, PresetLike] | None = None,
         llm_factory: Callable[[], LLMClient | None] | None = None,
         require_llm: bool = False,
-        max_query_chars: int = DEFAULT_MAX_QUERY_CHARS,
         persistence: PersistencePort | None = None,
         lock_manager: ConversationLockManager | None = None,
         middleware: MiddlewareChain | None = None,
@@ -46,7 +45,6 @@ class AgentOrchestrationService(AgentEngine):
             definitions=presets or AGENT_REGISTRY,
             llm_factory=llm_factory or _default_llm_factory,
             require_llm=require_llm,
-            max_query_chars=max_query_chars,
             persistence=persistence,
             lock_manager=lock_manager,
             middleware=middleware,

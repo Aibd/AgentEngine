@@ -124,9 +124,6 @@ class AgentEngine:
         require_llm: bool = True,
         # 是否要求 LLM 必须存在，False 时允许没有 LLM 也能运行（测试用）
 
-        max_query_chars: int = 20_000,
-        # 用户输入最大字符数，超长输入将被截断
-
         persistence: PersistencePort | None = None,
         # 持久化实现，注入后引擎会在 conversation_id 非空时自动加载/保存消息
 

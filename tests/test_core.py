@@ -71,13 +71,6 @@ async def test_service_rejects_empty_query():
         await service.run(agent_name="general_chat", query="   ")
 
 
-async def test_service_rejects_too_long_query():
-    service = AgentOrchestrationService(max_query_chars=4)
-
-    with pytest.raises(ValueError, match="too long"):
-        await service.run(agent_name="general_chat", query="hello")
-
-
 async def test_public_engine_uses_explicit_definitions_and_llm():
     llm = MockLLMClient([LLMResponse(content="sdk response", finish_reason="stop")])
     engine = AgentEngine(
