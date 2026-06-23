@@ -50,16 +50,16 @@ class SandboxConfig:
     regardless. Turn on if your image is fully pre-provisioned."""
 
     # --- cgroup limits -------------------------------------------------------
-    mem_limit: str = "512m"
+    mem_limit: str = "256m"
     """Hardening #6: memory ceiling per container (cgroup)."""
 
-    nano_cpus: int = 2_000_000_000
-    """Hardening #6: CPU quota in nano-CPUs. 2e9 = 2 cores. 1e9 = 1 core."""
+    nano_cpus: int = 500_000_000
+    """Hardening #6: CPU quota in nano-CPUs. 5e8 = 0.5 cores. 1e9 = 1 core."""
 
-    pids_limit: int = 256
+    pids_limit: int = 64
     """Hardening #7: max processes — blocks fork bombs."""
 
-    tmpfs: dict[str, str] = field(default_factory=lambda: {"/tmp": "size=64m"})
+    tmpfs: dict[str, str] = field(default_factory=lambda: {"/tmp": "size=32m"})
     """Writable in-memory scratch. Required when read_only_rootfs=True."""
 
     # --- workspace mount -----------------------------------------------------
@@ -73,7 +73,7 @@ class SandboxConfig:
     """Per-exec timeout in seconds (coreutils ``timeout`` wraps each command)."""
 
     # --- capacity (manager-level) -------------------------------------------
-    max_containers: int = 24
+    max_containers: int = 12
     """Max concurrent live containers (resident ``sleep infinity`` containers).
     Worst-case sandbox memory is roughly ``max_containers * mem_limit``; size
     this against the host's memory budget, leaving headroom for the OS, the
@@ -85,7 +85,7 @@ class SandboxConfig:
     zero active execs. Use this to cap CPU/memory spikes during parallel tool
     calls without limiting the number of resident containers."""
 
-    idle_ttl_seconds: float = 900.0
+    idle_ttl_seconds: float = 300.0
     """Reap a container after this many seconds with no exec. A background
     reaper thread scans every 60s and destroys idle containers, preventing
     zombie sessions from pinning memory. 0 disables TTL reaping."""
