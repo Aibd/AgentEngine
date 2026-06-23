@@ -312,10 +312,10 @@ SANDBOX_MANAGER = SandboxManager(
     sessions_root="/var/agent/sessions",       # 示例路径，按部署调整
     config=SandboxConfig(
         image="agentengine-sandbox:session",
-        mem_limit="512m",
-        nano_cpus=2_000_000_000,               # 2 核
-        max_containers=24,                     # 并发上限，依内存预算设定，见第 8 节
-        idle_ttl_seconds=900,                  # 空闲回收阈值（秒）
+        mem_limit="256m",
+        nano_cpus=500_000_000,                 # 0.5 核
+        max_containers=12,                     # 并发上限，依内存预算设定，见第 8 节
+        idle_ttl_seconds=300,                  # 空闲回收阈值（秒）
         # runtime="runsc",                     # 升级 gVisor 时启用，见第 11 节
     ),
 )
@@ -370,17 +370,17 @@ async def _cleanup():
 最坏内存 ≈ max_containers × mem_limit
 ```
 
-据此按内存预算反推并发上限（以 `mem_limit=512m` 为例）：
+据此按内存预算反推并发上限（以 `mem_limit=256m` 为例）：
 
 | 可用内存预算 | 建议 `max_containers` | 沙盒最坏占用 |
 |---|---|---|
-| 8 GB | 12 | ≈ 6 GB |
-| 16 GB | 24 | ≈ 12 GB |
-| 32 GB | 48 | ≈ 24 GB |
+| 8 GB | 24 | ≈ 6 GB |
+| 16 GB | 48 | ≈ 12 GB |
+| 32 GB | 96 | ≈ 24 GB |
 
 > 表中为示例换算，需为主机系统、Agent App、LLM 客户端预留余量，不应让沙盒占满全部内存。
 
-CPU 方面，`nano_cpus` 为单容器上限而非预留（`2_000_000_000` = 2 核），依赖 cgroup 时间片
+CPU 方面，`nano_cpus` 为单容器上限而非预留（`500_000_000` = 0.5 核），依赖 cgroup 时间片
 共享，可适度超卖。
 
 两道闸门已内置：
@@ -462,11 +462,11 @@ workspace 擦除、工具透明性，无需真实容器。
 | `cap_drop` | `("ALL",)` | 权限 | 丢弃全部 Linux capabilities |
 | `no_new_privileges` | `True` | 权限 | 禁止提权 |
 | `read_only_rootfs` | `False` | 权限 | rootfs 只读；默认关，便于运行期装包 |
-| `mem_limit` | `"512m"` | 资源 | 内存上限（cgroup） |
-| `nano_cpus` | `2_000_000_000` | 资源 | CPU 上限（纳核，2e9 = 2 核） |
-| `pids_limit` | `256` | 资源 | 进程数上限，防 fork 炸弹 |
-| `tmpfs` | `{"/tmp": "size=64m"}` | 资源 | 可写临时区 |
+| `mem_limit` | `"256m"` | 资源 | 内存上限（cgroup） |
+| `nano_cpus` | `500_000_000` | 资源 | CPU 上限（纳核，5e8 = 0.5 核） |
+| `pids_limit` | `64` | 资源 | 进程数上限，防 fork 炸弹 |
+| `tmpfs` | `{"/tmp": "size=32m"}` | 资源 | 可写临时区 |
 | `workspace_mount` | `"/workspace"` | 文件 | 容器内 workspace 挂载点 |
 | `default_exec_timeout` | `30.0` | 超时 | 单次执行超时（秒） |
-| `max_containers` | `24` | 容量 | 最大并发容器数 |
-| `idle_ttl_seconds` | `900.0` | 容量 | 空闲回收阈值（秒），0 表示禁用 |
+| `max_containers` | `12` | 容量 | 最大并发容器数 |
+| `idle_ttl_seconds` | `300.0` | 容量 | 空闲回收阈值（秒），0 表示禁用 |

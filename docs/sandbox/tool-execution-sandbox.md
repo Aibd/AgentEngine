@@ -323,7 +323,7 @@ Layer 2: Sandbox Container (OS 级隔离)
   └─ 无 Linux capabilities (cap_drop=ALL)
   └─ 非 root 用户 (user=sandbox)
   └─ 禁止提权 (no_new_privileges=True)
-  └─ 资源限制 (memory=512m, CPU=2, pids=256)
+  └─ 资源限制 (memory=256m, CPU=0.5, pids=64)
   └─ 只写 workspace（bind mount），其余只读
 
 Layer 3: Workspace 隔离
