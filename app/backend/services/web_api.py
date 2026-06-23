@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 import uuid
 from collections.abc import AsyncIterator
@@ -29,6 +28,7 @@ from agentengine.enterprise import (
     retry_middleware,
 )
 from agentengine.errors import error_to_dict
+from agentengine.settings import Settings
 from agentengine.persistence import SqlitePersistence
 from agentengine.skills.loader import SkillLoader
 from agentengine.skills.catalog import (
@@ -62,22 +62,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DB_PATH = REPO_ROOT / "data" / "chatbot.db"
 DEFAULT_UPLOAD_ROOT = REPO_ROOT / "data" / "uploads"
 
-
-def _load_dotenv(path: Path) -> None:
-    if not path.exists():
-        return
-    for raw_line in path.read_text("utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
-
-
-_load_dotenv(REPO_ROOT / ".env")
+_SETTINGS = Settings.from_env(dotenv=REPO_ROOT / ".env")
 
 # Process-wide singletons: persistence + lock manager. The Service constructed
 # per request must share the same instances so all conversations land in one
@@ -88,9 +73,15 @@ PERSISTENCE = SqlitePersistence(DEFAULT_DB_PATH)
 LOCK_MANAGER = InMemoryConversationLockManager()
 SANDBOX_MANAGER: SandboxManager | None = None
 try:
-    _sessions_root_env = os.getenv("SANDBOX_SESSIONS_ROOT")
-    _sandbox_sessions = Path(_sessions_root_env) if _sessions_root_env else REPO_ROOT / "data" / "sandbox-sessions"
-    SANDBOX_MANAGER = SandboxManager(sessions_root=_sandbox_sessions)
+    _sandbox_sessions = (
+        Path(_SETTINGS.sandbox.sessions_root)
+        if _SETTINGS.sandbox.sessions_root
+        else REPO_ROOT / "data" / "sandbox-sessions"
+    )
+    SANDBOX_MANAGER = SandboxManager(
+        sessions_root=_sandbox_sessions,
+        config=_SETTINGS.to_sandbox_config(),
+    )
     import logging
     _logger = logging.getLogger(__name__)
     _logger.info("sandbox_manager_ready sessions_root=%s", _sandbox_sessions)
@@ -99,7 +90,7 @@ except Exception:
     _logger = logging.getLogger(__name__)
     _logger.warning("sandbox_manager_unavailable — bash/python will run on host")
 QUOTA_STORE = QuotaStore()
-APPROVAL_GATE = ApprovalGate(timeout_seconds=float(os.getenv("APPROVAL_TIMEOUT_SECONDS", "300")))
+APPROVAL_GATE = ApprovalGate(timeout_seconds=_SETTINGS.app.approval_timeout_seconds)
 REPORT_FILES_DB = ReportMetadataDB(DEFAULT_UPLOAD_ROOT / "index.db")
 REPORT_STORE = ReportJobStore(
     db=REPORT_FILES_DB,
@@ -136,8 +127,8 @@ async def _shutdown_sandbox() -> None:
 async def health() -> dict[str, Any]:
     return {
         "ok": True,
-        "llm_configured": bool(os.getenv("LLM_API_KEY") and os.getenv("LLM_MODEL")),
-        "model": os.getenv("LLM_MODEL", ""),
+        "llm_configured": bool(_SETTINGS.llm.api_key and _SETTINGS.llm.model),
+        "model": _SETTINGS.llm.model,
     }
 
 
@@ -819,7 +810,7 @@ def _html_to_text(value: str) -> str:
 
 
 def _build_enterprise_middleware() -> MiddlewareChain:
-    _configure_quota_from_env(QUOTA_STORE)
+    _configure_quota_from_settings(QUOTA_STORE)
     return MiddlewareChain([
         otel_tracing_middleware(),
         quota_middleware(QUOTA_STORE),
@@ -828,26 +819,16 @@ def _build_enterprise_middleware() -> MiddlewareChain:
     ])
 
 
-def _configure_quota_from_env(store: QuotaStore) -> None:
-    default_limits = QuotaLimits(
-        max_runs=_env_int("QUOTA_MAX_RUNS"),
-        max_tool_calls=_env_int("QUOTA_MAX_TOOL_CALLS"),
-        max_tokens_in=_env_int("QUOTA_MAX_TOKENS_IN"),
-        max_tokens_out=_env_int("QUOTA_MAX_TOKENS_OUT"),
-        window_seconds=float(os.getenv("QUOTA_WINDOW_SECONDS", "60")),
-    )
-    if any([
-        default_limits.max_runs,
-        default_limits.max_tool_calls,
-        default_limits.max_tokens_in,
-        default_limits.max_tokens_out,
-    ]):
-        store.set_limits("default", default_limits)
-
-
-def _env_int(name: str) -> int:
-    raw = os.getenv(name, "0").strip()
-    return int(raw) if raw.isdigit() else 0
+def _configure_quota_from_settings(store: QuotaStore) -> None:
+    if not _SETTINGS.quota.has_limits:
+        return
+    store.set_limits("default", QuotaLimits(
+        max_runs=_SETTINGS.quota.max_runs,
+        max_tool_calls=_SETTINGS.quota.max_tool_calls,
+        max_tokens_in=_SETTINGS.quota.max_tokens_in,
+        max_tokens_out=_SETTINGS.quota.max_tokens_out,
+        window_seconds=_SETTINGS.quota.window_seconds,
+    ))
 
 
 def _apply_skill_directive(query: str, skill: str) -> str:
