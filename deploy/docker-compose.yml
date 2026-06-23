@@ -47,6 +47,15 @@ services:
       # 3. 持久化数据（SQLite DB、上传文件）
       - agent-data:/app/data
 
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
     restart: unless-stopped
 
   # ── Windows 开发覆盖示例 ──────────────────────────────────────────────────

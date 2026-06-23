@@ -22,16 +22,9 @@ if sys.version_info < (3, 11):
 PY
 
 if [ ! -f ".env" ]; then
-  echo ".env not found, creating template..."
-  cat > .env <<'EOF'
-LLM_API_KEY=your_api_key_here
-LLM_MODEL=deepseek-chat
-LLM_BASE_URL=https://api.deepseek.com/v1
-LLM_TIMEOUT=120
-LLM_MAX_RETRIES=2
-AGENTENGINE_LOG_DIR=logs
-EOF
-  echo "Created .env template. Please edit LLM_API_KEY before running."
+  echo ".env not found, creating from .env.example..."
+  cp .env.example .env
+  echo "Created .env from template. Please edit LLM_API_KEY before running."
   exit 1
 fi
 

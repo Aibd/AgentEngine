@@ -15,14 +15,9 @@ if errorlevel 1 (
 
 :: Check .env
 if not exist ".env" (
-    echo .env not found, creating template...
-    echo LLM_API_KEY=your_api_key_here> .env
-    echo LLM_MODEL=deepseek-chat>> .env
-    echo LLM_BASE_URL=https://api.deepseek.com/v1>> .env
-    echo LLM_TIMEOUT=120>> .env
-    echo LLM_MAX_RETRIES=2>> .env
-    echo AGENTENGINE_LOG_DIR=logs>> .env
-    echo Created .env template. Please edit LLM_API_KEY before running.
+    echo .env not found, creating from .env.example...
+    copy .env.example .env >nul
+    echo Created .env from template. Please edit LLM_API_KEY before running.
     pause
     exit /b 1
 )
