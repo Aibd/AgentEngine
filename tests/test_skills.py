@@ -217,7 +217,8 @@ def test_loader_skips_skill_exceeding_resource_limit(tmp_path: Path) -> None:
     )
     scripts_dir = skill_dir / "scripts"
     scripts_dir.mkdir(parents=True)
-    for i in range(5):
+    # Exceed the configured resource-file limit so the loader skips the skill.
+    for i in range(Skill.MAX_RESOURCE_FILES + 1):
         (scripts_dir / f"s{i}.py").write_text("x", encoding="utf-8")
 
     loader = SkillLoader(roots=[root])

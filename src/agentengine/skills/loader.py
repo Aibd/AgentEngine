@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import yaml
 
@@ -46,8 +46,8 @@ class Skill:
     resources: SkillResources | None = None
     host_exec: bool = False  # When True, scripts run on the host process (not sandbox)
 
-    MAX_RESOURCE_FILES: int = 100
-    RESOURCE_DIRS: frozenset[str] = frozenset({"scripts", "references", "assets"})
+    MAX_RESOURCE_FILES: ClassVar[int] = 100
+    RESOURCE_DIRS: ClassVar[frozenset[str]] = frozenset({"scripts", "references", "assets"})
 
     def __post_init__(self) -> None:
         # Backfill base_dir from path when not provided (keeps existing callers working).
