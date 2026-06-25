@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agentengine.sandbox.config import SandboxConfig
+from agentengine.sandbox.errors import SandboxStartupError
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from docker.models.containers import Container
@@ -64,13 +65,19 @@ class SessionSandbox:
             str(self.host_workspace): {"bind": self.cfg.workspace_mount, "mode": "rw"}
         }
         run_kwargs["working_dir"] = self.cfg.workspace_mount
-        self._container = self._client.containers.run(
-            image=self.cfg.image,
-            command=["sleep", "infinity"],
-            name=f"ae-sbx-{self.conversation_id[:32]}",
-            labels={"agentengine.sandbox": "session", "conversation_id": self.conversation_id},
-            **run_kwargs,
-        )
+        try:
+            self._container = self._client.containers.run(
+                image=self.cfg.image,
+                command=["sleep", "infinity"],
+                name=f"ae-sbx-{self.conversation_id[:32]}",
+                labels={"agentengine.sandbox": "session", "conversation_id": self.conversation_id},
+                **run_kwargs,
+            )
+        except Exception as exc:  # noqa: BLE001 - any failure to create the container is a startup failure
+            raise SandboxStartupError(
+                f"failed to start sandbox container for conversation "
+                f"{self.conversation_id}: {exc}"
+            ) from exc
         logger.info(
             "sandbox_session_started conv=%s container=%s",
             self.conversation_id, self._container.short_id,
