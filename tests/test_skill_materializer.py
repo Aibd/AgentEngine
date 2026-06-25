@@ -86,7 +86,7 @@ def test_materialize_rejects_path_escape(tmp_path: Path) -> None:
     )
     materializer = SkillMaterializer(tmp_path / "workspace")
 
-    with pytest.raises(ValueError, match="escapes workspace"):
+    with pytest.raises(ValueError, match="path separators"):
         materializer.materialize(skill)
 
 
