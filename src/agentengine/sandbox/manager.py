@@ -88,7 +88,7 @@ class SandboxManager:
     @staticmethod
     def _make_client() -> Any:
         try:
-            import docker  # type: ignore[import-not-found]
+            import docker
         except ImportError as exc:  # pragma: no cover
             raise SandboxError(
                 "The 'docker' SDK is required for the sandbox. "

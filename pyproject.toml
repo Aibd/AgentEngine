@@ -70,3 +70,9 @@ explicit_package_bases = true
 strict = true
 show_error_codes = true
 warn_unused_configs = true
+
+# The docker SDK ships no type stubs; treat it as untyped rather than failing
+# strict mode. The sandbox package is the only consumer.
+[[tool.mypy.overrides]]
+module = ["docker", "docker.*"]
+ignore_missing_imports = true
