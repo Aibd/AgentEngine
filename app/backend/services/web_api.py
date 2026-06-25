@@ -5,6 +5,7 @@ import json
 import re
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -108,19 +109,22 @@ MCP_STORE = McpConnectorStore(REPO_ROOT / ".agent" / "mcp_connectors.json")
 
 MAX_SKILL_ZIP_BYTES = 20 * 1024 * 1024  # 20MB ceiling for an uploaded skill pack.
 
-app = FastAPI(title="AgentEngine Web API")
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Process-wide singletons are constructed at import time; nothing extra to
+    # do on startup. On shutdown, tear down any live sandbox containers.
+    yield
+    if SANDBOX_MANAGER is not None:
+        SANDBOX_MANAGER.shutdown()
+
+
+app = FastAPI(title="AgentEngine Web API", lifespan=_lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("shutdown")
-async def _shutdown_sandbox() -> None:
-    if SANDBOX_MANAGER is not None:
-        SANDBOX_MANAGER.shutdown()
 
 
 @app.get("/api/health")
