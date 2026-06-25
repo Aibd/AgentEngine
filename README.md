@@ -67,6 +67,20 @@ chmod +x quick_start.sh
 ./quick_start.sh
 ```
 
+`quick_start.*` 是**纯原生模式**：宿主机直接跑后端 + 前端，零容器，沙盒连本机 Docker Desktop（零路径配置）。
+
+或用 **Docker 容器化一把梭**（前端 + 后端，沙盒镜像见根目录 `docker-compose.yml`）：
+
+```bash
+# 一次性：构建后端按会话拉起的沙盒镜像
+docker compose --profile setup build sandbox-image
+
+# 启动全栈 → http://localhost:8080
+docker compose up -d --build
+```
+
+两种模式并列：开发图省事用 `quick_start`，要接近生产用 `docker compose`。
+
 ---
 
 ### 创建 LLM 客户端

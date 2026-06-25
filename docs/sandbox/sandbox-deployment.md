@@ -196,24 +196,34 @@ Windows 宿主机
 **如果 App 也要容器化（Windows docker-compose）**
 
 Docker Desktop WSL2 backend 中，`/var/run/docker.sock` 在 Linux 容器里可以直接访问。
-但 bind mount 绝对路径（`/var/agent/sandbox-sessions`）在 Windows 上没有对应真实目录，
-改用 **named volume** 让 Docker 自动管理路径：
+路径约束与 Linux 生产**完全相同**：daemon 跑在 WSL2 VM 里，沙盒容器 bind mount 的源路径
+由 daemon 用**它自己（即 WSL2 VM）的视角**解析，而不是 App 容器的视角。
+
+> ⚠️ **不要用 named volume。** 直觉上会想用 named volume 让 Docker「自动管理路径」，
+> 但它对这套 DooD（兄弟容器）模型是**错的**：App 容器把会话目录写进了 named volume 的数据区，
+> 而 daemon 拿到的只是裸路径字符串 `/var/agent/sandbox-sessions/{conv}`，会在 VM 宿主侧
+> 另建一个**空目录**挂进沙盒 —— 两边指向不同物理目录，文件在 App 与沙盒之间传不过去。
+
+正确做法与 Linux 一致：用**同路径 bind mount**。纯 Linux 绝对路径会落在 WSL2 VM 内，
+是 daemon 能解析的真实目录，三方字符串天然一致。这正是根目录
+[`docker-compose.yml`](../../docker-compose.yml) 采用的配置：
 
 ```yaml
-# docker-compose.override.yml（Windows 本地覆盖，不提交到 git）
+# 根 docker-compose.yml（本地一把梭，Windows / Linux 通用）
 services:
   backend:
     environment:
       SANDBOX_SESSIONS_ROOT: /var/agent/sandbox-sessions
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - sandbox-sessions:/var/agent/sandbox-sessions  # named volume，Docker 自动管理
-      - agent-data:/app/data
+      - /var/agent/sandbox-sessions:/var/agent/sandbox-sessions  # 同路径，不是 named volume
+      - agent-data:/app/data            # 这个才是 named volume：仅 App 挂载，安全
 volumes:
-  sandbox-sessions:
+  agent-data:
 ```
 
-Named volume 由 Docker 内部管理，路径在 WSL2 VM 内部，三方（App 容器 / 沙盒容器 / daemon）自动一致，无需手动对齐路径字符串。
+唯一代价：该目录在 WSL2 VM 内，不便用 Windows 资源管理器直接浏览 —— 但 workspace 是临时的
+（会话 release 时即清空），无需浏览。首次部署后建议跑一次沙盒读写，确认 App 与沙盒看到同一目录。
 
 ---
 

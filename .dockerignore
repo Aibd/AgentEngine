@@ -1,0 +1,28 @@
+# Backend build context — keep it small. (Also applies to the sandbox-image
+# build, which copies nothing from the repo, so excluding things here is safe.)
+
+.git/
+.gitignore
+
+# Python caches / virtualenvs
+.venv/
+venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# The frontend builds from its own context (app/frontend); keep its huge
+# node_modules out of the backend image context entirely.
+app/frontend/
+
+# Runtime data + secrets must never be baked into the image.
+data/
+.env
+*.env
+
+# Not needed at runtime. (Do NOT add a broad *.md here — skills ship their
+# instructions as SKILL.md and would be silently excluded from the image.)
+docs/
+tests/

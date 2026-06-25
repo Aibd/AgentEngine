@@ -328,7 +328,7 @@ function InstalledTab({
                     </>
                   ) : (
                     <>
-                      <Package size={11} /> {skill.source === "market" ? "市场" : "导入"}
+                      <Package size={11} /> 导入
                     </>
                   )}
                 </span>

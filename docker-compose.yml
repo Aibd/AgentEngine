@@ -1,0 +1,86 @@
+# AgentEngine — single-file local stack for Windows Docker Desktop (WSL2 backend).
+#
+# What you get:
+#   • backend   FastAPI + sandbox orchestrator              → http://localhost:8000
+#   • frontend  built Vite SPA served by nginx, which        → http://localhost:8080
+#               reverse-proxies /api to the backend (same origin → no CORS)
+#
+# One-time setup:
+#   1. Build the per-conversation sandbox image the backend spawns:
+#        docker compose --profile setup build sandbox-image
+#      (equivalently: docker build -f deploy/sandbox/Dockerfile.session -t agentengine-sandbox:session .)
+#   2. Put LLM credentials in ./.env at the repo root, e.g.:
+#        LLM_API_KEY=sk-xxxx
+#        LLM_MODEL=deepseek-chat
+#        LLM_BASE_URL=https://api.deepseek.com/v1
+#
+# Run:
+#   docker compose up -d --build      → open http://localhost:8080
+#
+# Working on the frontend? Stop the container and run Vite natively for hot-reload
+# (its dev server already proxies /api to localhost:8000):
+#   docker compose stop frontend
+#   cd app/frontend && npm run dev    → http://localhost:5173
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env            # LLM creds etc. — won't fail if the file is absent
+        required: false
+    environment:
+      # CRITICAL for the sandbox. This path must be byte-identical inside this
+      # container AND on the Docker host (the WSL2 VM): the backend asks the
+      # daemon to bind-mount subdirectories of it into *sibling* sandbox
+      # containers, and the daemon resolves bind sources on the HOST, not here.
+      # A named volume breaks that handoff — the same-path bind mount below is
+      # what makes it work (the directory simply lives inside the WSL2 VM).
+      SANDBOX_SESSIONS_ROOT: /var/agent/sandbox-sessions
+      # Sandbox internet access. Default is OFF (untrusted code can't call out).
+      # "false" lets sandbox code pip install / fetch URLs and powers the
+      # web-search / web-fetch skills. It loosens isolation — keep it off for
+      # anything but trusted local testing.
+      SANDBOX_NETWORK_DISABLED: "false"
+    volumes:
+      # Docker-out-of-Docker: lets the backend drive the host daemon to spawn
+      # sandboxes. Docker Desktop auto-proxies this socket into WSL2.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Same-path bind mount (NOT a named volume) — see SANDBOX_SESSIONS_ROOT.
+      - /var/agent/sandbox-sessions:/var/agent/sandbox-sessions
+      # SQLite DB + uploaded files. A named volume is fine here: only the backend
+      # ever mounts it, it is never bind-mounted into a sandbox.
+      - agent-data:/app/data
+      # Skills: bind-mount the repo's skill dirs so (a) the seed skills are
+      # always present and (b) anything you import in the UI persists back to
+      # the repo instead of vanishing on the next `--build`. Enable/disable
+      # state lives in the SQLite DB above, so that persists too.
+      - ./.agents/skills:/app/.agents/skills
+      - ./.agent/skills:/app/.agent/skills
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./app/frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # One-time helper: builds the image the backend spawns per conversation.
+  # Never started (it sits in the "setup" profile); build it with:
+  #   docker compose --profile setup build sandbox-image
+  sandbox-image:
+    profiles: ["setup"]
+    image: agentengine-sandbox:session
+    build:
+      context: .
+      dockerfile: deploy/sandbox/Dockerfile.session
+
+volumes:
+  agent-data:
