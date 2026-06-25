@@ -12,6 +12,7 @@ deployment must run untrusted code. See docs/sandbox-deployment.md.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -93,10 +94,14 @@ class SandboxedBashTool(Tool):
         if not command:
             return "Error: 'command' is required."
         timeout = kwargs.get("timeout")
-        sandbox = self._mgr.acquire(self._conv)
-        # SessionSandbox.exec_shell is blocking C I/O; for high concurrency wrap
-        # in asyncio.to_thread. Kept direct here for clarity.
-        result = sandbox.exec_shell(command, timeout=float(timeout) if timeout else None)
+        t = float(timeout) if timeout else None
+        # The Docker SDK is synchronous: acquire() may create/start a container
+        # and exec_shell() blocks until the command returns. Run them off the
+        # event loop so concurrent conversations' SSE streams don't stall.
+        def _blocking() -> dict[str, Any]:
+            return self._mgr.acquire(self._conv).exec_shell(command, timeout=t)
+
+        result = await asyncio.to_thread(_blocking)
 
         parts: list[str] = [f"$ {command}", f"exit={result['exit_code']}"]
         if result["timed_out"]:
@@ -145,9 +150,11 @@ class SandboxedPythonTool(Tool):
             return "Error: 'code' is required."
         timeout = kwargs.get("timeout")
         t = float(timeout) if timeout else None
-        sandbox = self._mgr.acquire(self._conv)
+        # Off-load blocking Docker SDK calls; see SandboxedBashTool.run.
+        def _blocking() -> dict[str, Any]:
+            return self._mgr.acquire(self._conv).exec_python(code, timeout=t)
 
-        result = sandbox.exec_python(code, timeout=t)
+        result = await asyncio.to_thread(_blocking)
         lines: list[str] = [f"exit={result['exit_code']}"]
         if result["timed_out"]:
             lines.append("[!] timed out (exit 124)")
