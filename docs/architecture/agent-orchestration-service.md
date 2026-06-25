@@ -94,7 +94,6 @@ GET /api/runs/stream?query=...&agent_name=deep_research&conversation_id=abc
     │  )
     │
     ├─ 装配工具链:
-    │    • ReadFileTool (workspace + sandbox roots)
     │    • SkillTool + ReadSkillResource (仅已启用的技能)
     │    • SandboxedBashTool / SandboxedPythonTool (沙盒模式)
     │    • 注入 ExecPolicy 作为安全兜底

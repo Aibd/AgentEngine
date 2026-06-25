@@ -323,11 +323,11 @@ Layer 2: Sandbox Container (OS 级隔离)
   └─ 无 Linux capabilities (cap_drop=ALL)
   └─ 非 root 用户 (user=sandbox)
   └─ 禁止提权 (no_new_privileges=True)
-  └─ 资源限制 (memory=256m, CPU=0.5, pids=64)
-  └─ 只写 workspace（bind mount），其余只读
+  └─ 资源限制 (memory=512m, CPU=2核, pids=256；见 SandboxConfig 默认值)
+  └─ workspace（bind mount）可写；rootfs 默认可写以便运行期装包 (read_only_rootfs=False)
 
 Layer 3: Workspace 隔离
-  └─ 文件工具 (read_file, write_file) → 宿主执行，workspace root 限制
+  └─ 宿主机文件工具（read_file/write_file 等）已移除：文件 I/O 全部经由容器内 bash/python
   └─ Shell 工具 (bash, python) → 容器执行，bind mount 共享 workspace
   └─ 会话隔离：每 conversation 独立 workspace + 独立容器
 ```

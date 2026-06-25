@@ -275,8 +275,9 @@ host_ws = manager.host_workspace_for(conversation_id)   # 主机侧目录
 # 传出：容器内写 /workspace/result.xlsx → 主机 host_ws / "result.xlsx" 可取
 ```
 
-将文件工具的 workspace 根指向同一目录，使 `bash` / `python` 与 `read_file` / `write_file`
-共享同一份文件系统：
+宿主机侧文件工具（`read_file` / `write_file` 等）已从默认工具集移除：沙盒模式下所有文件
+I/O 均经由容器内的 `bash` / `python` 完成。主机通过上述会话目录读写文件，与容器内代码看到
+的是同一份文件系统。host 侧装配时将该目录登记到 context，供文件回流等逻辑取用：
 
 ```python
 context.extras["workspace_root"] = str(manager.host_workspace_for(conversation_id))
@@ -358,7 +359,7 @@ async def _cleanup():
 ### 7.5 definition 接入
 
 在 definition 的 `setup` 钩子中，以沙盒工具替代内置 `BashTool`，参见
-`app/backend/agents/sandboxed_coder/preset.py`。由于工具同名，对 `ToolExecutor` 与模型透明。
+`app/backend/agents/sandboxed_coder/definition.py`。由于工具同名，对 `ToolExecutor` 与模型透明。
 
 ---
 

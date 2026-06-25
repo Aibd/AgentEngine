@@ -343,7 +343,7 @@ context = AgentContext(
     llm=llm,
     tool_collection=ToolCollection([
         ProfileLookupTool(),  # 自定义工具实例
-        ReadFileTool(),      # 内置工具也可以手动注入
+        BashTool(),          # 内置工具也可以手动注入
     ]),
 )
 ```

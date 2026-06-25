@@ -83,7 +83,7 @@ def test_tools_compile_to_setup_hook(tmp_path: Path, tools_line: str) -> None:
 async def test_setup_hook_attaches_tools_by_name(tmp_path: Path) -> None:
     md = _write(
         tmp_path / "r.md",
-        "---\nname: r\ntools: [read_file, Skill]\n---\nbody\n",
+        "---\nname: r\ntools: [bash, Skill]\n---\nbody\n",
     )
     definition = load_definition(md)
     context = AgentContext(request_id="t", query="q")
@@ -92,22 +92,22 @@ async def test_setup_hook_attaches_tools_by_name(tmp_path: Path) -> None:
     await definition.setup(context)
 
     names = set(context.tool_collection.tool_map)
-    assert {"read_file", "Skill"} <= names
-    assert type(context.tool_collection.get("read_file")).__name__ == "ReadFileTool"
+    assert {"bash", "Skill"} <= names
+    assert type(context.tool_collection.get("bash")).__name__ == "BashTool"
     assert type(context.tool_collection.get("Skill")).__name__ == "SkillTool"
 
 
 async def test_setup_hook_is_idempotent(tmp_path: Path) -> None:
-    md = _write(tmp_path / "r.md", "---\nname: r\ntools: [read_file]\n---\nbody\n")
+    md = _write(tmp_path / "r.md", "---\nname: r\ntools: [bash]\n---\nbody\n")
     definition = load_definition(md)
     context = AgentContext(request_id="t", query="q")
 
     assert definition.setup is not None
     await definition.setup(context)
-    first = context.tool_collection.get("read_file")
+    first = context.tool_collection.get("bash")
     await definition.setup(context)
     # Same instance — second run must not replace or duplicate.
-    assert context.tool_collection.get("read_file") is first
+    assert context.tool_collection.get("bash") is first
 
 
 def test_load_definitions_scans_directory(tmp_path: Path) -> None:

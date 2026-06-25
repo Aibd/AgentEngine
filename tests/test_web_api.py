@@ -83,7 +83,7 @@ async def test_capabilities_endpoint_lists_web_agent_tools_and_skills() -> None:
     assert response.status_code == 200
     body = response.json()
     assert {agent["name"] for agent in body["agents"]} >= {"general_chat", "deep_research"}
-    assert {tool["name"] for tool in body["tools"]} >= {"read_file", "Skill"}
+    assert {tool["name"] for tool in body["tools"]} >= {"bash", "Skill"}
     assert any(skill["name"] == "codebase-research" for skill in body["skills"])
 
 

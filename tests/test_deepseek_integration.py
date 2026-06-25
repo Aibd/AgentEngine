@@ -99,66 +99,6 @@ async def test_general_chat_emits_v2_sse_sequence() -> None:
 
 
 @skip_unless_integration
-async def test_deep_research_invokes_read_file_tool(tmp_path: Path) -> None:
-    """deep_research with a real tool call: model must read a file and report back.
-
-    Validates:
-      - ToolCollection registration in spec.setup actually runs
-      - tool_call_start / tool_result event pair fires
-      - Memory contains the assistant tool_call + tool message round-trip
-    """
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    (workspace / "NOTE.md").write_text(
-        "# Project Note\n\nThis is a fixture file used by the e2e test.\n",
-        encoding="utf-8",
-    )
-
-    os.environ["AGENT_WORKSPACE_ROOT"] = str(workspace)
-
-    llm = create_llm_from_env()
-    assert llm is not None
-
-    service = AgentOrchestrationService(
-        llm_factory=lambda: llm,
-    )
-    context, stream = service.create_streaming_context(
-        request_id="e2e-tools",
-        query="read NOTE.md and summarise in one line",
-        conversation_id="e2e-tools",
-    )
-    context.llm = llm
-
-    try:
-        result = await service.run(
-            agent_name="deep_research",
-            query="读 NOTE.md 后用一句话总结这个文件的用途",
-            context=context,
-        )
-    finally:
-        await llm.close()
-
-    assert result.strip()
-
-    events = []
-    while not stream._queue.empty():
-        evt = await stream._queue.get()
-        if evt is None:
-            break
-        if "comment" not in evt:
-            events.append(evt)
-    types = [e["event"] for e in events]
-    assert "tool_call_start" in types, f"no tool_call_start in {types}"
-    assert "tool_result" in types, f"no tool_result in {types}"
-
-    memory = context.extras["agent_memory"]
-    tool_messages = [m for m in memory if m["role"] == "tool"]
-    assert tool_messages, "expected at least one tool result message in memory"
-    assert any("Project Note" in (m.get("content") or "") for m in tool_messages), \
-        "tool result did not include the file contents"
-
-
-@skip_unless_integration
 async def test_conversation_history_persists_across_runs(tmp_path: Path) -> None:
     """Two separate service instances sharing one SQLite DB must share history.
 
