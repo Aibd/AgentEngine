@@ -1061,9 +1061,10 @@ function ConversationTurn({
           <Sparkles size={17} />
         </div>
         <div className="assistant-message">
-          {trace.steps.map((step) => (
-            <StepGroup key={step.turn} step={step} />
-          ))}
+          <RunActivity steps={trace.steps} isRunning={isRunning} status={trace.status} />
+          {hasStreamedText ? (
+            <AssistantText chunks={trace.steps.flatMap((step) => step.text)} />
+          ) : null}
 
           {trace.todos.length ? <TodoChecklist todos={trace.todos} /> : null}
           {trace.pendingQuestions.map((question) => (
@@ -1289,27 +1290,125 @@ function ArtifactCard({ artifact, onOpen, isFirst = false, hasNoStepText = false
   );
 }
 
-function StepGroup({ step }: { step: StepTrace }) {
-  const hasOnlyText = step.text.length > 0 && step.thinking.length === 0 && step.tools.length === 0;
+function RunActivity({
+  steps,
+  isRunning,
+  status,
+}: {
+  steps: StepTrace[];
+  isRunning: boolean;
+  status: RunTrace["status"];
+}) {
+  const visibleSteps = steps.filter((step) => step.thinking.length > 0 || step.tools.length > 0);
+  const [open, setOpen] = useState(isRunning);
+
+  // Surface the live work by default, then fold the implementation trace away
+  // once a final answer has arrived. Users can always reopen it for details.
+  useEffect(() => {
+    setOpen(isRunning);
+  }, [isRunning]);
+
+  if (!visibleSteps.length) {
+    return null;
+  }
+
+  const tools = visibleSteps.flatMap((step) => step.tools);
+  const failedTools = tools.filter((tool) => tool.status === "failed").length;
+  const elapsed = visibleSteps.reduce((total, step) => total + (step.elapsedSeconds ?? 0), 0);
+  const label = isRunning ? "正在处理" : status === "failed" ? "处理未完成" : "处理完成";
+  const summary = [
+    `${visibleSteps.length} 个步骤`,
+    tools.length ? `${tools.length} 次工具调用` : "分析并生成回答",
+    !isRunning && elapsed > 0 ? formatSeconds(elapsed) : "",
+    failedTools ? `${failedTools} 项失败` : "",
+  ].filter(Boolean).join(" · ");
 
   return (
-    <section className={hasOnlyText ? "step-group plain-step" : "step-group"}>
-      {!hasOnlyText ? (
-        <div className="step-heading">
-          <span className="step-title">Step {step.turn}</span>
-          <span className="step-time">{formatSeconds(step.elapsedSeconds)}</span>
+    <section className={`run-activity ${isRunning ? "is-running" : ""} ${status === "failed" ? "is-failed" : ""}`}>
+      <button
+        className="run-activity-head"
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+      >
+        <span className="run-activity-title">
+          {isRunning ? <Loader2 className="spin" size={15} /> : status === "failed" ? <CircleAlert size={15} /> : <Sparkles size={15} />}
+          <strong>{label}</strong>
+          <small>{summary}</small>
+        </span>
+        {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+      </button>
+
+      {open ? (
+        <div className="run-activity-body">
+          {visibleSteps.map((step, index) => (
+            <ProcessStep
+              key={step.turn}
+              step={step}
+              index={index}
+              isLive={isRunning && step.status === "running"}
+            />
+          ))}
         </div>
       ) : null}
+    </section>
+  );
+}
 
-      {step.thinking.length ? <ThinkingBlock chunks={step.thinking} running={step.status === "running"} stepElapsedSeconds={step.elapsedSeconds} /> : null}
+function ProcessStep({ step, index, isLive }: { step: StepTrace; index: number; isLive: boolean }) {
+  const [open, setOpen] = useState(isLive);
 
-      <div className="tool-grid">
-        {step.tools.map((tool) => (
-          <ToolCard key={tool.id} tool={tool} />
-        ))}
+  useEffect(() => {
+    setOpen(isLive);
+  }, [isLive]);
+
+  const failedTools = step.tools.filter((tool) => tool.status === "failed").length;
+  const detail = step.tools.length
+    ? `${step.tools.length} 次工具调用${failedTools ? ` · ${failedTools} 项失败` : ""}`
+    : isLive
+      ? "正在分析请求"
+      : "已完成分析";
+
+  return (
+    <section className={`process-step ${isLive ? "is-live" : ""}`}>
+      <span className="process-step-rail" aria-hidden="true">
+        <span>{index + 1}</span>
+      </span>
+      <div className="process-step-main">
+        <button
+          className="process-step-head"
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          aria-expanded={open}
+        >
+          <span>
+            <strong>{isLive ? "执行中" : `步骤 ${step.turn}`}</strong>
+            <small>{detail}</small>
+          </span>
+          <span className="process-step-meta">
+            {isLive ? <Loader2 className="spin" size={13} /> : null}
+            {formatSeconds(step.elapsedSeconds)}
+            {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+          </span>
+        </button>
+
+        {open ? (
+          <div className="process-step-content">
+            {step.thinking.length ? (
+              <ThinkingBlock
+                chunks={step.thinking}
+                running={isLive}
+                stepElapsedSeconds={step.elapsedSeconds}
+              />
+            ) : null}
+            {step.tools.length ? (
+              <div className="tool-grid">
+                {step.tools.map((tool) => <ToolCard key={tool.id} tool={tool} />)}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
-
-      {step.text.length ? <AssistantText chunks={step.text} /> : null}
     </section>
   );
 }
@@ -1402,6 +1501,14 @@ function ToolCard({ tool }: { tool: ToolTrace }) {
   const [open, setOpen] = useState(false);
   const failed = tool.status === "failed";
   const running = tool.status === "running";
+  const label = displayToolName(tool.name);
+  const summary = running
+    ? "正在执行"
+    : failed
+      ? tool.errorType || "调用失败"
+      : tool.elapsedSeconds != null
+        ? `${formatSeconds(tool.elapsedSeconds)} 完成`
+        : "已完成";
 
   return (
     <article className={`tool-card ${failed ? "is-failed" : ""}`}>
@@ -1409,14 +1516,15 @@ function ToolCard({ tool }: { tool: ToolTrace }) {
         <span className="tool-name">
           {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
           <Wrench size={16} />
-          <strong>{tool.name}</strong>
-        </span>
-        {running || failed ? (
-          <span className={`status-pill ${tool.status}`}>
-            {running ? <Loader2 className="spin" size={12} /> : <CircleAlert size={12} />}
-            {tool.status}
+          <span>
+            <strong>{label}</strong>
+            {label !== tool.name ? <small>{tool.name}</small> : null}
           </span>
-        ) : null}
+        </span>
+        <span className={`status-pill ${tool.status}`}>
+          {running ? <Loader2 className="spin" size={12} /> : failed ? <CircleAlert size={12} /> : null}
+          {summary}
+        </span>
       </button>
 
       {open ? (
@@ -1432,6 +1540,18 @@ function ToolCard({ tool }: { tool: ToolTrace }) {
       ) : null}
     </article>
   );
+}
+
+function displayToolName(name: string): string {
+  const labels: Record<string, string> = {
+    "web-search": "搜索网页信息",
+    "web-fetch": "阅读网页内容",
+    RunSkillScript: "运行技能",
+    read_file: "读取文件",
+    write_file: "写入文件",
+    shell_command: "执行命令",
+  };
+  return labels[name] ?? name.replace(/[-_]/g, " ");
 }
 
 function CodeBlock({ label, value }: { label: string; value: unknown }) {

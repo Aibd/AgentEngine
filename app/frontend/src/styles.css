@@ -1167,31 +1167,170 @@ button:disabled {
   padding-top: 2px;
 }
 
-.step-group {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-}
-
-.step-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 22px;
-}
-
-.step-title {
-  color: #46504a;
-  font-size: 12px;
-  font-weight: 740;
-}
-
-.step-time,
 .tool-meta,
 .usage-line {
   color: #68736b;
   font-size: 11px;
+}
+
+.run-activity {
+  width: min(100%, 680px);
+  border: 1px solid #d7dfda;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #fbfdfb, #f5f8f6);
+  overflow: hidden;
+}
+
+.run-activity.is-running {
+  border-color: #9cc5b8;
+  box-shadow: 0 2px 12px rgba(38, 107, 94, 0.08);
+}
+
+.run-activity.is-failed {
+  border-color: #dbb8ad;
+  background: #fff9f7;
+}
+
+.run-activity-head,
+.process-step-head {
+  display: flex;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.run-activity-head {
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.run-activity-title,
+.process-step-meta {
+  display: inline-flex;
+  align-items: center;
+}
+
+.run-activity-title {
+  min-width: 0;
+  gap: 7px;
+  color: #28594f;
+}
+
+.run-activity.is-failed .run-activity-title {
+  color: #8c2f1e;
+}
+
+.run-activity-title strong {
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.run-activity-title small {
+  overflow: hidden;
+  color: #748077;
+  font-size: 11px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-activity-body {
+  display: grid;
+  gap: 0;
+  border-top: 1px solid #e1e8e3;
+  padding: 4px 12px 10px;
+}
+
+.process-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 25px minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 0 0;
+}
+
+.process-step:not(:last-child)::after {
+  position: absolute;
+  top: 31px;
+  bottom: -8px;
+  left: 11px;
+  width: 1px;
+  background: #cbd8d0;
+  content: "";
+}
+
+.process-step-rail {
+  display: grid;
+  place-items: start center;
+}
+
+.process-step-rail span {
+  display: grid;
+  place-items: center;
+  z-index: 1;
+  width: 22px;
+  height: 22px;
+  border: 1px solid #aec7bd;
+  border-radius: 999px;
+  color: #3c7466;
+  background: #f8fcfa;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.process-step.is-live .process-step-rail span {
+  border-color: #2f8b78;
+  color: #fff;
+  background: #2f8b78;
+  box-shadow: 0 0 0 4px rgba(47, 139, 120, 0.12);
+}
+
+.process-step-main {
+  min-width: 0;
+}
+
+.process-step-head {
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 22px;
+  padding: 1px 0;
+}
+
+.process-step-head > span:first-child {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.process-step-head strong {
+  color: #40524a;
+  font-size: 12px;
+  font-weight: 740;
+}
+
+.process-step-head small,
+.process-step-meta {
+  color: #76827a;
+  font-size: 11px;
+}
+
+.process-step-meta {
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.process-step-content {
+  display: grid;
+  gap: 7px;
+  margin: 7px 0 1px;
 }
 
 .thinking-block {
@@ -1235,11 +1374,11 @@ button:disabled {
 
 .tool-card {
   display: grid;
-  width: min(100%, 620px);
-  border: 1px solid #d8dfd9;
+  width: 100%;
+  border: 1px solid #dde6e0;
   border-radius: 7px;
-  background: #ffffff;
-  padding: 7px 9px;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 6px 8px;
 }
 
 .tool-card.is-failed {
@@ -1274,11 +1413,26 @@ button:disabled {
   font-size: 11px;
 }
 
-.tool-name strong {
+.tool-name > span {
+  display: grid;
+  min-width: 0;
+}
+
+.tool-name strong,
+.tool-name small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tool-name strong {
   font-weight: 700;
+}
+
+.tool-name small {
+  color: #8a948d;
+  font-size: 10px;
+  font-weight: 500;
 }
 
 .status-pill {
@@ -1286,10 +1440,15 @@ button:disabled {
   gap: 4px;
   border-radius: 999px;
   padding: 2px 6px;
-  color: #7b401b;
-  background: #fbecdd;
+  color: #477263;
+  background: #eaf4ef;
   font-size: 10px;
   font-weight: 700;
+}
+
+.status-pill.running {
+  color: #7b401b;
+  background: #fbecdd;
 }
 
 .status-pill.failed {
