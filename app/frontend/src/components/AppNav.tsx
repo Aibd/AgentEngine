@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import {
-  Bot,
   Cable,
   ChevronDown,
   ChevronRight,
@@ -12,6 +11,7 @@ import {
   LogOut,
   PanelLeftClose,
   Plus,
+  Package,
   Search,
   Settings,
   SlidersHorizontal,
@@ -35,12 +35,6 @@ export type NavSession = {
   title: string;
 };
 
-export type NavSpace = {
-  id: string;
-  name: string;
-  sessionIds: string[];
-};
-
 type AppNavProps = {
   version: string;
   activeView: AppView;
@@ -48,7 +42,6 @@ type AppNavProps = {
   onNewTask: () => void;
   onCollapse: () => void;
   sessions: NavSession[];
-  spaces: NavSpace[];
   activeSessionId: string;
   onSelectSession: (id: string) => void;
   onDeleteSession: (id: string) => void;
@@ -62,8 +55,8 @@ const NAV_ITEMS: Array<{
   hint: string;
   icon: ReactNode;
 }> = [
+  { view: "skills", labelKey: "nav.skills", hint: "", icon: <Package size={18} /> },
   { view: "chat", labelKey: "nav.newTask", hint: "", icon: <Plus size={18} /> },
-  { view: "chat", labelKey: "nav.assistant", hint: "默认", icon: <Bot size={18} /> },
   { view: "experts", labelKey: "nav.experts", hint: "技能", icon: <Users size={18} /> },
   { view: "connectors", labelKey: "nav.connectors", hint: "MCP", icon: <Cable size={18} /> },
   { view: "automation", labelKey: "nav.automation", hint: "定时任务", icon: <Clock3 size={18} /> },
@@ -78,7 +71,6 @@ export function AppNav(props: AppNavProps) {
     onNewTask,
     onCollapse,
     sessions,
-    spaces,
     activeSessionId,
     onSelectSession,
     onDeleteSession,
@@ -88,7 +80,6 @@ export function AppNav(props: AppNavProps) {
 
   const { locale, t, toggleLocale } = useI18n();
   const [tasksOpen, setTasksOpen] = useState(true);
-  const [spacesOpen, setSpacesOpen] = useState(true);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
@@ -198,17 +189,6 @@ export function AppNav(props: AppNavProps) {
           ))}
         </NavGroup>
 
-        <NavGroup
-          title={`${t("nav.spaces")} (${spaces.length})`}
-          open={spacesOpen}
-          onToggle={() => setSpacesOpen((value) => !value)}
-        >
-          {spaces.map((space) => (
-            <div key={space.id} className="nav-space">
-              <span className="nav-space-name">{space.name}</span>
-            </div>
-          ))}
-        </NavGroup>
       </div>
 
       <div className="app-nav-footer">

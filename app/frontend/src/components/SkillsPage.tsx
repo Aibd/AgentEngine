@@ -6,7 +6,6 @@ import {
   Plus,
   Search,
   ShieldCheck,
-  Sparkles,
   Star,
   Trash2,
   Check,
@@ -21,11 +20,8 @@ import {
   skillExportUrl,
 } from "../traceTransport";
 import type { MarketSkill, SkillSummary } from "../types";
-import type { AppView } from "./AppNav";
-
 type SkillsPageProps = {
   skills: SkillSummary[];
-  onNavigate: (view: AppView) => void;
   onSkillsChanged: () => void;
   onOpenImport: () => void;
   sidebarOpen: boolean;
@@ -36,7 +32,6 @@ type SubTab = "market" | "installed";
 
 export function SkillsPage({
   skills,
-  onNavigate,
   onSkillsChanged,
   onOpenImport,
   sidebarOpen,
@@ -54,16 +49,12 @@ export function SkillsPage({
             <Menu size={18} />
           </button>
         ) : null}
-        <div className="skills-page-tabs" role="tablist">
-          <button type="button" className="page-tab" onClick={() => onNavigate("experts")}>
-            <Sparkles size={15} /> 专家
-          </button>
-          <button type="button" className="page-tab is-active" aria-current="page">
-            <Package size={15} /> 技能
-          </button>
-          <button type="button" className="page-tab" onClick={() => onNavigate("connectors")}>
-            连接器
-          </button>
+        <div className="page-section-title">
+          <Package size={18} />
+          <div>
+            <h1>技能</h1>
+            <p>管理可供专家和普通会话调用的能力。</p>
+          </div>
         </div>
         <div className="skills-page-head-actions">
           <label className="skills-page-search">

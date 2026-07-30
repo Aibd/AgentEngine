@@ -27,7 +27,7 @@ import {
   type ThinkingMode,
 } from "./components/Composer";
 import { SkillsManager } from "./components/SkillsManager";
-import { AppNav, type AppView, type NavSpace } from "./components/AppNav";
+import { AppNav, type AppView } from "./components/AppNav";
 import { SkillsPage } from "./components/SkillsPage";
 import { ExpertsPage } from "./components/ExpertsPage";
 import { ConnectorsPage } from "./components/ConnectorsPage";
@@ -759,13 +759,6 @@ export function App() {
     canSubmit,
   };
 
-  const navSpaces = useMemo<NavSpace[]>(
-    () => [
-      { id: "agentengine", name: "AgentEngine", sessionIds: [] },
-    ],
-    [],
-  );
-
   function navigate(view: AppView) {
     setActiveView(view);
     if (view !== "chat") {
@@ -786,7 +779,6 @@ export function App() {
           }}
           onCollapse={() => setSidebarOpen(false)}
           sessions={sessions.map((session) => ({ id: session.id, title: session.title }))}
-          spaces={navSpaces}
           activeSessionId={activeSessionId}
           onSelectSession={(id) => {
             navigate("chat");
@@ -851,7 +843,6 @@ export function App() {
       ) : activeView === "skills" ? (
         <SkillsPage
           skills={skills}
-          onNavigate={navigate}
           onSkillsChanged={handleSkillsChanged}
           onOpenImport={() => setShowSkillsManager(true)}
           sidebarOpen={sidebarOpen}
@@ -859,7 +850,6 @@ export function App() {
         />
       ) : activeView === "experts" ? (
         <ExpertsPage
-          onNavigate={navigate}
           onStartExpert={startExpertChat}
           onStartTeam={startTeamChat}
           sidebarOpen={sidebarOpen}

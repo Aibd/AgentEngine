@@ -3560,6 +3560,35 @@ button:disabled {
   padding: 12px 20px;
 }
 
+.page-section-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 9px;
+  color: #28594f;
+}
+
+.page-section-title > div {
+  display: grid;
+  gap: 1px;
+}
+
+.page-section-title h1,
+.page-section-title p {
+  margin: 0;
+}
+
+.page-section-title h1 {
+  color: #26332d;
+  font-size: 16px;
+  font-weight: 760;
+}
+
+.page-section-title p {
+  color: #7a857d;
+  font-size: 11px;
+}
+
 .skills-page-collapse {
   display: grid;
   place-items: center;

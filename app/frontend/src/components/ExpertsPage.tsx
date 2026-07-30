@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2, Menu, Package, Search, Sparkles, Users } from "lucide-react";
+import { Loader2, Menu, Search, Sparkles, Users } from "lucide-react";
 import {
   fetchExpertCategories,
   fetchExpertScenarios,
@@ -8,10 +8,7 @@ import {
   fetchExperts,
 } from "../traceTransport";
 import type { Expert, ExpertTeam, ScenarioGroup } from "../types";
-import type { AppView } from "./AppNav";
-
 type ExpertsPageProps = {
-  onNavigate: (view: AppView) => void;
   onStartExpert: (expert: Expert) => void;
   onStartTeam: (team: ExpertTeam) => void;
   sidebarOpen: boolean;
@@ -21,7 +18,6 @@ type ExpertsPageProps = {
 type SubTab = "experts" | "teams";
 
 export function ExpertsPage({
-  onNavigate,
   onStartExpert,
   onStartTeam,
   sidebarOpen,
@@ -38,16 +34,12 @@ export function ExpertsPage({
             <Menu size={18} />
           </button>
         ) : null}
-        <div className="skills-page-tabs" role="tablist">
-          <button type="button" className="page-tab is-active" aria-current="page">
-            <Sparkles size={15} /> 专家
-          </button>
-          <button type="button" className="page-tab" onClick={() => onNavigate("skills")}>
-            <Package size={15} /> 技能
-          </button>
-          <button type="button" className="page-tab" onClick={() => onNavigate("connectors")}>
-            连接器
-          </button>
+        <div className="page-section-title">
+          <Sparkles size={18} />
+          <div>
+            <h1>专家</h1>
+            <p>选择一个专家或专家团队，开启带有专业指令的会话。</p>
+          </div>
         </div>
         <div className="skills-page-head-actions">
           <label className="skills-page-search">

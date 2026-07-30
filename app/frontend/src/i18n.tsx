@@ -19,6 +19,7 @@ function saveLocale(locale: Locale) {
 // ---- translations --------------------------------------------------------
 
 const ZH: Record<string, string> = {
+  "nav.skills": "技能",
   "nav.newTask": "新建会话",
   "nav.assistant": "助理",
   "nav.experts": "专家",
@@ -44,6 +45,7 @@ const ZH: Record<string, string> = {
 const EN: Record<string, string> = {
   "nav.newTask": "New task",
   "nav.assistant": "Assistant",
+  "nav.skills": "Skills",
   "nav.experts": "Experts",
   "nav.connectors": "Connectors",
   "nav.automation": "Automation",
