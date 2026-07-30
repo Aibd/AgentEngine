@@ -23,6 +23,24 @@
 #   cd app/frontend && npm run dev    → http://localhost:5173
 
 services:
+  keycloak:
+    # Local-only identity provider.  `start-dev` uses an embedded database and
+    # is deliberately for this Docker Desktop development stack, not production.
+    image: quay.io/keycloak/keycloak:26.4.7
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      # Change this in .env before exposing Keycloak beyond this machine.
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-change-this-local-admin-password}
+      KC_HOSTNAME: http://localhost:8081
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "127.0.0.1:8081:8080"
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+      - ./deploy/keycloak/agentengine-realm.json:/opt/keycloak/data/import/agentengine-realm.json:ro
+    restart: unless-stopped
+
   backend:
     build:
       context: .
@@ -45,6 +63,12 @@ services:
       # web-search / web-fetch skills. It loosens isolation — keep it off for
       # anything but trusted local testing.
       SANDBOX_NETWORK_DISABLED: "true"
+      # Validate browser access tokens against the public issuer while fetching
+      # signing keys through Docker's private network.
+      OIDC_ISSUER_URL: http://localhost:8081/realms/agentengine
+      OIDC_AUDIENCE: agentengine-api
+      OIDC_JWKS_URL: http://keycloak:8080/realms/agentengine/protocol/openid-connect/certs
+      OIDC_TENANT_CLAIM: tenant_id
     volumes:
       # Docker-out-of-Docker: lets the backend drive the host daemon to spawn
       # sandboxes. Docker Desktop auto-proxies this socket into WSL2.
@@ -61,6 +85,8 @@ services:
       - ./.agents/skills:/app/.agents/skills
       - ./.agent/skills:/app/.agent/skills
     restart: unless-stopped
+    depends_on:
+      - keycloak
 
   frontend:
     build:
@@ -84,3 +110,4 @@ services:
 
 volumes:
   agent-data:
+  keycloak-data:

@@ -30,3 +30,20 @@ Required scopes are:
 Use an Authorization Code + PKCE flow in the browser, then attach the access
 token to API calls. Do not store tenant identity or service credentials in
 browser-controlled query parameters.
+
+## Local self-hosted Keycloak
+
+The repository's Docker Compose stack includes a local Keycloak instance and a
+preconfigured `agentengine` realm.  It starts automatically with
+`docker compose up -d --build`:
+
+- Application: http://localhost:8080
+- Keycloak administration: http://localhost:8081/admin
+- Initial administrator: `admin` / `change-this-local-admin-password`
+- Initial application user: `demo` / `demo-password-change-me`
+
+Change `KEYCLOAK_ADMIN_PASSWORD` in `.env` before using anything other than a
+local Docker Desktop setup.  The Keycloak port is deliberately bound to
+`127.0.0.1`; the included `start-dev` configuration and embedded database are
+not a production deployment.  For production, run Keycloak with `start`, a
+managed Postgres database, HTTPS, backups, and an external secret store.

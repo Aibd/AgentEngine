@@ -114,6 +114,12 @@ def current_principal(request: Request) -> Principal:
 
 
 def _claims_scopes(claims: dict[str, Any]) -> frozenset[str]:
+    """Return permissions from standard scopes and Keycloak realm roles.
+
+    Keycloak represents realm roles in ``realm_access.roles`` instead of the
+    OAuth ``scope`` claim.  Supporting both keeps the resource server portable
+    while allowing the bundled local realm to use normal Keycloak roles.
+    """
     values: set[str] = set()
     scope = claims.get("scope")
     if isinstance(scope, str):
@@ -121,6 +127,11 @@ def _claims_scopes(claims: dict[str, Any]) -> frozenset[str]:
     scp = claims.get("scp")
     if isinstance(scp, list):
         values.update(str(part) for part in scp if str(part))
+    realm_access = claims.get("realm_access")
+    if isinstance(realm_access, dict):
+        roles = realm_access.get("roles")
+        if isinstance(roles, list):
+            values.update(str(role) for role in roles if str(role))
     return frozenset(values)
 
 

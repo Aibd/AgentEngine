@@ -48,6 +48,32 @@ async def test_oidc_authenticator_uses_verified_token_claims() -> None:
     assert principal.scopes == frozenset({"agent:run", "reports:read"})
 
 
+async def test_oidc_authenticator_accepts_keycloak_realm_roles() -> None:
+    settings = AuthSettings(
+        issuer_url="https://issuer.example",
+        audience="agentengine-api",
+        tenant_claim="tenant",
+        allowed_algorithms=("HS256",),
+    )
+    token = jwt.encode(
+        {
+            "sub": "keycloak-user",
+            "tenant": "local",
+            "realm_access": {"roles": ["agent:read", "agent:run"]},
+            "aud": "agentengine-api",
+            "iss": "https://issuer.example",
+            "exp": int(time.time()) + 60,
+        },
+        "test-secret-key-must-be-at-least-32-bytes",
+        algorithm="HS256",
+        headers={"kid": "test-key"},
+    )
+
+    principal = await _StaticKeyAuthenticator(settings).authenticate(f"Bearer {token}")
+
+    assert principal.scopes == frozenset({"agent:read", "agent:run"})
+
+
 async def test_protected_route_rejects_a_missing_or_invalid_bearer_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

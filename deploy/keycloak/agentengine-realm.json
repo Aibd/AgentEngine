@@ -1,0 +1,114 @@
+{
+  "realm": "agentengine",
+  "enabled": true,
+  "displayName": "AgentEngine",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "roles": {
+    "realm": [
+      { "name": "agent:read" },
+      { "name": "agent:run" },
+      { "name": "reports:read" },
+      { "name": "reports:write" },
+      { "name": "skills:read" },
+      { "name": "skills:manage" },
+      { "name": "connectors:manage" },
+      { "name": "approvals:decide" }
+    ]
+  },
+  "defaultRoles": [
+    "offline_access",
+    "uma_authorization",
+    "agent:read",
+    "agent:run",
+    "reports:read",
+    "reports:write",
+    "skills:read",
+    "skills:manage",
+    "connectors:manage",
+    "approvals:decide"
+  ],
+  "users": [
+    {
+      "username": "demo",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "demo@localhost",
+      "firstName": "Demo",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo-password-change-me",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "agent:read",
+        "agent:run",
+        "reports:read",
+        "reports:write",
+        "skills:read",
+        "skills:manage",
+        "connectors:manage",
+        "approvals:decide"
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "agentengine-web",
+      "name": "AgentEngine Web",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": [
+        "http://localhost:8080/*",
+        "http://127.0.0.1:8080/*",
+        "http://localhost:5173/*",
+        "http://127.0.0.1:5173/*"
+      ],
+      "webOrigins": [
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "agentengine-api audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "agentengine-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "local tenant",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "tenant_id",
+            "claim.value": "local",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -10,9 +10,10 @@ import {
   X,
 } from "lucide-react";
 import type { McpConnector } from "../types";
+import { apiFetch } from "../auth";
 import { useI18n } from "../i18n";
 
-const API = "http://127.0.0.1:8000";
+const API = "";
 
 type Draft = {
   name: string;
@@ -43,7 +44,7 @@ export function ConnectorsPage() {
 
   const fetchConnectors = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/api/connectors`);
+      const res = await apiFetch(`${API}/api/connectors`);
       if (!res.ok) throw new Error("Failed to load");
       const data = await res.json();
       setConnectors(data.connectors ?? []);
@@ -65,7 +66,7 @@ export function ConnectorsPage() {
       list.map((c) => (c.id === id ? { ...c, enabled: !c.enabled } : c)),
     );
     try {
-      const res = await fetch(`${API}/api/connectors/${id}/toggle`, { method: "PATCH" });
+      const res = await apiFetch(`${API}/api/connectors/${id}/toggle`, { method: "PATCH" });
       if (!res.ok) throw new Error("failed");
     } catch {
       setConnectors(prev);
@@ -77,7 +78,7 @@ export function ConnectorsPage() {
     const prev = connectors;
     setConnectors((list) => list.filter((c) => c.id !== id));
     try {
-      const res = await fetch(`${API}/api/connectors/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`${API}/api/connectors/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("failed");
     } catch {
       setConnectors(prev);
@@ -113,7 +114,7 @@ export function ConnectorsPage() {
       body.url = draft.url.trim();
     }
     try {
-      const res = await fetch(`${API}/api/connectors`, {
+      const res = await apiFetch(`${API}/api/connectors`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

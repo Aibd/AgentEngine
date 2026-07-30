@@ -83,8 +83,14 @@ async def test_capabilities_endpoint_lists_web_agent_tools_and_skills() -> None:
     assert response.status_code == 200
     body = response.json()
     assert {agent["name"] for agent in body["agents"]} >= {"general_chat", "deep_research"}
-    assert {tool["name"] for tool in body["tools"]} >= {"Skill"}
-    assert "bash" not in {tool["name"] for tool in body["tools"]}
+    tool_names = {tool["name"] for tool in body["tools"]}
+    assert tool_names >= {"Skill"}
+    # When Docker is reachable, the API advertises a sandboxed bash tool.  In
+    # environments without Docker it must not fall back to host-shell bash.
+    if web_api.SANDBOX_MANAGER is None:
+        assert "bash" not in tool_names
+    else:
+        assert "bash" in tool_names
     assert any(skill["name"] == "codebase-research" for skill in body["skills"])
 
 

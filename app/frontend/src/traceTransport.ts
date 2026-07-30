@@ -10,6 +10,7 @@ import type {
   SkillSummary,
   SseEvent,
 } from "./types";
+import { apiFetch } from "./auth";
 
 type TraceHandler = (event: SseEvent) => void;
 type DoneHandler = () => void;
@@ -113,7 +114,7 @@ export async function uploadReportFile(
     filename: file.name,
     conversation_id: conversationId,
   });
-  const response = await fetch(`/api/report-files?${params.toString()}`, {
+  const response = await apiFetch(`/api/report-files?${params.toString()}`, {
     method: "POST",
     headers: { "Content-Type": "application/octet-stream" },
     body: file,
@@ -132,7 +133,7 @@ export async function uploadReportFile(
 }
 
 export async function fetchCapabilities(): Promise<CapabilitySummary> {
-  const response = await fetch("/api/capabilities");
+  const response = await apiFetch("/api/capabilities");
   if (!response.ok) {
     throw new Error(`capabilities request failed: ${response.status}`);
   }
@@ -140,7 +141,7 @@ export async function fetchCapabilities(): Promise<CapabilitySummary> {
 }
 
 export async function fetchSkills(): Promise<SkillSummary[]> {
-  const response = await fetch("/api/skills");
+  const response = await apiFetch("/api/skills");
   if (!response.ok) {
     throw new Error(`skills request failed: ${response.status}`);
   }
@@ -149,7 +150,7 @@ export async function fetchSkills(): Promise<SkillSummary[]> {
 }
 
 export async function fetchSkillDetail(name: string): Promise<SkillDetail> {
-  const response = await fetch(`/api/skills/${encodeURIComponent(name)}`);
+  const response = await apiFetch(`/api/skills/${encodeURIComponent(name)}`);
   if (!response.ok) {
     throw new Error(await readErrorDetail(response, "skill detail request failed"));
   }
@@ -158,7 +159,7 @@ export async function fetchSkillDetail(name: string): Promise<SkillDetail> {
 
 export async function importSkillZip(file: File): Promise<SkillSummary> {
   const params = new URLSearchParams({ filename: file.name });
-  const response = await fetch(`/api/skills/import?${params.toString()}`, {
+  const response = await apiFetch(`/api/skills/import?${params.toString()}`, {
     method: "POST",
     headers: { "Content-Type": "application/zip" },
     body: file,
@@ -170,7 +171,7 @@ export async function importSkillZip(file: File): Promise<SkillSummary> {
 }
 
 export async function setSkillEnabled(name: string, enabled: boolean): Promise<SkillSummary> {
-  const response = await fetch(`/api/skills/${encodeURIComponent(name)}`, {
+  const response = await apiFetch(`/api/skills/${encodeURIComponent(name)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ enabled }),
@@ -182,7 +183,7 @@ export async function setSkillEnabled(name: string, enabled: boolean): Promise<S
 }
 
 export async function deleteSkill(name: string): Promise<void> {
-  const response = await fetch(`/api/skills/${encodeURIComponent(name)}`, {
+  const response = await apiFetch(`/api/skills/${encodeURIComponent(name)}`, {
     method: "DELETE",
   });
   if (!response.ok) {
@@ -203,7 +204,7 @@ export async function fetchMarketSkills(category?: string, q?: string): Promise<
     params.set("q", q.trim());
   }
   const suffix = params.toString() ? `?${params.toString()}` : "";
-  const response = await fetch(`/api/skill-market${suffix}`);
+  const response = await apiFetch(`/api/skill-market${suffix}`);
   if (!response.ok) {
     throw new Error(`skill market request failed: ${response.status}`);
   }
@@ -212,7 +213,7 @@ export async function fetchMarketSkills(category?: string, q?: string): Promise<
 }
 
 export async function fetchMarketCategories(): Promise<string[]> {
-  const response = await fetch("/api/skill-market/categories");
+  const response = await apiFetch("/api/skill-market/categories");
   if (!response.ok) {
     throw new Error(`skill market categories request failed: ${response.status}`);
   }
@@ -221,7 +222,7 @@ export async function fetchMarketCategories(): Promise<string[]> {
 }
 
 export async function installMarketSkill(entryId: string): Promise<SkillSummary> {
-  const response = await fetch(`/api/skill-market/${encodeURIComponent(entryId)}/install`, {
+  const response = await apiFetch(`/api/skill-market/${encodeURIComponent(entryId)}/install`, {
     method: "POST",
   });
   if (!response.ok) {
@@ -242,7 +243,7 @@ export async function fetchExperts(category?: string, scenario?: string, q?: str
     params.set("q", q.trim());
   }
   const suffix = params.toString() ? `?${params.toString()}` : "";
-  const response = await fetch(`/api/experts${suffix}`);
+  const response = await apiFetch(`/api/experts${suffix}`);
   if (!response.ok) {
     throw new Error(`experts request failed: ${response.status}`);
   }
@@ -251,7 +252,7 @@ export async function fetchExperts(category?: string, scenario?: string, q?: str
 }
 
 export async function fetchExpertCategories(): Promise<string[]> {
-  const response = await fetch("/api/experts/categories");
+  const response = await apiFetch("/api/experts/categories");
   if (!response.ok) {
     throw new Error(`expert categories request failed: ${response.status}`);
   }
@@ -260,7 +261,7 @@ export async function fetchExpertCategories(): Promise<string[]> {
 }
 
 export async function fetchExpertScenarios(): Promise<ScenarioGroup[]> {
-  const response = await fetch("/api/experts/scenarios");
+  const response = await apiFetch("/api/experts/scenarios");
   if (!response.ok) {
     throw new Error(`expert scenarios request failed: ${response.status}`);
   }
@@ -277,7 +278,7 @@ export async function fetchExpertTeams(category?: string, q?: string): Promise<E
     params.set("q", q.trim());
   }
   const suffix = params.toString() ? `?${params.toString()}` : "";
-  const response = await fetch(`/api/expert-teams${suffix}`);
+  const response = await apiFetch(`/api/expert-teams${suffix}`);
   if (!response.ok) {
     throw new Error(`expert teams request failed: ${response.status}`);
   }
@@ -286,7 +287,7 @@ export async function fetchExpertTeams(category?: string, q?: string): Promise<E
 }
 
 export async function fetchExpertTeamCategories(): Promise<string[]> {
-  const response = await fetch("/api/expert-teams/categories");
+  const response = await apiFetch("/api/expert-teams/categories");
   if (!response.ok) {
     throw new Error(`expert team categories request failed: ${response.status}`);
   }
@@ -306,25 +307,12 @@ async function readErrorDetail(response: Response, fallback: string): Promise<st
   return `${fallback} (${response.status})`;
 }
 
-export function connectEventSource(url: string, onEvent: TraceHandler): () => void {
-  const source = new EventSource(url);
-  for (const eventType of EVENT_TYPES) {
-    source.addEventListener(eventType, (message) => {
-      onEvent({
-        event: eventType,
-        data: JSON.parse((message as MessageEvent).data) as Record<string, unknown>,
-      });
-    });
-  }
-  return () => source.close();
-}
-
 async function consumeSse(
   url: string,
   signal: AbortSignal,
   onEvent: TraceHandler,
 ): Promise<boolean> {
-  const response = await fetch(url, {
+  const response = await apiFetch(url, {
     headers: { Accept: "text/event-stream" },
     signal,
   });
@@ -378,7 +366,7 @@ async function createAndStreamReport(
   if (resumeFromReportId) {
     body.resume_from_report_id = resumeFromReportId;
   }
-  const response = await fetch("/api/reports", {
+  const response = await apiFetch("/api/reports", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
