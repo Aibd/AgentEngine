@@ -35,7 +35,9 @@ type ComposerProps = {
   variant: "center" | "docked";
   query: string;
   onQueryChange: (value: string) => void;
-  onSubmit: () => void;
+  // Pass the controlled input directly so submit cannot race a pending
+  // parent-state update from the last keystroke.
+  onSubmit: (query: string) => void;
   isRunning: boolean;
   onStop: () => void;
   skill: ComposerSkill;
@@ -121,7 +123,7 @@ export function Composer(props: ComposerProps) {
       onStop();
       return;
     }
-    onSubmit();
+    onSubmit(query);
   }
 
   function toggleRecording() {

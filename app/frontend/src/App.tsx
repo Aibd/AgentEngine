@@ -626,14 +626,14 @@ export function App() {
     stopSession(activeSessionId);
   }
 
-  function submitFromComposer() {
+  function submitFromComposer(nextQuery: string) {
     if (isRunning) {
       stopRun();
       return;
     }
     // Expert-team session: run the members as a sequential relay pipeline.
     if (activeSession.teamMembers && activeSession.teamMembers.length > 0) {
-      const cleaned = query.trim();
+      const cleaned = nextQuery.trim();
       if (!cleaned) {
         return;
       }
@@ -642,10 +642,10 @@ export function App() {
       return;
     }
     if (selectedSkill === "data_analysis") {
-      startReportDemo(query);
+      startReportDemo(nextQuery);
       return;
     }
-    startRun();
+    startRun(nextQuery);
   }
 
   function newSession() {
