@@ -21,6 +21,7 @@ Idle containers are reaped by ``SandboxManager._reap_loop()`` after
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
 from pathlib import Path
@@ -56,10 +57,19 @@ class SessionSandbox:
     # -- lifecycle ------------------------------------------------------------
 
     def start(self) -> None:
-        """Create and start the resident container (idempotent)."""
+        """Create and start the resident container (idempotent).
+
+        Reclaims any leftover container holding this conversation's name first.
+        After a process restart or crash the in-memory manager state is gone but
+        Docker still keeps the old (often dead) ``ae-sbx-<conv>`` container, whose
+        name would otherwise collide with a 409 Conflict. Durable state lives in
+        the bind-mounted host workspace, so dropping the stale container is safe.
+        """
         if self._container is not None:
             return
         self.host_workspace.mkdir(parents=True, exist_ok=True)
+        name = self._container_name()
+        self._remove_stale_container(name)
         run_kwargs = self.cfg.host_config_kwargs()
         run_kwargs["volumes"] = {
             str(self.host_workspace): {"bind": self.cfg.workspace_mount, "mode": "rw"}
@@ -69,7 +79,7 @@ class SessionSandbox:
             self._container = self._client.containers.run(
                 image=self.cfg.image,
                 command=["sleep", "infinity"],
-                name=f"ae-sbx-{self.conversation_id[:32]}",
+                name=name,
                 labels={"agentengine.sandbox": "session", "conversation_id": self.conversation_id},
                 **run_kwargs,
             )
@@ -82,6 +92,40 @@ class SessionSandbox:
             "sandbox_session_started conv=%s container=%s",
             self.conversation_id, self._container.short_id,
         )
+
+    def _remove_stale_container(self, name: str) -> None:
+        """Drop a pre-existing container reserving *name* (left by a crashed or
+        restarted process). No-ops when the client cannot look up by name (test
+        fakes) or when nothing is found."""
+        get = getattr(self._client.containers, "get", None)
+        if get is None:
+            return
+        try:
+            stale = get(name)
+        except Exception:  # noqa: BLE001 - NotFound (or unsupported) → nothing to reclaim
+            return
+        labels = getattr(stale, "labels", None)
+        if not isinstance(labels, dict):
+            labels = getattr(stale, "attrs", {}).get("Config", {}).get("Labels", {})
+        if (
+            not isinstance(labels, dict)
+            or labels.get("agentengine.sandbox") != "session"
+            or labels.get("conversation_id") != self.conversation_id
+        ):
+            logger.warning("sandbox_session_refused_unverified_reclaim name=%s", name)
+            return
+        try:
+            stale.remove(force=True)
+            logger.info(
+                "sandbox_session_reclaimed_name conv=%s name=%s",
+                self.conversation_id, name,
+            )
+        except Exception as exc:  # noqa: BLE001 - best effort; surface via the run() 409 if it still collides
+            logger.warning("sandbox_session_reclaim_failed name=%s err=%s", name, exc)
+
+    def _container_name(self) -> str:
+        digest = hashlib.sha256(self.conversation_id.encode("utf-8")).hexdigest()[:32]
+        return f"ae-sbx-{digest}"
 
     def close(self) -> None:
         """Force-remove the container. Idempotent; safe to call twice."""

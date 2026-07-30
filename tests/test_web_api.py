@@ -83,7 +83,8 @@ async def test_capabilities_endpoint_lists_web_agent_tools_and_skills() -> None:
     assert response.status_code == 200
     body = response.json()
     assert {agent["name"] for agent in body["agents"]} >= {"general_chat", "deep_research"}
-    assert {tool["name"] for tool in body["tools"]} >= {"bash", "Skill"}
+    assert {tool["name"] for tool in body["tools"]} >= {"Skill"}
+    assert "bash" not in {tool["name"] for tool in body["tools"]}
     assert any(skill["name"] == "codebase-research" for skill in body["skills"])
 
 
@@ -160,16 +161,18 @@ async def test_run_stream_scopes_persistence_by_tenant() -> None:
         )
 
     assert events[-1]["event"] == "done"
-    assert default_messages.json()["messages"] == []
+    # Tenant identity comes from the verified principal. Client-supplied query
+    # parameters must not switch persistence namespaces.
     assert any(
         msg["role"] == "user" and msg["content"] == "tenant hello"
-        for msg in tenant_messages.json()["messages"]
+        for msg in default_messages.json()["messages"]
     )
+    assert tenant_messages.json()["messages"] == default_messages.json()["messages"]
 
 
 async def test_run_stream_emits_quota_error_for_limited_tenant() -> None:
-    web_api.QUOTA_STORE.set_limits("limited", QuotaLimits(max_runs=1))
-    await web_api.QUOTA_STORE.check_and_acquire_run("limited")
+    web_api.QUOTA_STORE.set_limits("test-tenant", QuotaLimits(max_runs=1))
+    await web_api.QUOTA_STORE.check_and_acquire_run("test-tenant")
 
     transport = httpx.ASGITransport(app=web_api.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver", timeout=10.0) as client:
@@ -188,7 +191,7 @@ async def test_run_stream_emits_quota_error_for_limited_tenant() -> None:
 
     error = next(evt for evt in events if evt["event"] == "error")
     assert error["data"]["code"] == "quota_exceeded"
-    assert error["data"]["details"]["tenant_id"] == "limited"
+    assert error["data"]["details"]["tenant_id"] == "test-tenant"
 
 
 async def test_approval_decision_rejects_unknown_id() -> None:

@@ -113,6 +113,22 @@ async def test_import_rejects_zip_slip(tmp_path: Path) -> None:
     assert not (tmp_path.parent / "evil").exists()
 
 
+@pytest.mark.parametrize("unsafe_name", ["C:evil/SKILL.md"])
+async def test_import_rejects_windows_escape_paths(tmp_path: Path, unsafe_name: str) -> None:
+    reg = _registry(tmp_path)
+    with pytest.raises(SkillImportError, match="unsafe path"):
+        await reg.import_zip(_make_zip({unsafe_name: "---\nname: evil\n---\nx"}))
+
+
+async def test_import_rejects_zip_bomb_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import agentengine.skills.registry as registry_module
+
+    monkeypatch.setattr(registry_module, "MAX_SKILL_ZIP_MEMBER_BYTES", 10)
+    reg = _registry(tmp_path)
+    with pytest.raises(SkillImportError, match="oversized"):
+        await reg.import_zip(_make_zip({"safe/SKILL.md": "---\nname: safe\n---\n" + "x" * 20}))
+
+
 async def test_duplicate_import_raises_file_exists(tmp_path: Path) -> None:
     reg = _registry(tmp_path)
     data = _make_zip({"dup/SKILL.md": "---\nname: dup\ndescription: D\n---\nB"})

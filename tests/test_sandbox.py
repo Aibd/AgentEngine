@@ -9,6 +9,7 @@ tool layer.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -197,3 +198,65 @@ def test_sandboxed_bash_runs_in_container(manager: SandboxManager):
     assert "exit=0" in out
     assert "ran: echo hi" in out
     assert manager.active_count == 1
+
+
+# --- restart resilience: reclaim a stale container name ---------------------
+
+def test_start_reclaims_stale_container_name(tmp_path: Path):
+    """A leftover container holding the name (e.g. after a process restart) is
+    force-removed so the new container can take the name instead of 409ing."""
+    from agentengine.sandbox.session_sandbox import SessionSandbox
+
+    class _StaleContainers:
+        def __init__(self):
+            self.runs = 0
+            self.removed: list[str] = []
+            self.name = "ae-sbx-" + hashlib.sha256(b"conv-x").hexdigest()[:32]
+            self.stale = {self.name}  # a leftover container holds this name
+
+        def get(self, name):
+            if name in self.stale:
+                outer = self
+
+                class _Stale:
+                    labels = {"agentengine.sandbox": "session", "conversation_id": "conv-x"}
+
+                    def remove(self_inner, force=False):
+                        outer.removed.append(name)
+                        outer.stale.discard(name)
+
+                return _Stale()
+            raise KeyError(name)
+
+        def run(self, **kwargs):
+            name = kwargs.get("name")
+            if name in self.stale:  # name still taken → mimic Docker 409
+                raise RuntimeError(f"409 Conflict: {name} already in use")
+            self.runs += 1
+
+            class _C:
+                short_id = "newc01"
+
+            return _C()
+
+    class _Client:
+        def __init__(self):
+            self.containers = _StaleContainers()
+
+    client = _Client()
+    sb = SessionSandbox(
+        conversation_id="conv-x",
+        host_workspace=tmp_path / "ws",
+        config=SandboxConfig(),
+        docker_client=client,
+    )
+    sb.start()  # must reclaim the stale name, then create successfully
+
+    assert client.containers.removed == [client.containers.name]  # stale force-removed
+    assert client.containers.runs == 1  # fresh container created, no 409
+
+
+def test_workspace_path_does_not_expose_conversation_id(manager: SandboxManager):
+    workspace = manager.host_workspace_for("tenant-alice:very-secret-conversation")
+    assert "alice" not in str(workspace)
+    assert workspace.name.startswith("session-")

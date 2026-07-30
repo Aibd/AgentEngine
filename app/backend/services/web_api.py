@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 import uuid
@@ -9,9 +10,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 
 from app.backend.agents import REGISTRY as AGENT_REGISTRY
 from agentengine.concurrency import InMemoryConversationLockManager
@@ -57,6 +58,7 @@ from app.backend.services.reporting.db import ReportMetadataDB
 from app.backend.services.reporting.docx_renderer import render_docx
 from app.backend.services.reporting.jobs import ReportJobStore, stream_report_artifact
 from app.backend.services.reporting.pdf_renderer import PdfRendererUnavailable, render_pdf
+from app.backend.services.auth import OIDCAuthenticator, Principal, current_principal
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -64,6 +66,7 @@ DEFAULT_DB_PATH = REPO_ROOT / "data" / "chatbot.db"
 DEFAULT_UPLOAD_ROOT = REPO_ROOT / "data" / "uploads"
 
 _SETTINGS = Settings.from_env(dotenv=REPO_ROOT / ".env")
+AUTHENTICATOR = OIDCAuthenticator(_SETTINGS.auth)
 
 # Process-wide singletons: persistence + lock manager. The Service constructed
 # per request must share the same instances so all conversations land in one
@@ -127,6 +130,38 @@ app.add_middleware(
 )
 
 
+def _required_scopes(request: Request) -> set[str]:
+    """Map the HTTP surface to the least privilege scope it needs."""
+    path = request.url.path
+    if path == "/api/health" or request.method == "OPTIONS":
+        return set()
+    if path.startswith("/api/connectors"):
+        return {"connectors:manage"}
+    if path.startswith("/api/skills") or path.startswith("/api/skill-market"):
+        return {"skills:manage"} if request.method != "GET" else {"skills:read"}
+    if path.startswith("/api/approvals"):
+        return {"approvals:decide"}
+    if path.startswith("/api/report-files") or path.startswith("/api/reports"):
+        return {"reports:read"} if request.method == "GET" else {"reports:write"}
+    if path.startswith("/api/runs"):
+        return {"agent:run"}
+    return {"agent:read"}
+
+
+@app.middleware("http")
+async def _authenticate_http_request(request: Request, call_next: Any) -> Response:
+    """Attach a verified principal before any route reads tenant/user data."""
+    if request.url.path == "/api/health" or request.method == "OPTIONS":
+        return await call_next(request)
+    try:
+        principal = await AUTHENTICATOR.authenticate(request.headers.get("Authorization"))
+        principal.require_scopes(_required_scopes(request))
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    request.state.principal = principal
+    return await call_next(request)
+
+
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
     return {
@@ -169,7 +204,7 @@ async def capabilities() -> dict[str, Any]:
         tools.append(SandboxedBashTool(manager=SANDBOX_MANAGER, conversation_id="capabilities"))
         tools.append(SandboxedPythonTool(manager=SANDBOX_MANAGER, conversation_id="capabilities"))
     else:
-        tools = build_default_tools(workspace_root=REPO_ROOT)
+        tools = build_default_tools(workspace_root=REPO_ROOT, exclude=["bash"])
     tools.append(SkillTool(skill_loader))
     tools.append(ReadSkillResource(skill_loader))
     if SANDBOX_MANAGER is not None:
@@ -438,7 +473,7 @@ def _public_message_dto(message: dict[str, Any]) -> dict[str, Any]:
 @app.get("/api/conversations/{conversation_id}/messages")
 async def conversation_messages(
     conversation_id: str,
-    tenant_id: str = Query("default", min_length=1),
+    principal: Principal = Depends(current_principal),
 ) -> dict[str, Any]:
     """Return persisted messages for a conversation so the UI can rehydrate.
 
@@ -447,7 +482,7 @@ async def conversation_messages(
     """
     if not conversation_id.strip():
         raise HTTPException(status_code=400, detail="conversation_id is required")
-    scoped_conversation_id = _scoped_conversation_id(conversation_id, tenant_id)
+    scoped_conversation_id = _scoped_conversation_id(conversation_id, principal.tenant_id)
     messages = await PERSISTENCE.load_messages(scoped_conversation_id)
     visible = [_public_message_dto(m) for m in messages if m.get("role") != "system"]
     return {"conversation_id": conversation_id, "messages": visible}
@@ -458,15 +493,15 @@ async def upload_report_file(
     request: Request,
     filename: str = Query(..., min_length=1),
     conversation_id: str = Query("web-conversation", min_length=1),
-    tenant_id: str = Query("default", min_length=1),
+    principal: Principal = Depends(current_principal),
 ) -> dict[str, Any]:
     data = await request.body()
     try:
         record = await REPORT_FILE_STORE.save_bytes(
             data=data,
             filename=filename,
-            tenant_id=tenant_id,
-            conversation_id=_scoped_conversation_id(conversation_id, tenant_id),
+            tenant_id=principal.tenant_id,
+            conversation_id=_scoped_conversation_id(conversation_id, principal.tenant_id),
         )
     except ValueError as exc:
         message = str(exc)
@@ -479,15 +514,21 @@ async def upload_report_file(
 
 
 @app.get("/api/report-files/{file_id}")
-async def report_file_snapshot(file_id: str) -> dict[str, Any]:
+async def report_file_snapshot(
+    file_id: str,
+    principal: Principal = Depends(current_principal),
+) -> dict[str, Any]:
     record = await REPORT_FILE_STORE.aget(file_id)
-    if record is None:
+    if record is None or record.tenant_id != principal.tenant_id:
         raise HTTPException(status_code=404, detail="report file not found")
     return record.snapshot()
 
 
 @app.post("/api/reports")
-async def create_report(body: dict[str, Any]) -> dict[str, Any]:
+async def create_report(
+    body: dict[str, Any],
+    principal: Principal = Depends(current_principal),
+) -> dict[str, Any]:
     """Create an HTML report artifact job.
 
     The artifact stream requires a configured LLM. The selected skill prompt,
@@ -503,28 +544,31 @@ async def create_report(body: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="conversation_id is required")
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
-    scoped_conversation_id = _scoped_conversation_id(
-        conversation_id,
-        str(body.get("tenant_id") or "default"),
-    )
+    scoped_conversation_id = _scoped_conversation_id(conversation_id, principal.tenant_id)
     files = (
         await REPORT_FILE_STORE.aget_many(file_ids)
         if file_ids
         else await REPORT_FILE_STORE.alist_by_conversation(scoped_conversation_id)
     )
     missing = sorted(set(file_ids) - {record.id for record in files})
-    if missing:
+    unauthorized = [
+        record.id for record in files
+        if record.tenant_id != principal.tenant_id
+        or record.conversation_id != scoped_conversation_id
+    ]
+    if missing or unauthorized:
         raise HTTPException(status_code=404, detail={"missing_file_ids": missing})
 
     resume_from_html = ""
     resume_from_id = str(body.get("resume_from_report_id") or "").strip()
     if resume_from_id:
         prior_job = await REPORT_STORE.aload(resume_from_id)
-        if prior_job is not None and prior_job.html.strip():
+        if prior_job is not None and _owns_report(prior_job, principal.tenant_id) and prior_job.html.strip():
             resume_from_html = prior_job.html
 
     job = await REPORT_STORE.acreate(
-        conversation_id=conversation_id,
+        conversation_id=scoped_conversation_id,
+        public_conversation_id=conversation_id,
         title=title,
         intent=intent,
         skill=skill,
@@ -538,27 +582,34 @@ async def create_report(body: dict[str, Any]) -> dict[str, Any]:
 async def list_reports(
     conversation_id: str = Query(...),
     limit: int = Query(50, ge=1, le=200),
+    principal: Principal = Depends(current_principal),
 ) -> dict[str, Any]:
     """List report metadata for a conversation, newest first."""
     rows = await REPORT_STORE.alist_by_conversation(
-        conversation_id,
+        _scoped_conversation_id(conversation_id, principal.tenant_id),
         limit=limit,
     )
     return {"reports": rows}
 
 
 @app.get("/api/reports/{report_id}")
-async def report_snapshot(report_id: str) -> dict[str, Any]:
+async def report_snapshot(
+    report_id: str,
+    principal: Principal = Depends(current_principal),
+) -> dict[str, Any]:
     job = await REPORT_STORE.aload(report_id)
-    if job is None:
+    if job is None or not _owns_report(job, principal.tenant_id):
         raise HTTPException(status_code=404, detail="report not found")
     return job.snapshot()
 
 
 @app.get("/api/reports/{report_id}/stream")
-async def report_stream(report_id: str) -> StreamingResponse:
+async def report_stream(
+    report_id: str,
+    principal: Principal = Depends(current_principal),
+) -> StreamingResponse:
     job = await REPORT_STORE.aload(report_id)
-    if job is None:
+    if job is None or not _owns_report(job, principal.tenant_id):
         raise HTTPException(status_code=404, detail="report not found")
     request_id = f"report-{uuid.uuid4().hex[:12]}"
 
@@ -574,15 +625,19 @@ async def report_stream(report_id: str) -> StreamingResponse:
             "X-Accel-Buffering": "no",
             "X-Streaming-Protocol": "agent-core.sse.v2",
             "X-Request-ID": request_id,
-            "X-Conversation-ID": job.conversation_id,
+            "X-Conversation-ID": job.public_conversation_id or job.conversation_id,
         },
     )
 
 
 @app.get("/api/reports/{report_id}/charts/{chart_id}.svg")
-async def report_chart_svg(report_id: str, chart_id: str) -> Response:
+async def report_chart_svg(
+    report_id: str,
+    chart_id: str,
+    principal: Principal = Depends(current_principal),
+) -> Response:
     job = await REPORT_STORE.aload(report_id)
-    if job is None:
+    if job is None or not _owns_report(job, principal.tenant_id):
         raise HTTPException(status_code=404, detail="report not found")
     svg = job.chart_assets.get(chart_id)
     if svg is None:
@@ -591,9 +646,13 @@ async def report_chart_svg(report_id: str, chart_id: str) -> Response:
 
 
 @app.get("/api/reports/{report_id}/exports/{export_format}")
-async def report_export(report_id: str, export_format: str) -> Response:
+async def report_export(
+    report_id: str,
+    export_format: str,
+    principal: Principal = Depends(current_principal),
+) -> Response:
     job = await REPORT_STORE.aload(report_id)
-    if job is None:
+    if job is None or not _owns_report(job, principal.tenant_id):
         raise HTTPException(status_code=404, detail="report not found")
     if export_format not in {"md", "html", "word", "doc", "docx", "pdf"}:
         raise HTTPException(status_code=501, detail=f"{export_format} export is not implemented yet")
@@ -637,10 +696,8 @@ async def run_stream(
     query: str = Query(..., min_length=1),
     agent_name: str = Query("general_chat", min_length=1),
     conversation_id: str = Query("web-conversation", min_length=1),
-    tenant_id: str = Query("default", min_length=1),
-    user_id: str = Query("", min_length=0),
-    scopes: str = Query("", min_length=0),
     skill: str = Query("", min_length=0),
+    principal: Principal = Depends(current_principal),
 ) -> StreamingResponse:
     query = query.strip()
     if not query:
@@ -652,9 +709,9 @@ async def run_stream(
             query=query,
             agent_name=agent_name,
             conversation_id=conversation_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            scopes=_parse_scopes(scopes),
+            tenant_id=principal.tenant_id,
+            user_id=principal.subject,
+            scopes=sorted(principal.scopes),
             request_id=request_id,
             skill=skill.strip(),
         ):
@@ -669,7 +726,7 @@ async def run_stream(
             "X-Streaming-Protocol": "agent-core.sse.v2",
             "X-Request-ID": request_id,
             "X-Conversation-ID": conversation_id,
-            "X-Tenant-ID": tenant_id,
+            "X-Tenant-ID": principal.tenant_id,
         },
     )
 
@@ -726,6 +783,10 @@ async def _run_agent_events(
             context.extras["workspace_root"] = sandbox_ws
         except Exception:
             sandbox = None
+    if sandbox is None:
+        # The web service must not degrade from a container boundary to host
+        # shell execution when Docker is unavailable or misconfigured.
+        context.extras["disable_host_exec"] = True
 
     skill_loader = SkillLoader(cwd=REPO_ROOT)
     if context.tool_collection.get("Skill") is None:
@@ -850,12 +911,17 @@ def _apply_skill_directive(query: str, skill: str) -> str:
     )
 
 
-def _parse_scopes(raw: str) -> list[str]:
-    return [scope.strip() for scope in raw.split(",") if scope.strip()]
-
-
 def _scoped_conversation_id(conversation_id: str, tenant_id: str) -> str:
-    tenant = tenant_id.strip() or "default"
-    if tenant == "default":
-        return conversation_id
-    return f"{tenant}:{conversation_id}"
+    """Create an opaque, tenant-separated persistence key.
+
+    This prevents users from choosing a ``tenant_id`` query parameter and
+    avoids leaking tenant names into SQLite conversation keys or Docker labels.
+    """
+    tenant = tenant_id.strip()
+    digest = hashlib.sha256(tenant.encode("utf-8")).hexdigest()[:20]
+    return f"tenant-{digest}:{conversation_id}"
+
+
+def _owns_report(job: Any, tenant_id: str) -> bool:
+    prefix = _scoped_conversation_id("", tenant_id)
+    return str(job.conversation_id).startswith(prefix)

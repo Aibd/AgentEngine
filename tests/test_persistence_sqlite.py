@@ -218,6 +218,7 @@ class TestMemoryIntegration:
         # System stays at the top, prior turns appear after, no duplicates
         assert roles[0] == Role.SYSTEM
         assert contents[0] == "you are helpful"
+        assert sum(role == Role.SYSTEM for role in roles) == 1
         assert "first question" in contents
         assert "first answer" in contents
 

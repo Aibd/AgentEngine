@@ -23,10 +23,47 @@ def _isolated_report_file_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     """
     try:
         from app.backend.services import web_api
+        from app.backend.services.reporting.db import ReportMetadataDB
         from app.backend.services.reporting.file_store import ReportFileStore
+        from app.backend.services.reporting.jobs import ReportJobStore
     except Exception:
         return
-    monkeypatch.setattr(web_api, "REPORT_FILE_STORE", ReportFileStore(tmp_path / "report_uploads"))
+    upload_root = tmp_path / "report_uploads"
+    metadata_db = ReportMetadataDB(upload_root / "index.db")
+    monkeypatch.setattr(web_api, "REPORT_FILES_DB", metadata_db)
+    monkeypatch.setattr(web_api, "REPORT_FILE_STORE", ReportFileStore(upload_root, db=metadata_db))
+    monkeypatch.setattr(
+        web_api,
+        "REPORT_STORE",
+        ReportJobStore(db=metadata_db, reports_dir=upload_root / "reports"),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _authenticated_web_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep legacy route tests focused on their endpoint contract.
+
+    Production deliberately fails closed when OIDC is absent; authentication
+    behavior itself is covered in ``test_web_auth.py`` with real JWTs.
+    """
+    try:
+        from app.backend.services import web_api
+        from app.backend.services.auth import Principal
+    except Exception:
+        return
+
+    class _TestAuthenticator:
+        async def authenticate(self, authorization: str | None) -> Principal:
+            return Principal(
+                subject="test-user",
+                tenant_id="test-tenant",
+                scopes=frozenset({
+                    "agent:read", "agent:run", "reports:read", "reports:write",
+                    "skills:read", "skills:manage", "connectors:manage", "approvals:decide",
+                }),
+            )
+
+    monkeypatch.setattr(web_api, "AUTHENTICATOR", _TestAuthenticator())
 
 
 class _EchoTool(Tool):

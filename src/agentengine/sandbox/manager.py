@@ -19,6 +19,7 @@ of simultaneous execs doesn't exhaust the host.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import shutil
 import threading
@@ -183,8 +184,8 @@ class SandboxManager:
         """The host directory bind-mounted into the conversation's container.
         File tools should use this as their workspace root so bash/kernel and
         the file tools see the same filesystem."""
-        safe = conversation_id.replace("/", "_").replace(":", "_")
-        return self.sessions_root / safe
+        digest = hashlib.sha256(conversation_id.encode("utf-8")).hexdigest()
+        return self.sessions_root / f"session-{digest}"
 
     # -- internals ------------------------------------------------------------
 

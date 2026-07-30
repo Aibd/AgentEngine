@@ -132,6 +132,24 @@ class AppSettings:
     approval_timeout_seconds: float = 300.0
 
 
+@dataclass(frozen=True)
+class AuthSettings:
+    """OIDC resource-server settings for the HTTP API.
+
+    Leaving ``issuer_url`` empty is intentionally not an anonymous fallback:
+    the web API returns 503 for protected routes until an operator configures
+    an identity provider.
+    """
+
+    issuer_url: str = ""
+    audience: str = ""
+    jwks_url: str = ""
+    tenant_claim: str = "tenant_id"
+    allowed_algorithms: tuple[str, ...] = ("RS256",)
+    jwks_cache_seconds: float = 300.0
+    http_timeout_seconds: float = 5.0
+
+
 # ---------------------------------------------------------------------------
 # Root settings
 # ---------------------------------------------------------------------------
@@ -145,6 +163,7 @@ class Settings:
     observability: ObservabilitySettings = field(default_factory=ObservabilitySettings)
     quota: QuotaSettings = field(default_factory=QuotaSettings)
     app: AppSettings = field(default_factory=AppSettings)
+    auth: AuthSettings = field(default_factory=AuthSettings)
 
     @classmethod
     def from_env(cls, dotenv: Path | None = None) -> "Settings":
@@ -183,6 +202,19 @@ class Settings:
             ),
             app=AppSettings(
                 approval_timeout_seconds=_float_env("APPROVAL_TIMEOUT_SECONDS", 300.0),
+            ),
+            auth=AuthSettings(
+                issuer_url=_str_env("OIDC_ISSUER_URL").rstrip("/"),
+                audience=_str_env("OIDC_AUDIENCE"),
+                jwks_url=_str_env("OIDC_JWKS_URL"),
+                tenant_claim=_str_env("OIDC_TENANT_CLAIM", "tenant_id"),
+                allowed_algorithms=tuple(
+                    item.strip()
+                    for item in _str_env("OIDC_ALLOWED_ALGORITHMS", "RS256").split(",")
+                    if item.strip()
+                ) or ("RS256",),
+                jwks_cache_seconds=_float_env("OIDC_JWKS_CACHE_SECONDS", 300.0),
+                http_timeout_seconds=_float_env("OIDC_HTTP_TIMEOUT_SECONDS", 5.0),
             ),
         )
 
@@ -255,6 +287,7 @@ __all__ = [
     "ObservabilitySettings",
     "QuotaSettings",
     "AppSettings",
+    "AuthSettings",
     "Settings",
     "create_llm_from_env",
 ]

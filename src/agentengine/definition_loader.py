@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 DEFINITION_FILE_SUFFIX = ".md"
 
 # Frontmatter keys consumed directly as AgentDefinition scalar fields.
-_SCALAR_FIELDS = ("max_messages", "auto_compact_tokens", "compaction_keep_recent")
+_SCALAR_FIELDS = ("max_steps", "max_messages", "auto_compact_tokens", "compaction_keep_recent")
 
 
 def load_definition(path: str | Path) -> AgentDefinition:
@@ -167,6 +167,8 @@ def _make_tool_setup(tool_names: tuple[str, ...]) -> SetupHook:
 
         collection = context.tool_collection
         missing = [name for name in tool_names if collection.get(name) is None]
+        if context.extras.get("disable_host_exec"):
+            missing = [name for name in missing if name != "bash"]
         if not missing:
             return
         for tool in build_default_tools_for_context(context, include=missing):

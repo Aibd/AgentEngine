@@ -28,7 +28,7 @@ services:
       context: .
       dockerfile: deploy/Dockerfile
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     env_file:
       - path: .env            # LLM creds etc. — won't fail if the file is absent
         required: false
@@ -44,7 +44,7 @@ services:
       # "false" lets sandbox code pip install / fetch URLs and powers the
       # web-search / web-fetch skills. It loosens isolation — keep it off for
       # anything but trusted local testing.
-      SANDBOX_NETWORK_DISABLED: "false"
+      SANDBOX_NETWORK_DISABLED: "true"
     volumes:
       # Docker-out-of-Docker: lets the backend drive the host daemon to spawn
       # sandboxes. Docker Desktop auto-proxies this socket into WSL2.

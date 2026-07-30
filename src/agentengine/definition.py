@@ -29,6 +29,7 @@ class AgentDefinition:
     name: str
     description: str = ""
     instructions: str = ""
+    max_steps: int = 20
     max_messages: int = 0
     auto_compact_tokens: int = 0
     compaction_keep_recent: int = 8
@@ -43,6 +44,7 @@ class AgentDefinition:
         return RunConfig(
             name=self.name,
             initial_messages=initial_messages,
+            max_steps=self.max_steps,
             max_messages=self.max_messages,
             auto_compact_tokens=self.auto_compact_tokens,
             compaction_keep_recent=self.compaction_keep_recent,

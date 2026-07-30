@@ -25,7 +25,7 @@ from typing import Any, cast
 from agentengine.base.agent import AgentRun
 from agentengine.base.context import AgentContext
 from agentengine.base.state import AgentState
-from agentengine.errors import AgentCancelledError, ContextWindowExceededError
+from agentengine.errors import AgentCancelledError, ContextWindowExceededError, MaxStepsExceededError
 from agentengine.hooks import (
     AfterTurnPayload,
     HookAbortError,
@@ -239,6 +239,11 @@ async def _loop(
     while True:
         if cancellation_token is not None:
             cancellation_token.throw_if_cancelled()
+        if agent.current_step >= agent.config.max_steps:
+            raise MaxStepsExceededError(
+                f"agent exceeded the configured maximum of {agent.config.max_steps} steps",
+                details={"max_steps": agent.config.max_steps},
+            )
 
         await _maybe_compact(agent, context)
         agent.current_step += 1

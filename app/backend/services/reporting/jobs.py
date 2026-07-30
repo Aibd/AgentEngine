@@ -35,6 +35,7 @@ class ReportJob:
     conversation_id: str
     title: str
     intent: str
+    public_conversation_id: str = ""
     skill: str = "data_analysis"
     file_ids: list[str] = field(default_factory=list)
     file_briefs: list[dict[str, Any]] = field(default_factory=list)
@@ -56,7 +57,7 @@ class ReportJob:
     def snapshot(self) -> dict[str, Any]:
         return {
             "id": self.id,
-            "conversation_id": self.conversation_id,
+            "conversation_id": self.public_conversation_id or self.conversation_id,
             "title": self.title,
             "intent": self.intent,
             "skill": self.skill,
@@ -103,6 +104,7 @@ class ReportJobStore:
         self,
         *,
         conversation_id: str,
+        public_conversation_id: str = "",
         title: str,
         intent: str,
         skill: str = "data_analysis",
@@ -114,6 +116,7 @@ class ReportJobStore:
         job = ReportJob(
             id=report_id,
             conversation_id=conversation_id,
+            public_conversation_id=public_conversation_id,
             title=title,
             intent=intent,
             skill=skill,
@@ -128,6 +131,7 @@ class ReportJobStore:
         self,
         *,
         conversation_id: str,
+        public_conversation_id: str = "",
         title: str,
         intent: str,
         skill: str = "data_analysis",
@@ -141,6 +145,7 @@ class ReportJobStore:
         """
         job = self.create(
             conversation_id=conversation_id,
+            public_conversation_id=public_conversation_id,
             title=title,
             intent=intent,
             skill=skill,
@@ -1040,7 +1045,7 @@ def _frame(
     payload = {
         "artifact_id": job.id,
         "report_id": job.id,
-        "conversation_id": job.conversation_id,
+        "conversation_id": job.public_conversation_id or job.conversation_id,
         "request_id": request_id,
         **data,
     }

@@ -40,6 +40,9 @@ from agentengine.skills.loader import SkillLoader
 logger = logging.getLogger(__name__)
 
 SKILL_FILE = "SKILL.md"
+MAX_SKILL_ZIP_MEMBERS = 256
+MAX_SKILL_ZIP_MEMBER_BYTES = 5 * 1024 * 1024
+MAX_SKILL_ZIP_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
 
 # Source values stored in ``skills_meta.source``.
 SOURCE_BUILTIN = "builtin"
@@ -373,13 +376,12 @@ def _remove_tree(path: Path) -> None:
 
 def _safe_member_path(name: str) -> PurePosixPath | None:
     """Normalize a zip member path and reject absolute / parent-escape paths."""
-    if not name or name.endswith("/"):
+    if not name or name.endswith("/") or "\\" in name:
         return None
     pure = PurePosixPath(name)
-    if pure.is_absolute():
+    if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
         return None
-    parts = pure.parts
-    if any(part == ".." for part in parts):
+    if any(":" in part or "\x00" in part for part in pure.parts):
         return None
     return pure
 
@@ -397,9 +399,19 @@ def _extract_skill_from_zip(data: bytes) -> tuple[str, dict[str, bytes]]:
         raise SkillImportError("无法解析 zip 文件") from exc
 
     with archive:
+        infos = archive.infolist()
+        if len(infos) > MAX_SKILL_ZIP_MEMBERS:
+            raise SkillImportError("skill zip has too many files")
+        total_size = sum(info.file_size for info in infos)
+        if total_size > MAX_SKILL_ZIP_UNCOMPRESSED_BYTES:
+            raise SkillImportError("skill zip expands beyond the allowed size")
+        if any(info.file_size > MAX_SKILL_ZIP_MEMBER_BYTES for info in infos):
+            raise SkillImportError("skill zip contains an oversized file")
+        if any(_safe_member_path(info.filename) is None and not info.is_dir() for info in infos):
+            raise SkillImportError("skill zip contains an unsafe path")
         members = [
             (info.filename, safe)
-            for info in archive.infolist()
+            for info in infos
             if not info.is_dir() and (safe := _safe_member_path(info.filename)) is not None
         ]
         if not members:
@@ -445,11 +457,14 @@ def _derive_skill_name(skill_md: bytes, root: PurePosixPath) -> str:
 
 
 def _write_skill_tree(target_dir: Path, files: dict[str, bytes]) -> None:
+    target_root = target_dir.resolve()
     for rel, content in files.items():
         dest = target_dir / rel
         # Final guard against any path that would escape target_dir.
         resolved = dest.resolve()
-        if not str(resolved).startswith(str(target_dir.resolve())):
+        try:
+            resolved.relative_to(target_root)
+        except ValueError:
             raise SkillImportError(f"非法的文件路径: {rel}")
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(content)

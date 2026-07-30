@@ -158,6 +158,10 @@ class RuntimeExecutionError(AgentEngineError):
     category = "runtime"
 
 
+class MaxStepsExceededError(RuntimeExecutionError):
+    code = "max_steps_exceeded"
+
+
 class AgentCancelledError(RuntimeExecutionError):
     code = "agent_cancelled"
 

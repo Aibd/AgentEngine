@@ -139,7 +139,14 @@ class Memory:
         records = await persistence.load_messages(conversation_id)
         if not records:
             return
-        loaded = [Message.from_persistent(r) for r in records]
+        # System prompts are supplied by the active RunConfig on every request.
+        # Older snapshots may contain them, but restoring them would duplicate
+        # policy/catalog prompts on every conversation turn.
+        loaded = [
+            message
+            for message in (Message.from_persistent(record) for record in records)
+            if message.role != Role.SYSTEM
+        ]
         with self._lock:
             # Insert loaded messages after existing system messages.
             system_msgs = [m for m in self.messages if m.role == Role.SYSTEM]

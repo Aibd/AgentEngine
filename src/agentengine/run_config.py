@@ -23,6 +23,7 @@ class RunConfig:
 
     name: str
     initial_messages: tuple[Message, ...] = ()
+    max_steps: int = 20
     max_messages: int = 0
     auto_compact_tokens: int = 0
     compaction_keep_recent: int = 8
@@ -36,6 +37,8 @@ class RunConfig:
             raise ValueError("RunConfig.name must not be empty")
         if self.max_messages < 0:
             raise ValueError("RunConfig.max_messages must be at least 0")
+        if self.max_steps < 1:
+            raise ValueError("RunConfig.max_steps must be at least 1")
         if self.auto_compact_tokens < 0:
             raise ValueError("RunConfig.auto_compact_tokens must be at least 0")
         if self.compaction_keep_recent < 0:
