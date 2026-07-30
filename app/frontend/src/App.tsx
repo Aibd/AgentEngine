@@ -6,9 +6,12 @@ import {
   ChevronRight,
   CircleAlert,
   Clock3,
+  Copy,
   FileText,
   Menu,
   Loader2,
+  Pencil,
+  Send,
   Settings2,
   Sparkles,
   X,
@@ -62,6 +65,7 @@ const samplePrompts = [
 type ChatTurn = {
   id: string;
   submittedQuery: string;
+  createdAt: number;
   files: ReportFileSummary[];
   trace: RunTrace;
   // For expert-team runs: a label like "成员 1/2 · 股票研究专家" shown above the turn.
@@ -250,6 +254,46 @@ export function App() {
     setSessionRunning(sessionId, false);
   }
 
+  function streamAgentRun({
+    sessionId,
+    turnId,
+    effectiveQuery,
+    agentName,
+    skill,
+  }: {
+    sessionId: string;
+    turnId: string;
+    effectiveQuery: string;
+    agentName: string;
+    skill: string;
+  }) {
+    const stop = runAgentTrace(
+      effectiveQuery,
+      (event) => {
+        setSessions((current) =>
+          updateSession(current, sessionId, (session) => ({
+            ...session,
+            turns: session.turns.map((turn) =>
+              turn.id === turnId ? { ...turn, trace: reduceTraceEvent(turn.trace, event) } : turn,
+            ),
+          })),
+        );
+        if (event.event === "done" || event.event === "error") {
+          stopMapRef.current.delete(sessionId);
+          setSessionRunning(sessionId, false);
+        }
+      },
+      () => {
+        stopMapRef.current.delete(sessionId);
+        setSessionRunning(sessionId, false);
+      },
+      agentName,
+      sessionId,
+      skill,
+    );
+    stopMapRef.current.set(sessionId, stop);
+  }
+
   function startRun(nextQuery = query) {
     const cleaned = nextQuery.trim();
     if (!cleaned) {
@@ -275,6 +319,7 @@ export function App() {
           {
             id: turnId,
             submittedQuery: cleaned,
+            createdAt: Date.now(),
             files: attachedFiles,
             trace: createEmptyTrace(),
           },
@@ -284,31 +329,49 @@ export function App() {
     setReportFiles([]);
     setComposerUploadError("");
     setPreviewFile(null);
-    const stop = runAgentTrace(
+    streamAgentRun({
+      sessionId: runSessionId,
+      turnId,
       effectiveQuery,
-      (event) => {
-        setSessions((current) =>
-          updateSession(current, runSessionId, (session) => ({
-            ...session,
-            turns: session.turns.map((turn) =>
-              turn.id === turnId ? { ...turn, trace: reduceTraceEvent(turn.trace, event) } : turn,
-            ),
-          })),
-        );
-        if (event.event === "done" || event.event === "error") {
-          stopMapRef.current.delete(runSessionId);
-          setSessionRunning(runSessionId, false);
-        }
-      },
-      () => {
-        stopMapRef.current.delete(runSessionId);
-        setSessionRunning(runSessionId, false);
-      },
-      activeSession.agentName ?? "general_chat",
-      runSessionId,
-      selectedSkill,
+      agentName: activeSession.agentName ?? "general_chat",
+      skill: selectedSkill,
+    });
+  }
+
+  function resendEditedLastTurn(turnId: string, nextQuery: string) {
+    const cleaned = nextQuery.trim();
+    const lastTurn = activeSession.turns.at(-1);
+    if (
+      !cleaned
+      || activeSession.isRunning
+      || activeSession.teamMembers?.length
+      || !lastTurn
+      || lastTurn.id !== turnId
+    ) {
+      return;
+    }
+    const effectiveQuery = withUploadedFileContext(cleaned, lastTurn.files);
+    setPreviewFile(null);
+    setSessions((current) =>
+      updateSession(current, activeSessionId, (session) => ({
+        ...session,
+        title: titleFromQuery(cleaned),
+        query: "",
+        isRunning: true,
+        turns: session.turns.map((turn) =>
+          turn.id === turnId
+            ? { ...turn, submittedQuery: cleaned, trace: createEmptyTrace() }
+            : turn,
+        ),
+      })),
     );
-    stopMapRef.current.set(runSessionId, stop);
+    streamAgentRun({
+      sessionId: activeSessionId,
+      turnId,
+      effectiveQuery,
+      agentName: activeSession.agentName ?? "general_chat",
+      skill: selectedSkill,
+    });
   }
 
   function startExpertChat(expert: Expert) {
@@ -384,6 +447,7 @@ export function App() {
             {
               id: turnId,
               submittedQuery: index === 0 ? userQuery : `（接力）${member.role}`,
+              createdAt: Date.now(),
               files: [],
               trace: createEmptyTrace(),
               memberLabel,
@@ -469,6 +533,7 @@ export function App() {
           {
             id: turnId,
             submittedQuery: cleanedIntent || title,
+            createdAt: Date.now(),
             files: attachedFiles,
             trace: createEmptyTrace(),
           },
@@ -766,6 +831,8 @@ export function App() {
               <Conversation
                 turns={activeSession.turns}
                 isRunning={isRunning}
+                canEditLastTurn={!activeSession.teamMembers?.length}
+                onEditLastTurn={resendEditedLastTurn}
                 onOpenArtifact={() => {
                   setPreviewFile(null);
                   setClosedArtifactId(null);
@@ -859,11 +926,15 @@ function getStoredArtifactWidth() {
 function Conversation({
   turns,
   isRunning,
+  canEditLastTurn,
+  onEditLastTurn,
   onOpenArtifact,
   onPreviewFile,
 }: {
   turns: ChatTurn[];
   isRunning: boolean;
+  canEditLastTurn: boolean;
+  onEditLastTurn: (turnId: string, nextQuery: string) => void;
   onOpenArtifact: () => void;
   onPreviewFile: (file: ReportFileSummary) => void;
 }) {
@@ -873,11 +944,15 @@ function Conversation({
       {turns.map((turn) => (
         <ConversationTurn
           key={turn.id}
+          turnId={turn.id}
           trace={turn.trace}
           submittedQuery={turn.submittedQuery}
+          createdAt={turn.createdAt}
           files={turn.files}
           memberLabel={turn.memberLabel}
           isRunning={isRunning && turn.id === lastTurnId}
+          canEdit={canEditLastTurn && turn.id === lastTurnId && !isRunning}
+          onEdit={onEditLastTurn}
           onOpenArtifact={onOpenArtifact}
           onPreviewFile={onPreviewFile}
         />
@@ -887,23 +962,52 @@ function Conversation({
 }
 
 function ConversationTurn({
+  turnId,
   trace,
   submittedQuery,
+  createdAt,
   files,
   memberLabel,
   isRunning,
+  canEdit,
+  onEdit,
   onOpenArtifact,
   onPreviewFile,
 }: {
+  turnId: string;
   trace: RunTrace;
   submittedQuery: string;
+  createdAt: number;
   files: ReportFileSummary[];
   memberLabel?: string;
   isRunning: boolean;
+  canEdit: boolean;
+  onEdit: (turnId: string, nextQuery: string) => void;
   onOpenArtifact: () => void;
   onPreviewFile: (file: ReportFileSummary) => void;
 }) {
   const hasStreamedText = trace.steps.some((step) => step.text.join("").trim().length > 0);
+  const messageText = submittedQuery || trace.query;
+  const [editingMessage, setEditingMessage] = useState(false);
+  const [draftMessage, setDraftMessage] = useState(messageText);
+
+  function copyMessage() {
+    void navigator.clipboard.writeText(messageText).catch(() => undefined);
+  }
+
+  function beginEdit() {
+    setDraftMessage(messageText);
+    setEditingMessage(true);
+  }
+
+  function submitEdit() {
+    const nextMessage = draftMessage.trim();
+    if (!nextMessage) {
+      return;
+    }
+    setEditingMessage(false);
+    onEdit(turnId, nextMessage);
+  }
 
   return (
     <section className="conversation-turn">
@@ -915,7 +1019,39 @@ function ConversationTurn({
       ) : null}
       <article className="message-row user-row">
         <div className="user-message">
-          <div className="user-bubble">{submittedQuery || trace.query}</div>
+          {editingMessage ? (
+            <div className="user-edit-box">
+              <textarea
+                value={draftMessage}
+                onChange={(event) => setDraftMessage(event.target.value)}
+                aria-label="Edit message"
+                rows={3}
+                autoFocus
+              />
+              <div className="user-edit-actions">
+                <button type="button" onClick={() => setEditingMessage(false)}>Cancel</button>
+                <button type="button" onClick={submitEdit} disabled={!draftMessage.trim()}>
+                  <Send size={14} />
+                  Send
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="user-bubble">{messageText}</div>
+              <div className="user-message-actions" aria-label="Message actions">
+                {canEdit ? <time dateTime={new Date(createdAt).toISOString()}>{formatMessageTime(createdAt)}</time> : null}
+                <button type="button" onClick={copyMessage} title="Copy message" aria-label="Copy message">
+                  <Copy size={14} />
+                </button>
+                {canEdit ? (
+                  <button type="button" onClick={beginEdit} title="Edit message" aria-label="Edit message">
+                    <Pencil size={14} />
+                  </button>
+                ) : null}
+              </div>
+            </>
+          )}
           {files.length ? <MessageFileList files={files} onPreview={onPreviewFile} /> : null}
         </div>
       </article>
@@ -1660,6 +1796,7 @@ function normalizePersistedTurn(value: unknown): ChatTurn | null {
   return {
     id: stringStorageValue(value.id) || crypto.randomUUID(),
     submittedQuery: stringStorageValue(value.submittedQuery),
+    createdAt: numberStorageValue(value.createdAt) || Date.now(),
     files: Array.isArray(value.files) ? (value.files as ReportFileSummary[]) : [],
     trace,
     ...(memberLabel ? { memberLabel } : {}),
@@ -1688,6 +1825,19 @@ function isStorageRecord(value: unknown): value is Record<string, unknown> {
 
 function stringStorageValue(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function numberStorageValue(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function formatMessageTime(value: number): string {
+  return new Date(value).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function createChatSession(id: string, title: string, query = ""): ChatSession {
