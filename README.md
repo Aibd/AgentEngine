@@ -2,7 +2,51 @@
 
 可嵌入业务系统的 Python Agent 运行引擎。负责 LLM 调用、ReAct 循环、工具调度、事件流和会话管理；认证、鉴权、租户路由、HTTP 端点由宿主系统负责。
 
+仓库里的 `app/` 是可直接运行的 Web 工作台，界面见下方[功能界面](#功能界面)。
+
 **当前版本：v0.2.0** | **[PUBLIC_API.md](PUBLIC_API.md)**
+
+---
+
+## 功能界面
+
+侧栏依次进入会话、专家、技能、连接器、自动化和资料库。下面的截图来自本地开发服务 `http://127.0.0.1:5173`（当前本地栈不要求登录）。
+
+### 会话
+
+新建会话后直接提问。首页会列出当前可用的 agent、工具和技能，并给出几条示例问题。运行过程中可以展开工具调用和步骤。
+
+![会话首页：输入框、能力统计和示例问题](docs/screenshots/chat.jpg)
+
+### 专家
+
+按场景选择单个专家，或让专家团按顺序接力完成同一件事。
+
+![专家页：精选场景和专家卡片](docs/screenshots/experts.jpg)
+
+### 技能
+
+搜索技能市场，安装或启用能力包。已启用的技能可以在会话里被 Agent 调用。
+
+![技能页：分类筛选和技能卡片](docs/screenshots/skills.jpg)
+
+### 连接器
+
+用 stdio 或 SSE 接入 MCP 服务器，让 Agent 调用外部工具。添加后可以测试连接，并查看该服务器暴露的工具。
+
+![连接器页：添加 MCP 服务器的表单](docs/screenshots/connectors.jpg)
+
+### 自动化
+
+按 cron 定时运行一段提示词，也可以立刻跑一次并查看运行历史。
+
+![自动化页：新建定时任务的表单](docs/screenshots/automation.jpg)
+
+### 更多
+
+资料库汇总会话里生成的报告和上传的文件，支持下载，报告还可以导出 PDF 或 DOCX。灵感页提供写作、研究、数据分析和代码的起步提示，点一下就会填进会话。
+
+![更多页：灵感模板](docs/screenshots/inspiration.jpg)
 
 ---
 
@@ -32,22 +76,15 @@ flowchart LR
 
 ### 部署威胁模型
 
-默认 Docker Compose 为了创建会话沙盒而挂载 `/var/run/docker.sock`。拥有该
-socket 的后端容器具备接近宿主机 root 的权限，因此此配置**仅适用于可信内网、
-单租户或本地开发环境**，不得直接作为公网或多租户生产部署方案。
+会话沙盒需要访问 Docker daemon。挂载 `/var/run/docker.sock` 的后端容器具备接近宿主机 root 的权限，因此**只适用于可信内网、单租户或本地开发**，不能直接作为公网或多租户生产部署。
 
-当前默认 compose 已移除该 socket，因而在未提供隔离调度器时会安全地禁用命令
-执行。仅在可信本机/单租户调试时，才显式叠加
-`deploy/docker-compose.trusted-sandbox.yml`：
+默认 Compose 不挂载该 socket。没有隔离调度器时，Web API 会禁用命令执行，并通过 `/api/capabilities` 的 `sandbox` 字段和运行响应的 `X-Sandbox-Status` 说明状态。只有可信本机或单租户调试时，才显式叠加 `deploy/docker-compose.trusted-sandbox.yml`：
 
 ```bash
 docker compose -f docker-compose.yml -f deploy/docker-compose.trusted-sandbox.yml up -d --build
 ```
 
-面向不可信用户代码时，应将沙盒调度移至独立、受策略约束的服务或隔离运行时；
-仅在容器中开启 gVisor 等执行时隔离，并不能消除应用直接持有 Docker daemon
-权限的风险。沙盒不可用时，Web API 会禁用宿主机命令执行，并通过
-`/api/capabilities` 的 `sandbox` 字段及运行响应的 `X-Sandbox-Status` 说明状态。
+面向不可信用户代码时，应将沙盒调度移到独立、受策略约束的服务或隔离运行时。只在容器里打开 gVisor，并不能消除应用直接持有 Docker daemon 权限的风险。
 
 ---
 
@@ -86,19 +123,20 @@ chmod +x quick_start.sh
 ./quick_start.sh
 ```
 
-`quick_start.*` 是**纯原生模式**：宿主机直接跑后端 + 前端，零容器，沙盒连本机 Docker Desktop（零路径配置）。
+`quick_start.*` 在宿主机直接启动后端（http://127.0.0.1:8000）和前端（http://127.0.0.1:5173），不依赖容器。本机没有可用的 Docker 沙盒时，命令执行会关闭；`web-search` / `web-fetch` 这类 `host_exec` 技能仍然可以运行。
 
-或用 **Docker 容器化一把梭**（前端 + 后端，沙盒镜像见根目录 `docker-compose.yml`）：
+Docker Compose 默认同样不挂载 Docker socket，也不启动 Keycloak。启动后打开 http://localhost:8080 。
 
 ```bash
-# 一次性：构建后端按会话拉起的沙盒镜像
-docker compose --profile setup build sandbox-image
-
-# 启动全栈 → http://localhost:8080
 docker compose up -d --build
 ```
 
-两种模式并列：开发图省事用 `quick_start`，要接近生产用 `docker compose`。
+只有可信的单租户环境才叠加沙盒，并先构建会话镜像。说明见上文[部署威胁模型](#部署威胁模型)。
+
+```bash
+docker compose --profile setup build sandbox-image
+docker compose -f docker-compose.yml -f deploy/docker-compose.trusted-sandbox.yml up -d --build
+```
 
 ---
 
@@ -465,6 +503,6 @@ uv run --env-file .env pytest
 
 ## 文档
 
-- [0.2 版本说明](docs/release-0.2.md)
-- [AgentEngine 集成说明](docs/agent-integration.md)
+- [0.2 版本说明](docs/releases/release-0.2.md)
+- [AgentEngine 集成说明](docs/agent/agent-integration.md)
 - [公开 API](PUBLIC_API.md)
