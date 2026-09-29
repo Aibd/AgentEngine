@@ -101,3 +101,55 @@ async def test_unknown_skill(tmp_path: Path) -> None:
     result = await tool.run(skill="missing", script="scripts/run.py")
 
     assert "Unknown skill" in result
+
+
+async def test_host_exec_works_without_sandbox(tmp_path: Path) -> None:
+    root = tmp_path / "skills"
+    skill_dir = _write_skill(
+        root,
+        "web-search",
+        "---\nname: web-search\ndescription: D\nhost_exec: true\n---\nBody",
+    )
+    (skill_dir / "scripts").mkdir(parents=True)
+    (skill_dir / "scripts" / "search.py").write_text(
+        "import sys\nprint('found', sys.argv[1] if len(sys.argv) > 1 else '')\n",
+        encoding="utf-8",
+    )
+
+    tool = RunSkillScript(
+        loader=SkillLoader(roots=[root]),
+        conversation_id="conv-1",
+        sandbox_manager=None,
+        workspace_root=tmp_path / "workspace",
+    )
+
+    result = await tool.run(
+        skill="web-search",
+        script="scripts/search.py",
+        args=["hello"],
+    )
+
+    assert "exit=0" in result
+    assert "found hello" in result
+
+
+async def test_non_host_exec_requires_sandbox(tmp_path: Path) -> None:
+    root = tmp_path / "skills"
+    skill_dir = _write_skill(
+        root,
+        "demo",
+        "---\nname: demo\ndescription: D\n---\nBody",
+    )
+    (skill_dir / "scripts").mkdir(parents=True)
+    (skill_dir / "scripts" / "run.py").write_text("print('ok')", encoding="utf-8")
+
+    tool = RunSkillScript(
+        loader=SkillLoader(roots=[root]),
+        conversation_id="conv-1",
+        sandbox_manager=None,
+        workspace_root=tmp_path / "workspace",
+    )
+
+    result = await tool.run(skill="demo", script="scripts/run.py")
+
+    assert "sandbox" in result.lower()

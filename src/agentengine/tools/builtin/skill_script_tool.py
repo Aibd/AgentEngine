@@ -3,6 +3,9 @@
 Scripts in skills with ``host_exec: true`` frontmatter run as host subprocesses
 (needed for network access, since the sandbox has network_disabled=True).
 All other scripts run inside the per-conversation sandbox container.
+
+When no sandbox manager is available, only ``host_exec`` skills can run
+(e.g. web-search / web-fetch in a Docker stack without docker.sock).
 """
 
 from __future__ import annotations
@@ -24,17 +27,19 @@ logger = logging.getLogger(__name__)
 
 
 class RunSkillScript(Tool):
-    """Execute a script bundled with an enabled skill inside the sandbox.
+    """Execute a script bundled with an enabled skill.
 
-    The script must be listed in the skill's ``resources.scripts`` manifest. The
-    skill package is first copied into the conversation workspace, then the
-    script is run with the requested arguments via ``SessionSandbox.exec_argv``.
+    The script must be listed in the skill's ``resources.scripts`` manifest.
+    ``host_exec`` skills run as host subprocesses (with network). Other skills
+    require a sandbox manager and run inside the per-conversation container.
     """
 
     name = "RunSkillScript"
     description = (
-        "Run a script bundled with a skill inside the isolated sandbox. "
-        "Only scripts declared in the skill manifest can be executed."
+        "Run a script bundled with a skill (e.g. web-search scripts/search.py, "
+        "web-fetch scripts/fetch.py). Only scripts declared in the skill "
+        "manifest can be executed. Prefer this after activating a skill with "
+        "the Skill tool."
     )
     schema = {
         "type": "object",
@@ -66,16 +71,17 @@ class RunSkillScript(Tool):
         self,
         *,
         loader: SkillLoader,
-        sandbox_manager: SandboxManager,
         conversation_id: str,
         enabled_names: set[str] | None = None,
-        workspace_root: str | Path,
+        workspace_root: str | Path | None = None,
+        sandbox_manager: SandboxManager | None = None,
     ) -> None:
         self._loader = loader
         self._sandbox_manager = sandbox_manager
         self._conversation_id = conversation_id
         self._enabled_names = enabled_names
-        self._materializer = SkillMaterializer(workspace_root)
+        root = workspace_root if workspace_root is not None else Path.cwd()
+        self._materializer = SkillMaterializer(root)
 
     async def run(self, **kwargs: Any) -> str:
         skill_name = str(kwargs.get("skill", ""))
@@ -107,12 +113,21 @@ class RunSkillScript(Tool):
         timeout_f = float(timeout) if timeout else 60.0
 
         logger.info(
-            "skill_script_run skill=%s script=%s host_exec=%s conv=%s",
-            skill_name, script_path, skill.host_exec, self._conversation_id,
+            "skill_script_run skill=%s script=%s host_exec=%s conv=%s has_sandbox=%s",
+            skill_name,
+            script_path,
+            skill.host_exec,
+            self._conversation_id,
+            self._sandbox_manager is not None,
         )
 
         if skill.host_exec:
             result = await self._run_on_host(skill, script_path, argv, timeout_f)
+        elif self._sandbox_manager is None:
+            return (
+                f"Skill '{skill_name}' requires a sandbox, but the sandbox is unavailable. "
+                "Only host_exec skills (e.g. web-search, web-fetch) can run without Docker."
+            )
         else:
             materialized = self._materializer.materialize(skill)
             sandbox = self._sandbox_manager.acquire(self._conversation_id)
