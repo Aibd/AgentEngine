@@ -19,7 +19,7 @@ flowchart LR
     Loop --> Runner
 ```
 
-循环没有内置步数上限，结束条件：模型不返回 `tool_calls`、`AfterTurn` hook 终止、自动压缩失败、中断请求、或 API/运行时错误。
+循环默认最多执行 `max_steps=20` 步（可在 `AgentDefinition` / `RunConfig` 调整）。结束条件：模型不返回 `tool_calls`、`AfterTurn` hook 终止、达到步数上限、自动压缩失败、中断请求、或 API/运行时错误。
 
 ### 安全层
 
@@ -29,6 +29,25 @@ flowchart LR
 4. Hook：拦截会话开始、用户输入、工具调用、轮后检查、终止
 5. `ExecPolicy`：工具白名单/黑名单/询问前缀规则
 6. `AgentEngine.interrupt(request_id)`：取消活跃运行
+
+### 部署威胁模型
+
+默认 Docker Compose 为了创建会话沙盒而挂载 `/var/run/docker.sock`。拥有该
+socket 的后端容器具备接近宿主机 root 的权限，因此此配置**仅适用于可信内网、
+单租户或本地开发环境**，不得直接作为公网或多租户生产部署方案。
+
+当前默认 compose 已移除该 socket，因而在未提供隔离调度器时会安全地禁用命令
+执行。仅在可信本机/单租户调试时，才显式叠加
+`deploy/docker-compose.trusted-sandbox.yml`：
+
+```bash
+docker compose -f docker-compose.yml -f deploy/docker-compose.trusted-sandbox.yml up -d --build
+```
+
+面向不可信用户代码时，应将沙盒调度移至独立、受策略约束的服务或隔离运行时；
+仅在容器中开启 gVisor 等执行时隔离，并不能消除应用直接持有 Docker daemon
+权限的风险。沙盒不可用时，Web API 会禁用宿主机命令执行，并通过
+`/api/capabilities` 的 `sandbox` 字段及运行响应的 `X-Sandbox-Status` 说明状态。
 
 ---
 

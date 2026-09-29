@@ -28,16 +28,13 @@ services:
       # 其他业务环境变量
       # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     volumes:
-      # 1. docker.sock
-      #    Linux:   /var/run/docker.sock:/var/run/docker.sock
-      #    Windows Docker Desktop (WSL2): 同上，Docker Desktop 自动代理
-      #    安全说明：持有此 socket 等价于宿主机 root 权限，仅在可信内网环境使用
-      - /var/run/docker.sock:/var/run/docker.sock
+      # Docker daemon access is intentionally absent by default. Apply the
+      # trusted-sandbox overlay only in a trusted, single-tenant environment.
 
       # 2. 沙盒 workspace 共享目录
       #
       #    [Linux 生产] bind mount 绝对路径，三方路径字符串完全一致：
-      - /var/agent/sandbox-sessions:/var/agent/sandbox-sessions
+      # - /var/agent/sandbox-sessions:/var/agent/sandbox-sessions
       #
       #    [Windows 开发] 注释掉上面一行，改用 named volume（取消下行注释）：
       #    named volume 由 Docker 管理，路径由 Docker daemon 内部分配，自动保证一致。

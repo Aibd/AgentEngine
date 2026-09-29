@@ -1,0 +1,10 @@
+# Explicit opt-in for trusted local or single-tenant development only.
+# This grants the backend near-host-root Docker daemon access. Do not use it
+# for a public or multi-tenant deployment; use a separately isolated sandbox
+# scheduler/runtime there.
+services:
+  backend:
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Must have the same path in this container and the Docker host.
+      - /var/agent/sandbox-sessions:/var/agent/sandbox-sessions
