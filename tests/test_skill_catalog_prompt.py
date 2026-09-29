@@ -65,4 +65,5 @@ def test_render_includes_usage_instruction(tmp_path: Path) -> None:
 
     catalog = SkillCatalogPrompt.render([skill])
 
-    assert "activate it by calling the Skill tool" in catalog
+    assert "Skill tool" in catalog
+    assert "Skill names are NOT tools" in catalog

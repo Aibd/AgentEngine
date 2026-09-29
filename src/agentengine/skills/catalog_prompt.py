@@ -42,6 +42,9 @@ class SkillCatalogPrompt:
         lines.append("")
         lines.append(
             "When a task matches one of the skills above, activate it by calling "
-            "the Skill tool with the skill name before doing the work."
+            'the Skill tool with {"skill": "<name>"} before doing the work. '
+            "Skill names are NOT tools — do not invent a function named after a "
+            "skill (for example, never call web-search or web-fetch as tools). "
+            "After Skill activation, run bundled scripts with RunSkillScript."
         )
         return "\n".join(lines)

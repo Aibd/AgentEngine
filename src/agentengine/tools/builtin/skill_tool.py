@@ -75,7 +75,9 @@ class SkillTool(Tool):
         skills = self._enabled_skills()
         catalog = SkillCatalogPrompt.render(skills.values())
         description_parts = [
-            "Execute a named skill. Call this FIRST before doing work a skill covers.",
+            "Execute a named skill. Call this FIRST before doing work a skill covers. "
+            "Pass the skill name in the skill parameter — do not invent a separate "
+            "tool named after the skill.",
         ]
         if catalog:
             description_parts.append(catalog)

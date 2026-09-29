@@ -99,6 +99,11 @@ async def run_turn(
         if context.persistence and context.conversation_id:
             await agent.memory.load_from_db(context.persistence, context.conversation_id)
 
+        # Authoritative wall-clock time — refresh every run so multi-turn chats
+        # do not keep a stale "today" and so models stop inventing dates from
+        # training cutoffs.
+        _ensure_runtime_time_context(agent)
+
         injector = context.extras.get("_inject_skill_catalog")
         if callable(injector):
             injector(agent)
@@ -203,8 +208,8 @@ async def _loop(
         agent.memory.add_user_message(query)
         return ""
 
-    hook_manager: HookManager | None = context.extras.get("hooks")
-    cwd = str(context.extras.get("workspace_root") or "")
+    hook_manager: HookManager | None = context.hooks or context.extras.get("hooks")
+    cwd = context.workspace_root or str(context.extras.get("workspace_root") or "")
     session_id = (
         context.session_id
         or context.conversation_id
@@ -348,7 +353,7 @@ async def _loop(
 
 
 def _get_cancellation_token(context: AgentContext) -> CancellationToken | None:
-    token = context.extras.get("cancellation_token")
+    token = context.cancellation_token or context.extras.get("cancellation_token")
     return token if isinstance(token, CancellationToken) else None
 
 
@@ -358,7 +363,7 @@ async def _maybe_compact(agent: AgentRun, context: AgentContext) -> None:
         return
 
     compactor: Compactor | None = None
-    configured = context.extras.get("compactor") or agent.config.compactor
+    configured = context.compactor or context.extras.get("compactor") or agent.config.compactor
     if configured is not None:
         compactor = cast(Compactor, configured)
     elif context.llm is not None:
@@ -545,13 +550,17 @@ async def _execute_tool_calls(
         on_event=emit,
         timeout_seconds=tool_timeout_seconds,
         exec_policy=(
-            context.extras.get("exec_policy")
-            if isinstance(context.extras.get("exec_policy"), ExecPolicy)
-            else None
+            context.exec_policy
+            if isinstance(context.exec_policy, ExecPolicy)
+            else (
+                context.extras.get("exec_policy")
+                if isinstance(context.extras.get("exec_policy"), ExecPolicy)
+                else None
+            )
         ),
     )
-    hook_manager: HookManager | None = context.extras.get("hooks")
-    cwd = str(context.extras.get("workspace_root") or "")
+    hook_manager: HookManager | None = context.hooks or context.extras.get("hooks")
+    cwd = context.workspace_root or str(context.extras.get("workspace_root") or "")
     session_id = (
         context.session_id
         or context.conversation_id
@@ -569,6 +578,8 @@ async def _execute_tool_calls(
             )
         except json.JSONDecodeError:
             tool_args = {}
+        if not isinstance(tool_args, dict):
+            tool_args = {}
 
         tool = (
             context.tool_collection.get(tool_name)
@@ -576,8 +587,25 @@ async def _execute_tool_calls(
             else None
         )
 
+        # Models often invent a top-level function named after a skill
+        # (e.g. "web-search") instead of calling Skill / RunSkillScript.
+        # Remap those aliases so skill work does not fail with ToolNotFound.
+        if tool is None and context.tool_collection is not None:
+            aliased = _resolve_skill_tool_alias(
+                context.tool_collection, tool_name, tool_args
+            )
+            if aliased is not None:
+                tool, tool_args, tool_name = aliased
+                logger.info(
+                    "tool_call_skill_alias request_id=%s alias_resolved=%s",
+                    context.request_id,
+                    tool_name,
+                )
+
         # Check approval gate for destructive tools
-        approval_gate: ApprovalGate | None = context.extras.get("approval_gate")
+        approval_gate: ApprovalGate | None = (
+            context.approval_gate or context.extras.get("approval_gate")
+        )
         if approval_gate is not None and tool is not None and tool.is_destructive:
             tenant_id = ""
             tenant = context.extras.get("tenant")
@@ -627,7 +655,7 @@ async def _execute_tool_calls(
 
         if tool is None:
             tool_call_id = tc.get("id", "") or ""
-            rendered = f"Unknown tool: {tool_name}"
+            rendered = _unknown_tool_message(tool_name, context.tool_collection)
             logger.warning(
                 "tool_call_missing request_id=%s tool=%s",
                 context.request_id,
@@ -794,3 +822,177 @@ async def _execute_tool_calls(
         )
 
     return tool_messages
+
+
+def _ensure_runtime_time_context(agent: AgentRun) -> None:
+    """Inject or refresh the authoritative current date/time for the model.
+
+    LLMs otherwise fall back to training-time knowledge cutoffs and answer
+    "current events" as if it were still that old date. This message is marked
+    in metadata so it can be updated in place across turns instead of stacking.
+    """
+    from agentengine.memory.message import Role
+
+    text = _format_runtime_time_context()
+    for message in agent.memory.messages:
+        if message.role == Role.SYSTEM and message.metadata.get("runtime_context"):
+            message.content = text
+            message.metadata["generated"] = True
+            return
+    agent.memory.append(
+        Message.system(
+            text,
+            metadata={"runtime_context": True, "generated": True},
+        )
+    )
+
+
+def _format_runtime_time_context() -> str:
+    import os
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    tz_name = (
+        os.environ.get("AGENTENGINE_TZ")
+        or os.environ.get("TZ")
+        or "Asia/Shanghai"
+    )
+    try:
+        now = datetime.now(ZoneInfo(tz_name))
+        tz_label = tz_name
+    except Exception:
+        now = datetime.now().astimezone()
+        tz_label = str(now.tzinfo or "local")
+
+    weekday = now.strftime("%A")
+    stamp = now.strftime("%Y-%m-%d %H:%M")
+    iso_date = now.strftime("%Y-%m-%d")
+    year = now.strftime("%Y")
+
+    return (
+        f"Current date and time (authoritative system clock): {stamp} {tz_label} "
+        f"({weekday}, {iso_date}).\n"
+        "Treat the value above as the real 'today'. Never invent or assume the "
+        "current date from model training data or knowledge cutoffs.\n"
+        "For news, prices, releases, schedules, or any time-sensitive question: "
+        "use tools (web-search / web-fetch) and ground the answer in tool results. "
+        f"When searching for recent information, include the year ({year}) or full "
+        f"date ({iso_date}) in the search query when helpful, and prefer sources "
+        "that match this timeframe."
+    )
+
+
+def _resolve_skill_tool_alias(
+    collection: Any,
+    tool_name: str,
+    tool_args: dict[str, Any],
+) -> tuple[Any, dict[str, Any], str] | None:
+    """Rewrite a skill-name tool call into Skill or RunSkillScript.
+
+    Models frequently invent top-level functions named after skills listed in
+    the catalog (e.g. ``web-search``). Skills are not tools; they are activated
+    via ``Skill`` and executed via ``RunSkillScript``. When the alias is
+    unambiguous we rewrite the call so the run continues instead of failing
+    with ToolNotFound.
+    """
+    if not tool_name:
+        return None
+
+    skill_tool = collection.get("Skill")
+    if skill_tool is None or not hasattr(skill_tool, "_enabled_skills"):
+        return None
+
+    try:
+        skills = skill_tool._enabled_skills()
+    except Exception:
+        return None
+    if tool_name not in skills:
+        return None
+
+    skill = skills[tool_name]
+    scripts = list(getattr(getattr(skill, "resources", None), "scripts", ()) or ())
+    run_script = collection.get("RunSkillScript")
+
+    # Prefer direct script execution when the model already supplied payload
+    # (query/url/args) and the skill has exactly one script — common for
+    # web-search / web-fetch style skills.
+    if run_script is not None and len(scripts) == 1:
+        argv = _coerce_skill_script_args(tool_args)
+        if argv is not None:
+            return (
+                run_script,
+                {"skill": tool_name, "script": scripts[0], "args": argv},
+                run_script.name,
+            )
+
+    # Otherwise activate the skill so the model receives full instructions.
+    args_str = _skill_activation_args(tool_args)
+    return skill_tool, {"skill": tool_name, "args": args_str}, skill_tool.name
+
+
+def _coerce_skill_script_args(tool_args: dict[str, Any]) -> list[str] | None:
+    """Map free-form model args into a skill-script argv list.
+
+    Returns ``None`` when there is no useful payload (caller should fall back
+    to Skill activation instead of running the script empty-handed).
+    """
+    if not tool_args:
+        return None
+
+    raw_args = tool_args.get("args")
+    if isinstance(raw_args, list):
+        return [str(item) for item in raw_args]
+    if isinstance(raw_args, str) and raw_args.strip():
+        return [raw_args.strip()]
+
+    for key in ("query", "q", "search_query", "url", "input", "text"):
+        value = tool_args.get(key)
+        if value is None or value == "":
+            continue
+        argv = [str(value)]
+        for extra in ("max_results", "num_results", "limit", "n"):
+            if extra in tool_args and tool_args[extra] is not None:
+                argv.append(str(tool_args[extra]))
+                break
+        return argv
+
+    # Last resort: flatten simple scalar values in declaration order.
+    scalars = [
+        str(value)
+        for value in tool_args.values()
+        if value is not None and not isinstance(value, (dict, list))
+    ]
+    return scalars or None
+
+
+def _skill_activation_args(tool_args: dict[str, Any]) -> str:
+    if not tool_args:
+        return ""
+    for key in ("query", "q", "search_query", "url", "input", "text", "args"):
+        value = tool_args.get(key)
+        if isinstance(value, list):
+            return " ".join(str(item) for item in value)
+        if value is not None and value != "":
+            return str(value)
+    try:
+        return json.dumps(tool_args, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(tool_args)
+
+
+def _unknown_tool_message(tool_name: str, collection: Any) -> str:
+    available: list[str] = []
+    if collection is not None and hasattr(collection, "tool_map"):
+        try:
+            available = sorted(collection.tool_map.keys())
+        except Exception:
+            available = []
+
+    hint = (
+        f"Unknown tool: {tool_name}. "
+        "If you meant a skill, call the Skill tool with "
+        f'{{"skill": "{tool_name}"}} first, then RunSkillScript for scripts.'
+    )
+    if available:
+        hint += f" Available tools: {', '.join(available)}."
+    return hint
