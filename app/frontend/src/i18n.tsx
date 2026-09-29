@@ -17,6 +17,10 @@ function saveLocale(locale: Locale) {
 }
 
 // ---- translations --------------------------------------------------------
+// Scope: chrome/navigation and product controls. User prompts, model output,
+// uploaded file names, and runtime trace payloads are intentionally never
+// translated in the client because changing them would alter user/agent data.
+// New shell UI text must be added to both dictionaries rather than hard-coded.
 
 const ZH: Record<string, string> = {
   "nav.skills": "技能",

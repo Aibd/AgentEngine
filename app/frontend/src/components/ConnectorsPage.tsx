@@ -1,6 +1,9 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   Cable,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
   Plus,
   Trash2,
   ToggleLeft,
@@ -8,6 +11,7 @@ import {
   Terminal,
   Globe,
   X,
+  Zap,
 } from "lucide-react";
 import type { McpConnector } from "../types";
 import { apiFetch } from "../auth";
@@ -33,6 +37,11 @@ const EMPTY_DRAFT: Draft = {
   url: "",
 };
 
+type TestState =
+  | { status: "loading" }
+  | { status: "ok"; tools: { name: string; description: string }[] }
+  | { status: "error"; error: string };
+
 export function ConnectorsPage() {
   const { locale } = useI18n();
   const [connectors, setConnectors] = useState<McpConnector[]>([]);
@@ -41,6 +50,8 @@ export function ConnectorsPage() {
   const [showForm, setShowForm] = useState(false);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [submitting, setSubmitting] = useState(false);
+  const [testResults, setTestResults] = useState<Record<string, TestState>>({});
+  const [testExpanded, setTestExpanded] = useState<Record<string, boolean>>({});
 
   const fetchConnectors = useCallback(async () => {
     try {
@@ -130,6 +141,41 @@ export function ConnectorsPage() {
     }
   }
 
+  async function handleTest(id: string) {
+    setTestResults((map) => ({ ...map, [id]: { status: "loading" } }));
+    try {
+      const res = await apiFetch(`${API}/api/connectors/${id}/test`, { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as {
+        ok?: boolean;
+        tools?: { name: string; description: string }[];
+        error?: string;
+      };
+      if (data.ok) {
+        setTestResults((map) => ({
+          ...map,
+          [id]: { status: "ok", tools: data.tools ?? [] },
+        }));
+      } else {
+        setTestResults((map) => ({
+          ...map,
+          [id]: {
+            status: "error",
+            error: data.error || (locale === "zh" ? "连接失败" : "Connection failed"),
+          },
+        }));
+      }
+    } catch (err) {
+      setTestResults((map) => ({
+        ...map,
+        [id]: {
+          status: "error",
+          error: err instanceof Error ? err.message : String(err),
+        },
+      }));
+    }
+  }
+
   const isZh = locale === "zh";
 
   return (
@@ -182,8 +228,61 @@ export function ConnectorsPage() {
                     ? `${c.command} ${c.args.join(" ")}`
                     : c.url}
                 </span>
+                {testResults[c.id] ? (
+                  <div className="connector-test-result">
+                    {testResults[c.id].status === "loading" ? (
+                      <span className="connector-test-loading">
+                        <Loader2 size={13} className="connector-test-spin" />
+                        {isZh ? "测试中..." : "Testing..."}
+                      </span>
+                    ) : testResults[c.id].status === "ok" ? (
+                      <>
+                        <button
+                          type="button"
+                          className="connector-test-summary is-ok"
+                          onClick={() =>
+                            setTestExpanded((map) => ({ ...map, [c.id]: !map[c.id] }))
+                          }
+                        >
+                          {testExpanded[c.id] ? (
+                            <ChevronDown size={13} />
+                          ) : (
+                            <ChevronRight size={13} />
+                          )}
+                          {isZh
+                            ? `发现 ${(testResults[c.id] as { tools: unknown[] }).tools.length} 个工具`
+                            : `Found ${(testResults[c.id] as { tools: unknown[] }).tools.length} tools`}
+                        </button>
+                        {testExpanded[c.id] ? (
+                          <ul className="connector-test-tools">
+                            {(testResults[c.id] as { tools: { name: string; description: string }[] }).tools.map(
+                              (tool) => (
+                                <li key={tool.name} title={tool.description}>
+                                  {tool.name}
+                                </li>
+                              ),
+                            )}
+                          </ul>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span className="connector-test-error">
+                        {(testResults[c.id] as { error: string }).error}
+                      </span>
+                    )}
+                  </div>
+                ) : null}
               </div>
               <div className="connector-card-actions">
+                <button
+                  type="button"
+                  className="connector-action-btn"
+                  onClick={() => handleTest(c.id)}
+                  disabled={testResults[c.id]?.status === "loading"}
+                  title={isZh ? "测试连接" : "Test connection"}
+                >
+                  <Zap size={16} />
+                </button>
                 <button
                   type="button"
                   className="connector-action-btn"

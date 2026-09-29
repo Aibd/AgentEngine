@@ -1,11 +1,11 @@
-import { ReactNode, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type UIEvent as ReactUIEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   ChevronDown,
   ChevronRight,
+  Check,
   CircleAlert,
-  Clock3,
   Copy,
   FileText,
   Menu,
@@ -31,6 +31,8 @@ import { AppNav, type AppView } from "./components/AppNav";
 import { SkillsPage } from "./components/SkillsPage";
 import { ExpertsPage } from "./components/ExpertsPage";
 import { ConnectorsPage } from "./components/ConnectorsPage";
+import { AutomationPage } from "./components/AutomationPage";
+import { MorePage } from "./components/MorePage";
 import { createEmptyTrace, reduceTraceEvent } from "./traceReducer";
 import {
   fetchCapabilities,
@@ -96,9 +98,16 @@ const ARTIFACT_WIDTH_DEFAULT = 720;
 const CHAT_SESSIONS_STORAGE_KEY = "agentengine.web.sessions.v1";
 const ACTIVE_SESSION_STORAGE_KEY = "agentengine.web.activeSessionId.v1";
 const MAX_PERSISTED_SESSIONS = 30;
+/** Matches `@media (max-width: 820px)` in styles.css — mobile/narrow layout. */
+const MOBILE_SIDEBAR_BREAKPOINT = 820;
+
+function isMobileViewport() {
+  return typeof window !== "undefined" && window.innerWidth <= MOBILE_SIDEBAR_BREAKPOINT;
+}
 
 export function App() {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Desktop: open by default. Mobile: collapsed so main content is visible first.
+  const [sidebarOpen, setSidebarOpen] = useState(() => !isMobileViewport());
   const [capabilities, setCapabilities] = useState<CapabilitySummary | null>(null);
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [showSkillsManager, setShowSkillsManager] = useState(false);
@@ -121,6 +130,11 @@ export function App() {
   const [sessions, setSessions] = useState<ChatSession[]>(loadPersistedSessions);
   const [activeSessionId, setActiveSessionId] = useState(() => loadPersistedActiveSessionId(sessions));
   const stopMapRef = useRef<Map<string, () => void>>(new Map());
+  const messageLaneRef = useRef<HTMLElement | null>(null);
+  const chatBottomRef = useRef<HTMLDivElement | null>(null);
+  // When true, keep the message lane pinned to the latest turn (switch/refresh/stream).
+  // User scrolling up clears this until they return near the bottom or switch sessions.
+  const stickChatToBottomRef = useRef(true);
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? sessions[0],
     [activeSessionId, sessions],
@@ -189,6 +203,54 @@ export function App() {
       .catch(() => setCapabilities(null));
     refreshSkills();
   }, []);
+
+  // Entering a mobile-width viewport: collapse nav so content stays primary.
+  useEffect(() => {
+    const media = window.matchMedia(`(max-width: ${MOBILE_SIDEBAR_BREAKPOINT}px)`);
+    const onChange = (event: MediaQueryListEvent) => {
+      if (event.matches) {
+        setSidebarOpen(false);
+      }
+    };
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+
+  function scrollChatToBottom(behavior: ScrollBehavior = "auto") {
+    const lane = messageLaneRef.current;
+    const anchor = chatBottomRef.current;
+    if (anchor) {
+      anchor.scrollIntoView({ block: "end", behavior });
+    }
+    if (lane) {
+      // scrollIntoView can be affected by nested layout; force the scroller too.
+      lane.scrollTop = lane.scrollHeight;
+    }
+  }
+
+  function handleMessageLaneScroll(event: ReactUIEvent<HTMLElement>) {
+    const lane = event.currentTarget;
+    const distance = lane.scrollHeight - lane.scrollTop - lane.clientHeight;
+    stickChatToBottomRef.current = distance <= 96;
+  }
+
+  // Opening a historical session / refresh / new session: always land on the latest message.
+  useLayoutEffect(() => {
+    stickChatToBottomRef.current = true;
+    scrollChatToBottom("auto");
+    // Second pass after paint for late layout (markdown, images).
+    const id = window.requestAnimationFrame(() => scrollChatToBottom("auto"));
+    return () => window.cancelAnimationFrame(id);
+  }, [activeSessionId, activeView]);
+
+  // Keep following the tail while streaming or when new turns appear, unless the
+  // user has scrolled up to read earlier messages.
+  useLayoutEffect(() => {
+    if (!stickChatToBottomRef.current) {
+      return;
+    }
+    scrollChatToBottom("auto");
+  }, [activeSession.turns, isRunning, activeSessionId]);
 
   function refreshSkills() {
     fetchSkills()
@@ -759,39 +821,54 @@ export function App() {
     canSubmit,
   };
 
+  function closeSidebarIfMobile() {
+    if (isMobileViewport()) {
+      setSidebarOpen(false);
+    }
+  }
+
   function navigate(view: AppView) {
     setActiveView(view);
     if (view !== "chat") {
       setPreviewFile(null);
     }
+    closeSidebarIfMobile();
   }
 
   return (
     <main className={appClassName} style={appStyle}>
       {sidebarOpen ? (
-        <AppNav
-          version="0.2.0"
-          activeView={activeView}
-          onNavigate={navigate}
-          onNewTask={() => {
-            navigate("chat");
-            newSession();
-          }}
-          onCollapse={() => setSidebarOpen(false)}
-          sessions={sessions.map((session) => ({ id: session.id, title: session.title }))}
-          activeSessionId={activeSessionId}
-          onSelectSession={(id) => {
-            navigate("chat");
-            selectSession(id);
-          }}
-          onDeleteSession={deleteSession}
-          onOpenSettings={() => navigate("skills")}
-          onLogout={() => {
-            setActiveSessionId("");
-            setSessions([]);
-            setSidebarOpen(false);
-          }}
-        />
+        <>
+          <button
+            type="button"
+            className="app-nav-backdrop"
+            aria-label="关闭侧栏"
+            onClick={() => setSidebarOpen(false)}
+          />
+          <AppNav
+            version="0.2.0"
+            activeView={activeView}
+            onNavigate={navigate}
+            onNewTask={() => {
+              navigate("chat");
+              newSession();
+            }}
+            onCollapse={() => setSidebarOpen(false)}
+            sessions={sessions.map((session) => ({ id: session.id, title: session.title }))}
+            activeSessionId={activeSessionId}
+            onSelectSession={(id) => {
+              navigate("chat");
+              selectSession(id);
+            }}
+            onDeleteSession={deleteSession}
+            onOpenSettings={() => navigate("skills")}
+            onLogout={() => {
+              setActiveSessionId("");
+              setSessions([]);
+              setSidebarOpen(false);
+            }}
+          />
+        </>
       ) : null}
 
       {activeView === "chat" ? (
@@ -802,20 +879,30 @@ export function App() {
             </button>
           ) : null}
 
-          <section className="message-lane" aria-label="Chat">
+          <section
+            ref={messageLaneRef}
+            className="message-lane"
+            aria-label="Chat"
+            onScroll={handleMessageLaneScroll}
+          >
             {activeSession.turns.length === 0 ? (
               <EmptyChat
                 capabilities={capabilities}
                 expertRole={activeSession.expertRole}
                 teamName={activeSession.teamName}
                 teamMembers={activeSession.teamMembers}
-                composer={<Composer variant="center" {...composerProps} />}
+                composer={
+                  <Composer
+                    key={`composer-center-${activeSessionId}`}
+                    variant="center"
+                    {...composerProps}
+                  />
+                }
                 onPick={(prompt) => {
                   if (activeSession.teamMembers && activeSession.teamMembers.length > 0) {
                     runTeamPipeline(activeSessionId, prompt, activeSession.teamMembers);
                     return;
                   }
-                  updateActiveQuery(prompt);
                   startRun(prompt);
                 }}
               />
@@ -832,11 +919,16 @@ export function App() {
                 onPreviewFile={setPreviewFile}
               />
             )}
+            <div ref={chatBottomRef} className="chat-scroll-anchor" aria-hidden="true" />
           </section>
 
           {activeSession.turns.length > 0 ? (
             <div className="composer-dock">
-              <Composer variant="docked" {...composerProps} />
+              <Composer
+                key={`composer-docked-${activeSessionId}`}
+                variant="docked"
+                {...composerProps}
+              />
             </div>
           ) : null}
         </section>
@@ -857,13 +949,21 @@ export function App() {
         />
       ) : activeView === "connectors" ? (
         <ConnectorsPage />
-      ) : (
-        <PlaceholderView
-          view={activeView}
+      ) : activeView === "automation" ? (
+        <AutomationPage
           sidebarOpen={sidebarOpen}
           onExpandSidebar={() => setSidebarOpen(true)}
         />
-      )}
+      ) : activeView === "more" ? (
+        <MorePage
+          onUsePrompt={(prompt) => {
+            navigate("chat");
+            updateActiveQuery(prompt);
+          }}
+          sidebarOpen={sidebarOpen}
+          onExpandSidebar={() => setSidebarOpen(true)}
+        />
+      ) : null}
 
       {activeView === "chat" && hasRightPanel ? (
         <>
@@ -1280,6 +1380,24 @@ function ArtifactCard({ artifact, onOpen, isFirst = false, hasNoStepText = false
   );
 }
 
+type ActivityItem =
+  | {
+      kind: "thinking";
+      key: string;
+      chunks: string[];
+      running: boolean;
+      elapsedSeconds?: number;
+    }
+  | {
+      kind: "tool";
+      key: string;
+      tool: ToolTrace;
+    }
+  | {
+      kind: "pending";
+      key: string;
+    };
+
 function RunActivity({
   steps,
   isRunning,
@@ -1289,7 +1407,11 @@ function RunActivity({
   isRunning: boolean;
   status: RunTrace["status"];
 }) {
-  const visibleSteps = steps.filter((step) => step.thinking.length > 0 || step.tools.length > 0);
+  // A live turn is meaningful progress even before the model emits a thought
+  // or starts a tool, so expose its current phase instead of a blank gap.
+  const visibleSteps = steps.filter(
+    (step) => step.status === "running" || step.thinking.length > 0 || step.tools.length > 0,
+  );
   const [open, setOpen] = useState(isRunning);
 
   // Surface the live work by default, then fold the implementation trace away
@@ -1302,16 +1424,46 @@ function RunActivity({
     return null;
   }
 
+  // Flatten nested steps into a single activity timeline (no "步骤 N" layers).
+  const items: ActivityItem[] = [];
+  for (const step of visibleSteps) {
+    const stepLive = isRunning && step.status === "running";
+    if (step.thinking.length > 0) {
+      items.push({
+        kind: "thinking",
+        key: `think-${step.turn}`,
+        chunks: step.thinking,
+        running: stepLive && step.tools.every((tool) => tool.status !== "running"),
+        elapsedSeconds: step.elapsedSeconds,
+      });
+    }
+    for (const tool of step.tools) {
+      items.push({ kind: "tool", key: tool.id, tool });
+    }
+    if (stepLive && step.thinking.length === 0 && step.tools.length === 0) {
+      items.push({ kind: "pending", key: `pending-${step.turn}` });
+    }
+  }
+
   const tools = visibleSteps.flatMap((step) => step.tools);
   const failedTools = tools.filter((tool) => tool.status === "failed").length;
   const elapsed = visibleSteps.reduce((total, step) => total + (step.elapsedSeconds ?? 0), 0);
-  const label = isRunning ? "正在处理" : status === "failed" ? "处理未完成" : "处理完成";
-  const summary = [
-    `${visibleSteps.length} 个步骤`,
-    tools.length ? `${tools.length} 次工具调用` : "分析并生成回答",
-    !isRunning && elapsed > 0 ? formatSeconds(elapsed) : "",
-    failedTools ? `${failedTools} 项失败` : "",
-  ].filter(Boolean).join(" · ");
+  const runningTool = tools.find((tool) => tool.status === "running");
+  const thinkingLive = items.some((item) => item.kind === "thinking" && item.running);
+  const label = isRunning ? "处理中" : status === "failed" ? "未完成" : "已完成";
+  const summary = isRunning
+    ? runningTool
+      ? displayToolName(runningTool.name)
+      : thinkingLive
+        ? "分析中"
+        : "准备中"
+    : status === "failed"
+      ? failedTools
+        ? `${failedTools} 项失败`
+        : "已中断"
+      : elapsed > 0
+        ? formatSeconds(elapsed)
+        : `${tools.length} 项操作`;
 
   return (
     <section className={`run-activity ${isRunning ? "is-running" : ""} ${status === "failed" ? "is-failed" : ""}`}>
@@ -1322,83 +1474,75 @@ function RunActivity({
         aria-expanded={open}
       >
         <span className="run-activity-title">
-          {isRunning ? <Loader2 className="spin" size={15} /> : status === "failed" ? <CircleAlert size={15} /> : <Sparkles size={15} />}
+          <span className={`run-activity-icon ${isRunning ? "is-live" : status === "failed" ? "is-failed" : "is-done"}`}>
+            {isRunning ? <Loader2 className="spin" size={13} /> : status === "failed" ? <CircleAlert size={13} /> : <Check size={13} />}
+          </span>
           <strong>{label}</strong>
           <small>{summary}</small>
         </span>
-        {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        <span className="run-activity-toggle">
+          {tools.length > 0 ? <span className="run-activity-count">{tools.length}</span> : null}
+          {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+        </span>
       </button>
 
       {open ? (
-        <div className="run-activity-body">
-          {visibleSteps.map((step, index) => (
-            <ProcessStep
-              key={step.turn}
-              step={step}
-              index={index}
-              isLive={isRunning && step.status === "running"}
-            />
-          ))}
+        <div className="run-activity-body" role="list">
+          {items.map((item) => {
+            if (item.kind === "pending") {
+              return (
+                <div key={item.key} className="activity-row is-live" role="listitem">
+                  <span className="activity-dot is-live" aria-hidden="true">
+                    <Loader2 className="spin" size={11} />
+                  </span>
+                  <div className="activity-main">
+                    <span className="activity-label">准备中…</span>
+                  </div>
+                </div>
+              );
+            }
+            if (item.kind === "thinking") {
+              return (
+                <div key={item.key} className={`activity-row ${item.running ? "is-live" : ""}`} role="listitem">
+                  <span className={`activity-dot ${item.running ? "is-live" : ""}`} aria-hidden="true">
+                    {item.running ? <Loader2 className="spin" size={11} /> : <Sparkles size={11} />}
+                  </span>
+                  <div className="activity-main">
+                    <ThinkingBlock
+                      chunks={item.chunks}
+                      running={item.running}
+                      stepElapsedSeconds={item.elapsedSeconds}
+                    />
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div
+                key={item.key}
+                className={`activity-row ${item.tool.status === "running" ? "is-live" : ""} ${item.tool.status === "failed" ? "is-failed" : ""}`}
+                role="listitem"
+              >
+                <span
+                  className={`activity-dot ${item.tool.status === "running" ? "is-live" : ""} ${item.tool.status === "failed" ? "is-failed" : ""}`}
+                  aria-hidden="true"
+                >
+                  {item.tool.status === "running" ? (
+                    <Loader2 className="spin" size={11} />
+                  ) : item.tool.status === "failed" ? (
+                    <CircleAlert size={11} />
+                  ) : (
+                    <Wrench size={11} />
+                  )}
+                </span>
+                <div className="activity-main">
+                  <ToolCard tool={item.tool} />
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : null}
-    </section>
-  );
-}
-
-function ProcessStep({ step, index, isLive }: { step: StepTrace; index: number; isLive: boolean }) {
-  const [open, setOpen] = useState(isLive);
-
-  useEffect(() => {
-    setOpen(isLive);
-  }, [isLive]);
-
-  const failedTools = step.tools.filter((tool) => tool.status === "failed").length;
-  const detail = step.tools.length
-    ? `${step.tools.length} 次工具调用${failedTools ? ` · ${failedTools} 项失败` : ""}`
-    : isLive
-      ? "正在分析请求"
-      : "已完成分析";
-
-  return (
-    <section className={`process-step ${isLive ? "is-live" : ""}`}>
-      <span className="process-step-rail" aria-hidden="true">
-        <span>{index + 1}</span>
-      </span>
-      <div className="process-step-main">
-        <button
-          className="process-step-head"
-          type="button"
-          onClick={() => setOpen((value) => !value)}
-          aria-expanded={open}
-        >
-          <span>
-            <strong>{isLive ? "执行中" : `步骤 ${step.turn}`}</strong>
-            <small>{detail}</small>
-          </span>
-          <span className="process-step-meta">
-            {isLive ? <Loader2 className="spin" size={13} /> : null}
-            {formatSeconds(step.elapsedSeconds)}
-            {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-          </span>
-        </button>
-
-        {open ? (
-          <div className="process-step-content">
-            {step.thinking.length ? (
-              <ThinkingBlock
-                chunks={step.thinking}
-                running={isLive}
-                stepElapsedSeconds={step.elapsedSeconds}
-              />
-            ) : null}
-            {step.tools.length ? (
-              <div className="tool-grid">
-                {step.tools.map((tool) => <ToolCard key={tool.id} tool={tool} />)}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
     </section>
   );
 }
@@ -1492,40 +1636,41 @@ function ToolCard({ tool }: { tool: ToolTrace }) {
   const failed = tool.status === "failed";
   const running = tool.status === "running";
   const label = displayToolName(tool.name);
+  const hint = toolHint(tool);
   const summary = running
-    ? "正在执行"
+    ? "执行中"
     : failed
-      ? tool.errorType || "调用失败"
+      ? tool.errorType || "失败"
       : tool.elapsedSeconds != null
-        ? `${formatSeconds(tool.elapsedSeconds)} 完成`
-        : "已完成";
+        ? formatSeconds(tool.elapsedSeconds)
+        : "完成";
 
   return (
-    <article className={`tool-card ${failed ? "is-failed" : ""}`}>
+    <article className={`tool-card ${failed ? "is-failed" : ""} ${running ? "is-running" : ""}`}>
       <button className="tool-card-head" type="button" onClick={() => setOpen((value) => !value)}>
         <span className="tool-name">
-          {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-          <Wrench size={16} />
           <span>
             <strong>{label}</strong>
-            {label !== tool.name ? <small>{tool.name}</small> : null}
+            {hint ? <small title={hint}>{hint}</small> : null}
           </span>
         </span>
         <span className={`status-pill ${tool.status}`}>
-          {running ? <Loader2 className="spin" size={12} /> : failed ? <CircleAlert size={12} /> : null}
+          {running ? <Loader2 className="spin" size={12} /> : null}
           {summary}
+          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </span>
       </button>
 
       {open ? (
         <div className="tool-card-content">
-          <CodeBlock label="Arguments" value={tool.arguments} />
-          {tool.result !== undefined ? <CodeBlock label="Result" value={tool.result} /> : null}
-          <div className="tool-meta">
-            <Clock3 size={14} />
-            <span>{formatSeconds(tool.elapsedSeconds)}</span>
-            {tool.errorType ? <span>{tool.errorType}</span> : null}
-          </div>
+          <CodeBlock label="参数" value={tool.arguments} />
+          {tool.result !== undefined ? <CodeBlock label="结果" value={tool.result} /> : null}
+          {tool.errorType ? (
+            <div className="tool-meta">
+              <CircleAlert size={14} />
+              <span>{tool.errorType}</span>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </article>
@@ -1534,14 +1679,44 @@ function ToolCard({ tool }: { tool: ToolTrace }) {
 
 function displayToolName(name: string): string {
   const labels: Record<string, string> = {
-    "web-search": "搜索网页信息",
-    "web-fetch": "阅读网页内容",
+    "web-search": "搜索网页",
+    "web-fetch": "阅读网页",
     RunSkillScript: "运行技能",
+    Skill: "加载技能",
+    ReadSkillResource: "读取技能资源",
     read_file: "读取文件",
     write_file: "写入文件",
     shell_command: "执行命令",
+    bash: "执行命令",
+    python: "运行代码",
   };
   return labels[name] ?? name.replace(/[-_]/g, " ");
+}
+
+function toolHint(tool: ToolTrace): string {
+  const args = tool.arguments ?? {};
+  if (typeof args.query === "string" && args.query.trim()) {
+    return args.query.trim();
+  }
+  if (typeof args.q === "string" && args.q.trim()) {
+    return args.q.trim();
+  }
+  if (typeof args.url === "string" && args.url.trim()) {
+    return args.url.trim();
+  }
+  if (typeof args.skill === "string" && args.skill.trim()) {
+    const script = typeof args.script === "string" ? args.script : "";
+    const list = Array.isArray(args.args) ? args.args.map(String).filter(Boolean) : [];
+    const tail = list[0] || script;
+    return tail ? `${args.skill} · ${tail}` : args.skill;
+  }
+  if (typeof args.command === "string" && args.command.trim()) {
+    return args.command.trim();
+  }
+  if (typeof args.path === "string" && args.path.trim()) {
+    return args.path.trim();
+  }
+  return "";
 }
 
 function CodeBlock({ label, value }: { label: string; value: unknown }) {
@@ -1642,39 +1817,6 @@ function QuestionPrompt({ question }: { question: UserQuestion }) {
         在下一条消息里回答即可，agent 会从下一轮接着处理。
       </p>
     </article>
-  );
-}
-
-const PLACEHOLDER_LABELS: Record<string, { title: string; hint: string }> = {
-  experts: { title: "专家", hint: "专家与专家团即将上线，敬请期待。" },
-  connectors: { title: "连接器", hint: "外部工具连接器即将上线，敬请期待。" },
-  automation: { title: "自动化", hint: "定时任务与自动化即将上线，敬请期待。" },
-  more: { title: "更多", hint: "资料库与灵感即将上线，敬请期待。" },
-};
-
-function PlaceholderView({
-  view,
-  sidebarOpen,
-  onExpandSidebar,
-}: {
-  view: AppView;
-  sidebarOpen: boolean;
-  onExpandSidebar: () => void;
-}) {
-  const meta = PLACEHOLDER_LABELS[view] ?? { title: "敬请期待", hint: "该功能正在开发中。" };
-  return (
-    <section className="placeholder-view">
-      {!sidebarOpen ? (
-        <button className="floating-sidebar-toggle" type="button" onClick={onExpandSidebar} title="展开侧栏">
-          <Menu size={19} />
-        </button>
-      ) : null}
-      <div className="placeholder-card">
-        <Sparkles size={28} />
-        <h1>{meta.title}</h1>
-        <p>{meta.hint}</p>
-      </div>
-    </section>
   );
 }
 

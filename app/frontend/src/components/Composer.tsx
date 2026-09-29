@@ -1,4 +1,11 @@
-import { DragEvent, FormEvent, useEffect, useRef, useState } from "react";
+import {
+  DragEvent,
+  FormEvent,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import {
   BarChart3,
   ChevronDown,
@@ -33,10 +40,10 @@ export type ComposerFile = {
 
 type ComposerProps = {
   variant: "center" | "docked";
+  /** External seed / reset value (session switch, clear after send). */
   query: string;
   onQueryChange: (value: string) => void;
-  // Pass the controlled input directly so submit cannot race a pending
-  // parent-state update from the last keystroke.
+  /** Always called with the live draft text — never rely on parent state for submit. */
   onSubmit: (query: string) => void;
   isRunning: boolean;
   onStop: () => void;
@@ -58,6 +65,21 @@ const CHAT_SKILL = "chat";
 
 const ACCEPT_TYPES = ".csv,.xlsx,.pdf,.png,.jpg,.jpeg,.gif,.webp";
 
+function isEnterKey(event: ReactKeyboardEvent | KeyboardEvent): boolean {
+  return event.key === "Enter" || event.code === "Enter" || event.code === "NumpadEnter";
+}
+
+function isImeComposing(event: ReactKeyboardEvent | KeyboardEvent): boolean {
+  // keyCode 229 = IME processing on Windows / Chromium.
+  const native = "nativeEvent" in event ? event.nativeEvent : event;
+  return Boolean(
+    (event as ReactKeyboardEvent).nativeEvent?.isComposing
+    || (native as KeyboardEvent).isComposing
+    || (event as KeyboardEvent).keyCode === 229
+    || (native as KeyboardEvent).keyCode === 229,
+  );
+}
+
 export function Composer(props: ComposerProps) {
   const {
     variant,
@@ -77,14 +99,26 @@ export function Composer(props: ComposerProps) {
     onRemoveFile,
     uploading,
     uploadError,
-    canSubmit,
   } = props;
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const textInputRef = useRef<HTMLInputElement | null>(null);
+  // Local draft is the single source of truth while typing. Parent `query` is
+  // only a seed (session switch / clear-after-send). Updating the whole
+  // sessions tree on every keystroke was racing Enter and causing silent no-ops.
+  const [draft, setDraft] = useState(query);
+  const draftRef = useRef(query);
   const [dragActive, setDragActive] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const submittingRef = useRef(false);
+
+  useEffect(() => {
+    // External reset: parent cleared input after send, or user switched session.
+    setDraft(query);
+    draftRef.current = query;
+  }, [query]);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -117,13 +151,69 @@ export function Composer(props: ComposerProps) {
     };
   }, [menuOpen]);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function setDraftValue(value: string) {
+    draftRef.current = value;
+    setDraft(value);
+  }
+
+  function readLiveValue(): string {
+    return textInputRef.current?.value ?? draftRef.current;
+  }
+
+  function canSubmitNow(text: string): boolean {
+    if (skill === "data_analysis") {
+      return Boolean(text.trim() || files.length > 0);
+    }
+    return Boolean(text.trim());
+  }
+
+  function trySubmit(raw?: string) {
     if (isRunning) {
       onStop();
       return;
     }
-    onSubmit(query);
+    // Guard double-fire from Enter + form submit in the same tick.
+    if (submittingRef.current) {
+      return;
+    }
+    const value = (raw ?? readLiveValue()).trim();
+    if (!canSubmitNow(value)) {
+      return;
+    }
+    submittingRef.current = true;
+    try {
+      // Clear local + parent draft first so the input never "rebounds" with
+      // the submitted text after a parent re-render.
+      setDraftValue("");
+      onQueryChange("");
+      // Pass the captured value — never read parent state for submit content.
+      onSubmit(value);
+    } finally {
+      // Allow the next send after React processes this click/key.
+      queueMicrotask(() => {
+        submittingRef.current = false;
+      });
+    }
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    trySubmit();
+  }
+
+  function handleInputKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (isImeComposing(event) || event.shiftKey || !isEnterKey(event)) {
+      return;
+    }
+    // Stop native form submit / browser default; we own the send path.
+    event.preventDefault();
+    event.stopPropagation();
+    trySubmit(event.currentTarget.value);
+  }
+
+  function handleDraftChange(value: string) {
+    setDraftValue(value);
   }
 
   function toggleRecording() {
@@ -147,7 +237,8 @@ export function Composer(props: ComposerProps) {
     recognition.onresult = (event: any) => {
       const transcript = event.results[0][0].transcript;
       if (transcript) {
-        onQueryChange(query ? query + " " + transcript : transcript);
+        const next = draftRef.current ? `${draftRef.current} ${transcript}` : transcript;
+        setDraftValue(next);
       }
     };
 
@@ -164,6 +255,8 @@ export function Composer(props: ComposerProps) {
     recognition.start();
     setIsRecording(true);
   }
+
+  const sendEnabled = isRunning || canSubmitNow(draft);
 
   function onDrag(event: DragEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -301,11 +394,19 @@ export function Composer(props: ComposerProps) {
         ) : null}
 
         <input
+          ref={textInputRef}
           className="composer-text"
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
+          name="composer-query"
+          value={draft}
+          onChange={(event) => handleDraftChange(event.target.value)}
+          onKeyDown={handleInputKeyDown}
           placeholder="Ask anything"
           disabled={isRunning}
+          enterKeyHint="send"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
         />
 
         {hasActiveSkill ? (
@@ -338,8 +439,8 @@ export function Composer(props: ComposerProps) {
         <button
           className={isRunning ? "composer-send is-running" : "composer-send"}
           type={isRunning ? "button" : "submit"}
-          onClick={isRunning ? onStop : undefined}
-          disabled={!isRunning && !canSubmit}
+          onClick={isRunning ? () => onStop() : undefined}
+          disabled={!sendEnabled}
           title={isRunning ? "停止" : "发送"}
           aria-label={isRunning ? "停止" : "发送"}
         >

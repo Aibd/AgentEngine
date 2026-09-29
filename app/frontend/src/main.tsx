@@ -17,5 +17,5 @@ async function bootstrap(): Promise<void> {
 }
 
 void bootstrap().catch((error: unknown) => {
-  document.body.textContent = error instanceof Error ? error.message : "Unable to start authentication.";
+  document.body.textContent = error instanceof Error ? error.message : "Unable to start the app.";
 });

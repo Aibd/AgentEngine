@@ -206,3 +206,24 @@ export type McpConnector = {
   url: string;
   enabled: boolean;
 };
+
+export type Automation = {
+  id: string;
+  name: string;
+  prompt: string;
+  agent_name: string;
+  cron: string;
+  enabled: boolean;
+  created_at: string;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  last_status: "success" | "failed" | "running" | null;
+  last_error: string | null;
+};
+
+export type AutomationRun = {
+  started_at: string;
+  status: "success" | "failed" | "running";
+  summary: string | null;
+  error: string | null;
+};

@@ -55,9 +55,9 @@ const NAV_ITEMS: Array<{
   hint: string;
   icon: ReactNode;
 }> = [
-  { view: "skills", labelKey: "nav.skills", hint: "", icon: <Package size={18} /> },
   { view: "chat", labelKey: "nav.newTask", hint: "", icon: <Plus size={18} /> },
-  { view: "experts", labelKey: "nav.experts", hint: "技能", icon: <Users size={18} /> },
+  { view: "experts", labelKey: "nav.experts", hint: "Experts", icon: <Users size={18} /> },
+  { view: "skills", labelKey: "nav.skills", hint: "Skills", icon: <Package size={18} /> },
   { view: "connectors", labelKey: "nav.connectors", hint: "MCP", icon: <Cable size={18} /> },
   { view: "automation", labelKey: "nav.automation", hint: "定时任务", icon: <Clock3 size={18} /> },
   { view: "more", labelKey: "nav.more", hint: "资料库·灵感", icon: <Grid2x2 size={18} /> },
