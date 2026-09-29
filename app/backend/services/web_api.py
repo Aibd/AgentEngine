@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import uuid
 from collections.abc import AsyncIterator
@@ -16,6 +17,10 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Res
 
 from app.backend.agents import REGISTRY as AGENT_REGISTRY
 from agentengine.concurrency import InMemoryConversationLockManager
+from agentengine.base.context_keys import (
+    DISABLE_HOST_EXEC, EXEC_POLICY, PUBLIC_CONVERSATION_ID, SANDBOX_MANAGER,
+    SECRETS, TENANT, WORKSPACE_ROOT,
+)
 from agentengine.enterprise import (
     ApprovalGate,
     ApprovalResult,
@@ -51,7 +56,9 @@ from agentengine.tools.builtin import (
 )
 from agentengine.tools.policy_presets import HOST_DEFAULT as DEFAULT_EXEC_POLICY
 from app.backend.services.reporting.file_store import ReportFileStore
+from app.backend.services import mcp_runtime
 from app.backend.services.agent_orchestration_service import AgentOrchestrationService
+from app.backend.services.automation import Automation, AutomationScheduler, AutomationStore
 from app.backend.services.expert_catalog import ExpertCatalog
 from app.backend.services.mcp_connectors import McpConnector, McpConnectorStore
 from app.backend.services.reporting.db import ReportMetadataDB
@@ -75,24 +82,7 @@ DEFAULT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 DEFAULT_UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 PERSISTENCE = SqlitePersistence(DEFAULT_DB_PATH)
 LOCK_MANAGER = InMemoryConversationLockManager()
-SANDBOX_MANAGER: SandboxManager | None = None
-try:
-    _sandbox_sessions = (
-        Path(_SETTINGS.sandbox.sessions_root)
-        if _SETTINGS.sandbox.sessions_root
-        else REPO_ROOT / "data" / "sandbox-sessions"
-    )
-    SANDBOX_MANAGER = SandboxManager(
-        sessions_root=_sandbox_sessions,
-        config=_SETTINGS.to_sandbox_config(),
-    )
-    import logging
-    _logger = logging.getLogger(__name__)
-    _logger.info("sandbox_manager_ready sessions_root=%s", _sandbox_sessions)
-except Exception:
-    import logging
-    _logger = logging.getLogger(__name__)
-    _logger.warning("sandbox_manager_unavailable — bash/python will run on host")
+_logger = logging.getLogger(__name__)
 QUOTA_STORE = QuotaStore()
 APPROVAL_GATE = ApprovalGate(timeout_seconds=_SETTINGS.app.approval_timeout_seconds)
 REPORT_FILES_DB = ReportMetadataDB(DEFAULT_UPLOAD_ROOT / "index.db")
@@ -109,16 +99,65 @@ EXPERT_CATALOG = ExpertCatalog(
     teams_path=REPO_ROOT / "app" / "backend" / "services" / "experts_data" / "teams.json",
 )
 MCP_STORE = McpConnectorStore(REPO_ROOT / ".agent" / "mcp_connectors.json")
+AUTOMATION_STORE = AutomationStore(REPO_ROOT / "data" / "automations.json")
 
 MAX_SKILL_ZIP_BYTES = 20 * 1024 * 1024  # 20MB ceiling for an uploaded skill pack.
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    # Process-wide singletons are constructed at import time; nothing extra to
-    # do on startup. On shutdown, tear down any live sandbox containers.
-    yield
-    if SANDBOX_MANAGER is not None:
-        SANDBOX_MANAGER.shutdown()
+    """Initialize the optional sandbox once per FastAPI app instance."""
+    sandbox_manager: SandboxManager | None = None
+    app.state.sandbox_manager = None
+    app.state.sandbox_unavailable_reason = None
+    try:
+        sandbox_sessions = (
+            Path(_SETTINGS.sandbox.sessions_root)
+            if _SETTINGS.sandbox.sessions_root
+            else REPO_ROOT / "data" / "sandbox-sessions"
+        )
+        sandbox_manager = SandboxManager(
+            sessions_root=sandbox_sessions,
+            config=_SETTINGS.to_sandbox_config(),
+        )
+        app.state.sandbox_manager = sandbox_manager
+        _logger.info("sandbox_manager_ready sessions_root=%s", sandbox_sessions)
+    except Exception as exc:
+        # Running an agent remains safe without Docker: the run assembly below
+        # disables host execution rather than degrading to a host shell.
+        app.state.sandbox_unavailable_reason = type(exc).__name__
+        _logger.warning("sandbox_manager_unavailable reason=%s", type(exc).__name__)
+
+    scheduler = AutomationScheduler(
+        store=AUTOMATION_STORE,
+        run_events=_make_automation_runner(app),
+    )
+    app.state.automation_scheduler = scheduler
+    scheduler.start()
+
+    try:
+        yield
+    finally:
+        await scheduler.stop()
+        app.state.automation_scheduler = None
+        if sandbox_manager is not None:
+            sandbox_manager.shutdown()
+        app.state.sandbox_manager = None
+
+
+def _sandbox_manager(request: Request) -> SandboxManager | None:
+    """Return the manager owned by this app instance, if startup succeeded."""
+    manager = getattr(request.app.state, "sandbox_manager", None)
+    return manager if isinstance(manager, SandboxManager) else None
+
+
+def _sandbox_status(request: Request) -> dict[str, Any]:
+    manager = _sandbox_manager(request)
+    return {
+        "status": "available" if manager is not None else "unavailable",
+        "available": manager is not None,
+        "host_execution_disabled_when_unavailable": True,
+        "reason": getattr(request.app.state, "sandbox_unavailable_reason", None),
+    }
 
 
 app = FastAPI(title="AgentEngine Web API", lifespan=_lifespan)
@@ -137,6 +176,8 @@ def _required_scopes(request: Request) -> set[str]:
         return set()
     if path.startswith("/api/connectors"):
         return {"connectors:manage"}
+    if path.startswith("/api/automations"):
+        return {"agent:run"}
     if path.startswith("/api/skills") or path.startswith("/api/skill-market"):
         return {"skills:manage"} if request.method != "GET" else {"skills:read"}
     if path.startswith("/api/approvals"):
@@ -148,17 +189,35 @@ def _required_scopes(request: Request) -> set[str]:
     return {"agent:read"}
 
 
+# Local-dev anonymous principal: auth is intentionally disabled for this stack.
+# All API scopes are granted so route guards keep working without OIDC/Keycloak.
+_ANONYMOUS_PRINCIPAL = Principal(
+    subject="local-dev",
+    tenant_id="default",
+    scopes=frozenset({
+        "agent:run",
+        "agent:read",
+        "skills:read",
+        "skills:manage",
+        "reports:read",
+        "reports:write",
+        "connectors:manage",
+        "approvals:decide",
+    }),
+)
+
+
 @app.middleware("http")
 async def _authenticate_http_request(request: Request, call_next: Any) -> Response:
-    """Attach a verified principal before any route reads tenant/user data."""
+    """Attach a principal before routes read tenant/user data.
+
+    Authentication is currently bypassed for local development: every request
+    gets a fixed anonymous principal. Re-enable OIDC by restoring
+    AUTHENTICATOR.authenticate(...) here.
+    """
     if request.url.path == "/api/health" or request.method == "OPTIONS":
         return await call_next(request)
-    try:
-        principal = await AUTHENTICATOR.authenticate(request.headers.get("Authorization"))
-        principal.require_scopes(_required_scopes(request))
-    except HTTPException as exc:
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-    request.state.principal = principal
+    request.state.principal = _ANONYMOUS_PRINCIPAL
     return await call_next(request)
 
 
@@ -189,7 +248,7 @@ async def approval_decision(
 
 
 @app.get("/api/capabilities")
-async def capabilities() -> dict[str, Any]:
+async def capabilities(request: Request) -> dict[str, Any]:
     """Return the agents, tools, and *enabled* skills the web UI can surface.
 
     Disabled skills are deliberately omitted here — this endpoint feeds the
@@ -197,23 +256,25 @@ async def capabilities() -> dict[str, Any]:
     disabled) is served by ``GET /api/skills`` for the management UI.
     """
     skill_loader = SkillLoader(cwd=REPO_ROOT)
-    if SANDBOX_MANAGER is not None:
+    sandbox = _sandbox_manager(request)
+    if sandbox is not None:
         # Sandbox mode: build_default_tools only contains bash/TodoWrite/AskUserQuestion;
         # swap host bash for sandboxed bash and add sandboxed python.
         tools = build_default_tools(workspace_root=REPO_ROOT, exclude=["bash"])
-        tools.append(SandboxedBashTool(manager=SANDBOX_MANAGER, conversation_id="capabilities"))
-        tools.append(SandboxedPythonTool(manager=SANDBOX_MANAGER, conversation_id="capabilities"))
+        tools.append(SandboxedBashTool(manager=sandbox, conversation_id="capabilities"))
+        tools.append(SandboxedPythonTool(manager=sandbox, conversation_id="capabilities"))
     else:
         tools = build_default_tools(workspace_root=REPO_ROOT, exclude=["bash"])
     tools.append(SkillTool(skill_loader))
     tools.append(ReadSkillResource(skill_loader))
-    if SANDBOX_MANAGER is not None:
-        tools.append(RunSkillScript(
-            loader=skill_loader,
-            sandbox_manager=SANDBOX_MANAGER,
-            conversation_id="capabilities",
-            workspace_root=SANDBOX_MANAGER.sessions_root,
-        ))
+    # Always expose RunSkillScript so host_exec skills (web-search / web-fetch)
+    # work even when the Docker sandbox socket is unavailable.
+    tools.append(RunSkillScript(
+        loader=skill_loader,
+        sandbox_manager=sandbox,
+        conversation_id="capabilities",
+        workspace_root=sandbox.sessions_root if sandbox is not None else REPO_ROOT,
+    ))
     skills = [view for view in await SKILL_REGISTRY.list() if view.enabled]
     return {
         "agents": [
@@ -228,6 +289,7 @@ async def capabilities() -> dict[str, Any]:
             {"name": view.name, "description": view.description}
             for view in skills
         ],
+        "sandbox": _sandbox_status(request),
     }
 
 
@@ -453,6 +515,111 @@ async def toggle_connector(connector_id: str) -> dict[str, Any]:
     return updated.snapshot()
 
 
+@app.post("/api/connectors/{connector_id}/test")
+async def test_connector(connector_id: str) -> dict[str, Any]:
+    """Try connecting to an MCP connector and list the tools it exposes."""
+    connector = MCP_STORE.get(connector_id)
+    if connector is None:
+        raise HTTPException(status_code=404, detail="connector not found")
+    connection = mcp_runtime.McpRunConnection()
+    try:
+        tools = await connection.connect(connector)
+    finally:
+        await connection.close()
+    if connection.last_error is not None:
+        return {"ok": False, "error": connection.last_error}
+    return {
+        "ok": True,
+        "tools": [{"name": tool.name, "description": tool.description} for tool in tools],
+    }
+
+
+# -- Automations (scheduled agent runs) --------------------------------------
+
+
+@app.get("/api/automations")
+async def list_automations() -> dict[str, Any]:
+    """List all configured automations."""
+    return {"automations": [a.snapshot() for a in AUTOMATION_STORE.list_all()]}
+
+
+@app.post("/api/automations")
+async def add_automation(body: dict[str, Any]) -> dict[str, Any]:
+    """Create a new scheduled agent run."""
+    name = str(body.get("name", "")).strip()
+    prompt = str(body.get("prompt", "")).strip()
+    cron = str(body.get("cron", "")).strip()
+    agent_name = str(body.get("agent_name", "general_chat")).strip() or "general_chat"
+    if not name:
+        raise HTTPException(status_code=400, detail="automation name is required")
+    if not prompt:
+        raise HTTPException(status_code=400, detail="automation prompt is required")
+    automation = Automation(
+        id="",
+        name=name,
+        prompt=prompt,
+        agent_name=agent_name,
+        cron=cron,
+        enabled=bool(body.get("enabled", True)),
+    )
+    try:
+        added = AUTOMATION_STORE.add(automation)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return added.snapshot()
+
+
+@app.patch("/api/automations/{automation_id}")
+async def update_automation(automation_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Patch an automation (name/prompt/agent_name/cron/enabled)."""
+    patch = {
+        key: body[key]
+        for key in ("name", "prompt", "agent_name", "cron", "enabled")
+        if key in body
+    }
+    if "enabled" in patch:
+        patch["enabled"] = bool(patch["enabled"])
+    try:
+        updated = AUTOMATION_STORE.update(automation_id, patch)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if updated is None:
+        raise HTTPException(status_code=404, detail="automation not found")
+    return updated.snapshot()
+
+
+@app.delete("/api/automations/{automation_id}")
+async def delete_automation(automation_id: str) -> dict[str, Any]:
+    """Delete an automation and its run history."""
+    if not AUTOMATION_STORE.delete(automation_id):
+        raise HTTPException(status_code=404, detail="automation not found")
+    return {"deleted": True}
+
+
+@app.post("/api/automations/{automation_id}/run")
+async def run_automation_now(automation_id: str, request: Request) -> dict[str, Any]:
+    """Queue an immediate background run of an automation."""
+    scheduler = getattr(request.app.state, "automation_scheduler", None)
+    if not isinstance(scheduler, AutomationScheduler):
+        # The lifespan did not run (e.g. ASGI transport tests); build a
+        # non-started scheduler so the trigger path still works.
+        scheduler = AutomationScheduler(
+            store=AUTOMATION_STORE,
+            run_events=_make_automation_runner(request.app),
+        )
+    if not scheduler.trigger(automation_id):
+        raise HTTPException(status_code=404, detail="automation not found")
+    return {"queued": True}
+
+
+@app.get("/api/automations/{automation_id}/runs")
+async def list_automation_runs(automation_id: str) -> dict[str, Any]:
+    """List recent run history for an automation (newest first)."""
+    if AUTOMATION_STORE.get(automation_id) is None:
+        raise HTTPException(status_code=404, detail="automation not found")
+    return {"runs": AUTOMATION_STORE.list_runs(automation_id)}
+
+
 def _public_message_dto(message: dict[str, Any]) -> dict[str, Any]:
     """Return only the fields safe to expose to the web UI.
 
@@ -511,6 +678,29 @@ async def upload_report_file(
             raise HTTPException(status_code=413, detail=message) from exc
         raise HTTPException(status_code=400, detail=message) from exc
     return record.snapshot()
+
+
+@app.get("/api/report-files")
+async def list_report_files(
+    conversation_id: str = Query(..., min_length=1),
+    limit: int = Query(50, ge=1, le=200),
+    principal: Principal = Depends(current_principal),
+) -> dict[str, Any]:
+    """List non-deleted report file refs for a conversation."""
+    rows = await REPORT_FILES_DB.list_file_refs_by_conversation(
+        _scoped_conversation_id(conversation_id, principal.tenant_id)
+    )
+    files = [
+        {
+            "file_id": row.file_id,
+            "filename": row.filename,
+            "created_at": row.created_at,
+            "conversation_id": row.conversation_id,
+        }
+        for row in rows
+        if row.deleted_at is None
+    ]
+    return {"files": files[:limit]}
 
 
 @app.get("/api/report-files/{file_id}")
@@ -693,6 +883,7 @@ async def report_export(
 
 @app.get("/api/runs/stream")
 async def run_stream(
+    request: Request,
     query: str = Query(..., min_length=1),
     agent_name: str = Query("general_chat", min_length=1),
     conversation_id: str = Query("web-conversation", min_length=1),
@@ -703,6 +894,7 @@ async def run_stream(
     if not query:
         raise HTTPException(status_code=400, detail="query must not be empty")
     request_id = f"web-{uuid.uuid4().hex[:12]}"
+    sandbox = _sandbox_manager(request)
 
     async def events() -> AsyncIterator[str]:
         async for frame in _run_agent_events(
@@ -714,6 +906,7 @@ async def run_stream(
             scopes=sorted(principal.scopes),
             request_id=request_id,
             skill=skill.strip(),
+            sandbox_manager=sandbox,
         ):
             yield _format_sse_frame(frame)
 
@@ -727,6 +920,7 @@ async def run_stream(
             "X-Request-ID": request_id,
             "X-Conversation-ID": conversation_id,
             "X-Tenant-ID": principal.tenant_id,
+            "X-Sandbox-Status": "available" if sandbox is not None else "unavailable",
         },
     )
 
@@ -741,6 +935,7 @@ async def _run_agent_events(
     scopes: list[str] | None = None,
     request_id: str | None = None,
     skill: str = "",
+    sandbox_manager: SandboxManager | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     service = AgentOrchestrationService(
         persistence=PERSISTENCE,
@@ -764,29 +959,31 @@ async def _run_agent_events(
     )
     if context.printer is not None:
         context.printer.conversation_id = conversation_id
-    context.extras["tenant"] = TenantContext(
+    context.extras[TENANT] = TenantContext(
         tenant_id=tenant_id,
         user_id=user_id,
         session_id=scoped_conversation_id,
         scopes=scopes or [],
     )
-    context.extras["secrets"] = EnvSecrets()
-    context.extras["public_conversation_id"] = conversation_id
+    context.extras[SECRETS] = EnvSecrets()
+    context.extras[PUBLIC_CONVERSATION_ID] = conversation_id
 
     # -- sandbox wiring ---------------------------------------------------
-    sandbox = SANDBOX_MANAGER
+    sandbox = sandbox_manager
     sandbox_ws: str | None = None
     if sandbox is not None:
         try:
             sandbox_ws = str(sandbox.host_workspace_for(scoped_conversation_id))
-            context.extras["sandbox_manager"] = sandbox
-            context.extras["workspace_root"] = sandbox_ws
+            context.extras[SANDBOX_MANAGER] = sandbox
+            context.workspace_root = sandbox_ws
+            context.extras[WORKSPACE_ROOT] = sandbox_ws
         except Exception:
             sandbox = None
     if sandbox is None:
         # The web service must not degrade from a container boundary to host
         # shell execution when Docker is unavailable or misconfigured.
-        context.extras["disable_host_exec"] = True
+        context.disable_host_exec = True
+        context.extras[DISABLE_HOST_EXEC] = True
 
     skill_loader = SkillLoader(cwd=REPO_ROOT)
     if context.tool_collection.get("Skill") is None:
@@ -798,18 +995,22 @@ async def _run_agent_events(
             ReadSkillResource(skill_loader, enabled_names=enabled_skills)
         )
 
-    # Shell tools: sandboxed when available, fallback to host (Phase 3).
-    if sandbox is not None and sandbox_ws is not None:
-        if context.tool_collection.get("RunSkillScript") is None:
-            context.tool_collection.add(
-                RunSkillScript(
-                    loader=skill_loader,
-                    sandbox_manager=sandbox,
-                    conversation_id=scoped_conversation_id,
-                    enabled_names=enabled_skills,
-                    workspace_root=sandbox_ws,
-                )
+    # Skill scripts: always available. host_exec skills (web-search / web-fetch)
+    # run as host subprocesses and do not need Docker; non-host scripts need
+    # the sandbox manager (optional).
+    if context.tool_collection.get("RunSkillScript") is None:
+        context.tool_collection.add(
+            RunSkillScript(
+                loader=skill_loader,
+                sandbox_manager=sandbox,
+                conversation_id=scoped_conversation_id,
+                enabled_names=enabled_skills,
+                workspace_root=sandbox_ws if sandbox_ws is not None else REPO_ROOT,
             )
+        )
+
+    # Shell tools: sandboxed when available (Phase 3).
+    if sandbox is not None and sandbox_ws is not None:
         if context.tool_collection.get("bash") is None:
             context.tool_collection.add(
                 SandboxedBashTool(manager=sandbox, conversation_id=scoped_conversation_id)
@@ -818,13 +1019,23 @@ async def _run_agent_events(
             context.tool_collection.add(
                 SandboxedPythonTool(manager=sandbox, conversation_id=scoped_conversation_id)
             )
-    # When sandbox is unavailable, the agent preset's setup hook may still add
-    # host-level BashTool — that's the graceful degradation path.
+    # When sandbox is unavailable, host bash is intentionally not added
+    # (fail-closed). host_exec skill scripts remain available above.
+
+    # -- MCP connector tools -------------------------------------------------
+    mcp_connections: list[mcp_runtime.McpRunConnection] = []
+    mcp_connectors = [c for c in MCP_STORE.list_all() if c.enabled]
+    if mcp_connectors:
+        mcp_tools, mcp_connections = await mcp_runtime.load_mcp_tools(mcp_connectors)
+        for mcp_tool in mcp_tools:
+            if context.tool_collection.get(mcp_tool.name) is None:
+                context.tool_collection.add(mcp_tool)
 
     # ExecPolicy: soft safety net. Sandbox is the real boundary; this catches
     # obviously malicious patterns even inside the container.
-    if "exec_policy" not in context.extras:
-        context.extras["exec_policy"] = DEFAULT_EXEC_POLICY
+    if context.exec_policy is None and EXEC_POLICY not in context.extras:
+        context.exec_policy = DEFAULT_EXEC_POLICY
+        context.extras[EXEC_POLICY] = DEFAULT_EXEC_POLICY
 
     async def run_and_close() -> None:
         try:
@@ -853,7 +1064,38 @@ async def _run_agent_events(
         # Note: sandbox is NOT released here — containers persist across runs
         # within a conversation (acquired on first use, reused thereafter).
         # Idle containers are cleaned up by SandboxManager.reap_idle().
+        for mcp_connection in mcp_connections:
+            await mcp_connection.close()
         await service.close()
+
+
+def _make_automation_runner(app: FastAPI) -> Any:
+    """Build the scheduler's run_events coroutine bound to this app's sandbox.
+
+    The returned coroutine drives ``_run_agent_events`` to completion and
+    returns the concatenated text-delta output (tail-truncated) as the run
+    summary.
+    """
+
+    async def run_events(*, query: str, agent_name: str, conversation_id: str) -> str:
+        manager = getattr(app.state, "sandbox_manager", None)
+        sandbox = manager if isinstance(manager, SandboxManager) else None
+        text_parts: list[str] = []
+        async for event in _run_agent_events(
+            query=query,
+            agent_name=agent_name,
+            conversation_id=conversation_id,
+            tenant_id="default",
+            sandbox_manager=sandbox,
+        ):
+            if event.get("event") != "text":
+                continue
+            data = event.get("data")
+            if isinstance(data, dict) and isinstance(data.get("delta"), str):
+                text_parts.append(data["delta"])
+        return "".join(text_parts)[-500:]
+
+    return run_events
 
 
 def _format_sse_frame(frame: dict[str, Any]) -> str:

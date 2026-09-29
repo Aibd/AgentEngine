@@ -85,9 +85,12 @@ async def test_capabilities_endpoint_lists_web_agent_tools_and_skills() -> None:
     assert {agent["name"] for agent in body["agents"]} >= {"general_chat", "deep_research"}
     tool_names = {tool["name"] for tool in body["tools"]}
     assert tool_names >= {"Skill"}
-    # When Docker is reachable, the API advertises a sandboxed bash tool.  In
-    # environments without Docker it must not fall back to host-shell bash.
-    if web_api.SANDBOX_MANAGER is None:
+    sandbox = body["sandbox"]
+    assert sandbox["status"] in {"available", "unavailable"}
+    assert sandbox["host_execution_disabled_when_unavailable"] is True
+    # When the lifespan could initialize Docker, the API advertises a sandboxed
+    # bash tool. Otherwise it must not fall back to host-shell bash.
+    if not sandbox["available"]:
         assert "bash" not in tool_names
     else:
         assert "bash" in tool_names
@@ -110,6 +113,7 @@ async def test_run_stream_emits_full_event_sequence() -> None:
             assert response.headers["content-type"].startswith("text/event-stream")
             assert response.headers["x-streaming-protocol"] == "agent-core.sse.v2"
             assert response.headers["x-conversation-id"] == "test-conv"
+            assert response.headers["x-sandbox-status"] in {"available", "unavailable"}
             events: list[dict] = []
             async for evt in _consume_sse(response):
                 events.append(evt)
@@ -574,3 +578,142 @@ async def test_expert_team_detail_and_404() -> None:
         assert ok.json()["id"] == team_id
         missing = await client.get("/api/expert-teams/does-not-exist")
         assert missing.status_code == 404
+
+
+# -- MCP connector test endpoint ----------------------------------------------
+
+
+from typing import Any
+
+import mcp.types as mcp_types
+
+from app.backend.services import mcp_runtime
+from app.backend.services.mcp_connectors import McpConnector, McpConnectorStore
+
+
+@pytest.fixture
+def isolated_connector_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> McpConnectorStore:
+    store = McpConnectorStore(tmp_path / "mcp_connectors.json")
+    monkeypatch.setattr(web_api, "MCP_STORE", store)
+    return store
+
+
+def _fake_connection_class(
+    tools: list, error: str | None = None
+) -> type:
+    class _FakeConnection:
+        def __init__(self) -> None:
+            self.last_error = error
+            self.closed = False
+
+        async def connect(self, connector: McpConnector) -> list:
+            return list(tools)
+
+        async def close(self) -> None:
+            self.closed = True
+
+    return _FakeConnection
+
+
+async def test_connector_test_endpoint_lists_tools(
+    isolated_connector_store: McpConnectorStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connector = isolated_connector_store.add(
+        McpConnector(id="", name="fs", transport="stdio", command="server")
+    )
+    mcp_tool = mcp_types.Tool(
+        name="read",
+        description="Read a file",
+        inputSchema={"type": "object", "properties": {}},
+    )
+    adapted = mcp_runtime.McpToolAdapter(None, connector.name, mcp_tool)  # type: ignore[arg-type]
+    monkeypatch.setattr(
+        mcp_runtime, "McpRunConnection", _fake_connection_class([adapted])
+    )
+
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(f"/api/connectors/{connector.id}/test")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["tools"] == [{"name": "mcp__fs__read", "description": "Read a file"}]
+
+
+async def test_connector_test_endpoint_reports_failure(
+    isolated_connector_store: McpConnectorStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connector = isolated_connector_store.add(
+        McpConnector(id="", name="broken", transport="stdio", command="missing-binary")
+    )
+    monkeypatch.setattr(
+        mcp_runtime, "McpRunConnection", _fake_connection_class([], error="spawn failed")
+    )
+
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(f"/api/connectors/{connector.id}/test")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": False, "error": "spawn failed"}
+
+
+async def test_connector_test_endpoint_unknown_connector_404(
+    isolated_connector_store: McpConnectorStore,
+) -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post("/api/connectors/ghost/test")
+
+    assert response.status_code == 404
+
+
+# -- report-files list endpoint ------------------------------------------------
+
+
+async def _upload(client: httpx.AsyncClient, filename: str, conversation_id: str) -> dict:
+    response = await client.post(
+        "/api/report-files",
+        params={"filename": filename, "conversation_id": conversation_id},
+        content=b"period,revenue\n2024Q1,805\n",
+        headers={"content-type": "application/octet-stream"},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+async def test_report_files_list_filters_by_conversation() -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        first = await _upload(client, "a.csv", "list-conv-a")
+        await _upload(client, "b.csv", "list-conv-a")
+        await _upload(client, "other.csv", "list-conv-b")
+
+        listed = await client.get("/api/report-files", params={"conversation_id": "list-conv-a"})
+
+    assert listed.status_code == 200
+    files = listed.json()["files"]
+    assert len(files) == 2
+    assert {f["filename"] for f in files} == {"a.csv", "b.csv"}
+    assert files[0]["file_id"] == first["id"]
+    for file in files:
+        assert {"file_id", "filename", "created_at", "conversation_id"} <= file.keys()
+
+
+async def test_report_files_list_respects_limit() -> None:
+    transport = httpx.ASGITransport(app=web_api.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        await _upload(client, "one.csv", "limit-conv")
+        await _upload(client, "two.csv", "limit-conv")
+
+        limited = await client.get(
+            "/api/report-files", params={"conversation_id": "limit-conv", "limit": 1}
+        )
+        missing_param = await client.get("/api/report-files")
+
+    assert limited.status_code == 200
+    assert len(limited.json()["files"]) == 1
+    assert missing_param.status_code == 422
