@@ -93,12 +93,14 @@ class TurnRunner:
                 *([on_event] if on_event is not None else []),
             ]
         )
-        # Hook manager: explicit > extras > nothing. We deliberately don't
-        # fall back to the global default — that's opt-in via setup hook.
+        # Hook manager: runner explicit > context field > legacy extras >
+        # nothing. We deliberately don't
+        # fall back to the global default - that's opt-in via setup hook.
         hook_manager: HookManager | None = (
-            self.hook_manager or context.extras.get("hooks")
+            self.hook_manager or context.hooks or context.extras.get("hooks")
         )
         if hook_manager is not None:
+            context.hooks = hook_manager
             context.extras["hooks"] = hook_manager
 
         started_at = time.perf_counter()
@@ -129,7 +131,7 @@ class TurnRunner:
             )
         )
 
-        cwd = str(context.extras.get("workspace_root") or "")
+        cwd = context.workspace_root or str(context.extras.get("workspace_root") or "")
         # SessionStart fires once at the top of the run. Aborting here gives
         # users a clean way to gate runs (e.g. tenant quota check) before any
         # LLM cost is incurred.

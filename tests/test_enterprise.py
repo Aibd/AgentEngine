@@ -227,6 +227,7 @@ class TestApprovalGate:
         )
 
         async def inner(c):
+            assert c.run_context.approval_gate is gate
             assert c.run_context.extras.get("approval_gate") is gate
             return "ok"
 

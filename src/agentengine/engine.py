@@ -122,6 +122,9 @@ class AgentEngine:
         self._active_runs[context.request_id] = (cancellation_token, task)
         context.extras["agent"] = agent
         context.extras["run_config"] = config
+        context.cancellation_token = cancellation_token
+        # Compatibility for integrations that still inspect runtime values via
+        # extras.  New integrations should use the explicit context field.
         context.extras["cancellation_token"] = cancellation_token
         logger.info(
             "agent_run_start request_id=%s agent=%s conversation_id=%s",

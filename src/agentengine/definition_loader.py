@@ -167,7 +167,7 @@ def _make_tool_setup(tool_names: tuple[str, ...]) -> SetupHook:
 
         collection = context.tool_collection
         missing = [name for name in tool_names if collection.get(name) is None]
-        if context.extras.get("disable_host_exec"):
+        if context.disable_host_exec or context.extras.get("disable_host_exec"):
             missing = [name for name in missing if name != "bash"]
         if not missing:
             return

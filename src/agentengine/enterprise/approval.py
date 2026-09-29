@@ -1,12 +1,13 @@
 """Human-in-the-loop approval for destructive tool calls.
 
 ``ApprovalGate`` pauses execution and waits for an external approval decision
-before a destructive tool runs. The turn loop checks ``context.extras`` for
-a gate before executing tools with ``is_destructive=True``.
+before a destructive tool runs. The turn loop checks ``context.approval_gate``
+first, then the legacy ``context.extras`` key, before executing tools with
+``is_destructive=True``.
 
 Integration:
     gate = ApprovalGate(timeout_seconds=300.0)
-    context.extras["approval_gate"] = gate
+    context.approval_gate = gate
     # The turn loop then auto-checks destructive tools
 """
 
@@ -106,7 +107,7 @@ class ApprovalGate:
 
 
 def approval_middleware(gate: ApprovalGate) -> MiddlewareFn:
-    """Injects the approval gate into both context.extras and run_context.extras."""
+    """Inject the gate into typed contexts and legacy extras."""
 
     async def _approval(
         ctx: MiddlewareContext,
@@ -114,6 +115,7 @@ def approval_middleware(gate: ApprovalGate) -> MiddlewareFn:
     ) -> str:
         ctx.extras["approval_gate"] = gate
         ctx.run_context.extras["approval_gate"] = gate
+        ctx.run_context.approval_gate = gate
         return await next_fn(ctx)
 
     return _approval

@@ -110,6 +110,18 @@ async def test_setup_hook_is_idempotent(tmp_path: Path) -> None:
     assert context.tool_collection.get("bash") is first
 
 
+async def test_setup_hook_respects_explicit_host_exec_disable(tmp_path: Path) -> None:
+    md = _write(tmp_path / "r.md", "---\nname: r\ntools: [bash, Skill]\n---\nbody\n")
+    definition = load_definition(md)
+    context = AgentContext(request_id="t", query="q", disable_host_exec=True)
+
+    assert definition.setup is not None
+    await definition.setup(context)
+
+    assert context.tool_collection.get("bash") is None
+    assert context.tool_collection.get("Skill") is not None
+
+
 def test_load_definitions_scans_directory(tmp_path: Path) -> None:
     _write(tmp_path / "a.md", "---\nname: a\n---\nA body\n")
     _write(tmp_path / "b.md", "---\nname: b\n---\nB body\n")

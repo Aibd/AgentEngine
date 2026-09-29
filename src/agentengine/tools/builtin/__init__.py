@@ -132,7 +132,7 @@ def build_default_tools_for_context(
     invoking the agent's setup hook). Falls back gracefully when called outside
     a TurnRunner — every dependency the tools take is optional.
     """
-    workspace_root = context.extras.get("workspace_root") or Path(
+    workspace_root = context.workspace_root or context.extras.get("workspace_root") or Path(
         os.getenv("AGENT_WORKSPACE_ROOT", os.getcwd())
     )
     emit = context.extras.get("emit")

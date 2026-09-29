@@ -170,7 +170,7 @@ class AgentEngine:
         """
         执行一次 Agent 运行，返回完整的最终回答字符串
 
-        ReAct 循环没有内置步数上限，结束条件：
+        ReAct 循环默认最多执行 20 步（由 RunConfig.max_steps 配置），结束条件：
         1. 模型返回的响应不包含 tool_calls
         2. AfterTurn hook 返回 STOP 结果
         3. 自动压缩失败抛出 ContextWindowExceededError
@@ -257,6 +257,16 @@ class AgentContext:
     persistence: PersistencePort | None = None
     # 持久化实现，优先级高于引擎级别的 persistence
     # 适合每个请求使用不同持久化后端的场景
+
+    hooks: HookManager | None = None
+    exec_policy: ExecPolicy | None = None
+    approval_gate: ApprovalGate | None = None
+    compactor: Compactor | None = None
+    workspace_root: str = ""
+    cancellation_token: CancellationToken | None = None
+    disable_host_exec: bool = False
+    # 引擎跨模块消费的显式运行时依赖。它们提供类型检查；旧 extras
+    # 同名键暂时仍受支持，以便现有宿主集成平滑迁移。
 
     extras: dict[str, Any] = field(default_factory=dict)
     # 扩展字段，业务系统可注入任意额外数据（如 tenant 信息、trace context 等）
@@ -365,6 +375,7 @@ engine = AgentEngine(definitions=registry)
 class RunConfig:
     name: str                              # Agent 名称（同 AgentDefinition.name）
     initial_messages: tuple[Message, ...]  # 初始消息（至少包含 system 消息）
+    max_steps: int = 20                    # ReAct 最大步数，达到后抛出 MaxStepsExceededError
     max_messages: int = 0                  # 消息上限
     auto_compact_tokens: int = 0           # 压缩阈值
     compaction_keep_recent: int = 8        # 压缩保留最近条数
@@ -875,7 +886,8 @@ class HookManager:
         """
 ```
 
-注入方式：`context.extras["hooks"] = HookManager()`
+注入方式：`context.hooks = HookManager()`。为兼容旧集成，
+`context.extras["hooks"] = HookManager()` 仍可用，但新代码应使用显式字段。
 
 ### Hook Payload 类型
 
